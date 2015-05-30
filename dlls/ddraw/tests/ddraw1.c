@@ -883,7 +883,8 @@ static void test_coop_level_d3d_state(void)
     hr = IDirect3DViewport_Clear(viewport, 1, &clear_rect, D3DCLEAR_TARGET);
     ok(SUCCEEDED(hr), "Failed to clear viewport, hr %#x.\n", hr);
     color = get_surface_color(rt, 320, 240);
-    ok(compare_color(color, 0x0000ff00, 1), "Got unexpected color 0x%08x.\n", color);
+    ok(compare_color(color, 0x0000ff00, 1) || broken(compare_color(color, 0x00000000, 1)),
+            "Got unexpected color 0x%08x.\n", color);
 
     destroy_viewport(device, viewport);
     destroy_material(background);
@@ -1238,26 +1239,41 @@ static void test_ck_rgba(void)
         {{640.0f}, {480.0f}, {0.75f}, {1.0f}, {0xffffffff}, {0x00000000}, {1.0f}, {0.0f}},
         {{640.0f}, {  0.0f}, {0.75f}, {1.0f}, {0xffffffff}, {0x00000000}, {1.0f}, {1.0f}},
     };
+    /* Supposedly there was no D3DRENDERSTATE_COLORKEYENABLE in D3D < 5.
+     * Maybe the WARP driver on Windows 8 ignores setting it via the older
+     * device interface but it's buggy in that the internal state is not
+     * initialized, or possibly toggling D3DRENDERSTATE_COLORKEYENABLE /
+     * D3DRENDERSTATE_ALPHABLENDENABLE has unintended side effects.
+     * Checking the W8 test results it seems like test 1 fails most of the time
+     * and test 0 fails very rarely. */
     static const struct
     {
         D3DCOLOR fill_color;
         BOOL color_key;
         BOOL blend;
-        D3DCOLOR result1, result1_broken;
-        D3DCOLOR result2, result2_broken;
+        D3DCOLOR result1, result1_r200, result1_warp;
+        D3DCOLOR result2, result2_r200, result2_warp;
     }
     tests[] =
     {
         /* r200 on Windows doesn't check the alpha component when applying the color
          * key, so the key matches on every texel. */
-        {0xff00ff00, TRUE,  TRUE,  0x00ff0000, 0x00ff0000, 0x000000ff, 0x000000ff},
-        {0xff00ff00, TRUE,  FALSE, 0x00ff0000, 0x00ff0000, 0x000000ff, 0x000000ff},
-        {0xff00ff00, FALSE, TRUE,  0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00},
-        {0xff00ff00, FALSE, FALSE, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00},
-        {0x7f00ff00, TRUE,  TRUE,  0x00807f00, 0x00ff0000, 0x00807f00, 0x000000ff},
-        {0x7f00ff00, TRUE,  FALSE, 0x0000ff00, 0x00ff0000, 0x0000ff00, 0x000000ff},
-        {0x7f00ff00, FALSE, TRUE,  0x00807f00, 0x00807f00, 0x00807f00, 0x00807f00},
-        {0x7f00ff00, FALSE, FALSE, 0x0000ff00, 0x0000ff00, 0x0000ff00, 0x0000ff00},
+        {0xff00ff00, TRUE,  TRUE,  0x00ff0000, 0x00ff0000, 0x0000ff00,
+                0x000000ff, 0x000000ff, 0x0000ff00},
+        {0xff00ff00, TRUE,  FALSE, 0x00ff0000, 0x00ff0000, 0x0000ff00,
+                0x000000ff, 0x000000ff, 0x0000ff00},
+        {0xff00ff00, FALSE, TRUE,  0x0000ff00, 0x0000ff00, 0x0000ff00,
+                0x0000ff00, 0x0000ff00, 0x0000ff00},
+        {0xff00ff00, FALSE, FALSE, 0x0000ff00, 0x0000ff00, 0x0000ff00,
+                0x0000ff00, 0x0000ff00, 0x0000ff00},
+        {0x7f00ff00, TRUE,  TRUE,  0x00807f00, 0x00ff0000, 0x00807f00,
+                0x00807f00, 0x000000ff, 0x00807f00},
+        {0x7f00ff00, TRUE,  FALSE, 0x0000ff00, 0x00ff0000, 0x0000ff00,
+                0x0000ff00, 0x000000ff, 0x0000ff00},
+        {0x7f00ff00, FALSE, TRUE,  0x00807f00, 0x00807f00, 0x00807f00,
+                0x00807f00, 0x00807f00, 0x00807f00},
+        {0x7f00ff00, FALSE, FALSE, 0x0000ff00, 0x0000ff00, 0x0000ff00,
+                0x0000ff00, 0x0000ff00, 0x0000ff00},
     };
 
     IDirect3DExecuteBuffer *execute_buffer;
@@ -1370,9 +1386,10 @@ static void test_ck_rgba(void)
         ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
         color = get_surface_color(rt, 320, 240);
-        ok(compare_color(color, tests[i].result1, 1) || compare_color(color, tests[i].result1_broken, 1),
-                "Expected color 0x%08x for test %u, got 0x%08x.\n",
-                tests[i].result1, i, color);
+        ok(compare_color(color, tests[i].result1, 1)
+                || broken(compare_color(color, tests[i].result1_r200, 1))
+                || broken(compare_color(color, tests[i].result1_warp, 1)),
+                "Got unexpected color 0x%08x for test %u.\n", color, i);
 
         U5(fx).dwFillColor = 0xff0000ff;
         hr = IDirectDrawSurface_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
@@ -1389,9 +1406,10 @@ static void test_ck_rgba(void)
         /* This tests that fragments that are masked out by the color key are
          * discarded, instead of just fully transparent. */
         color = get_surface_color(rt, 320, 240);
-        ok(compare_color(color, tests[i].result2, 1) || compare_color(color, tests[i].result2_broken, 1),
-                "Expected color 0x%08x for test %u, got 0x%08x.\n",
-                tests[i].result2, i, color);
+        ok(compare_color(color, tests[i].result2, 1)
+                || broken(compare_color(color, tests[i].result2_r200, 1))
+                || broken(compare_color(color, tests[i].result2_warp, 1)),
+                "Got unexpected color 0x%08x for test %u.\n", color, i);
     }
 
     IDirectDrawSurface_Release(rt);
@@ -6409,6 +6427,24 @@ static void test_texturemapblend(void)
     emit_set_rs(&ptr, D3DRENDERSTATE_ZENABLE, D3DZB_FALSE);
     emit_set_rs(&ptr, D3DRENDERSTATE_SRCBLEND, D3DBLEND_SRCALPHA);
     emit_set_rs(&ptr, D3DRENDERSTATE_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    /* The history of D3DRENDERSTATE_ALPHABLENDENABLE is quite a mess. In the
+     * first D3D release there was a D3DRENDERSTATE_BLENDENABLE (enum value 27).
+     * D3D5 introduced a new and separate D3DRENDERSTATE_ALPHABLENDENABLE (42)
+     * together with D3DRENDERSTATE_COLORKEYENABLE (41). The docs aren't all
+     * that clear but they mention that D3DRENDERSTATE_BLENDENABLE overrides the
+     * two new states.
+     * Then D3D6 came and got rid of the new D3DRENDERSTATE_ALPHABLENDENABLE
+     * state (42), renaming the older D3DRENDERSTATE_BLENDENABLE enum (27)
+     * as D3DRENDERSTATE_ALPHABLENDENABLE.
+     * There is a comment in the D3D6 docs which mentions that hardware
+     * rasterizers always used D3DRENDERSTATE_BLENDENABLE to just toggle alpha
+     * blending while prior to D3D5 software rasterizers toggled both color
+     * keying and alpha blending according to it. What I gather is that, from
+     * D3D6 onwards, D3DRENDERSTATE_ALPHABLENDENABLE always only toggles the
+     * alpha blending state.
+     * These tests seem to show that actual, current hardware follows the D3D6
+     * behavior even when using the original D3D interfaces, for the HAL device
+     * at least. */
     emit_set_rs(&ptr, D3DRENDERSTATE_ALPHABLENDENABLE, TRUE);
     emit_set_rs(&ptr, D3DRENDERSTATE_TEXTUREMAPBLEND, D3DTBLEND_MODULATE);
     emit_set_rs(&ptr, D3DRENDERSTATE_TEXTUREHANDLE, texture_handle);
@@ -6640,10 +6676,12 @@ static void test_texturemapblend(void)
     emit_process_vertices(&ptr, D3DPROCESSVERTICES_COPY, 0, 8);
     emit_set_rs(&ptr, D3DRENDERSTATE_ALPHABLENDENABLE, TRUE);
     emit_set_rs(&ptr, D3DRENDERSTATE_TEXTUREHANDLE, texture_handle);
-    /* This is supposed to be on by default on version 1 devices,
-     * but for some reason it randomly defaults to FALSE on the W8
-     * testbot. This is either the fault of Windows 8 or the WARP
-     * driver. */
+    /* D3DRENDERSTATE_COLORKEYENABLE is supposed to be on by default on version
+     * 1 devices, but for some reason it randomly defaults to FALSE on the W8
+     * testbot. This is either the fault of Windows 8 or the WARP driver.
+     * Also D3DRENDERSTATE_COLORKEYENABLE was introduced in D3D 5 aka version 2
+     * devices only, which might imply this doesn't actually do anything on
+     * WARP. */
     emit_set_rs(&ptr, D3DRENDERSTATE_COLORKEYENABLE, TRUE);
 
     emit_tquad(&ptr, 0);
@@ -6663,12 +6701,15 @@ static void test_texturemapblend(void)
     hr = IDirect3DDevice_EndScene(device);
     ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
 
+    /* Allow broken WARP results (colorkey disabled). */
     color = get_surface_color(rt, 5, 5);
-    ok(compare_color(color, 0x00000000, 2), "Got unexpected color 0x%08x.\n", color);
+    ok(compare_color(color, 0x00000000, 2) || broken(compare_color(color, 0x000000ff, 2)),
+            "Got unexpected color 0x%08x.\n", color);
     color = get_surface_color(rt, 400, 5);
     ok(compare_color(color, 0x00ff0000, 2), "Got unexpected color 0x%08x.\n", color);
     color = get_surface_color(rt, 5, 245);
-    ok(compare_color(color, 0x00000000, 2), "Got unexpected color 0x%08x.\n", color);
+    ok(compare_color(color, 0x00000000, 2) || broken(compare_color(color, 0x00000080, 2)),
+            "Got unexpected color 0x%08x.\n", color);
     color = get_surface_color(rt, 400, 245);
     ok(compare_color(color, 0x00800000, 2), "Got unexpected color 0x%08x.\n", color);
 

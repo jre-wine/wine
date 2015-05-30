@@ -247,6 +247,12 @@ static inline void restore_fpu( CONTEXT *context, const ucontext_t *sigcontext )
     FIXME("not implemented\n");
 }
 
+/**************************************************************************
+ *		__chkstk (NTDLL.@)
+ *
+ * Should check if we can decrement SP by the value provided in r4, but we shouldn't need that.
+ */
+__ASM_GLOBAL_FUNC( __chkstk, "bx lr" )
 
 /***********************************************************************
  *		RtlCaptureContext (NTDLL.@)
@@ -277,7 +283,7 @@ __ASM_STDCALL_FUNC( RtlCaptureContext, 4,
                     "str PC, [r0, #0x40]\n\t"  /* context->Pc */
                     "mrs r1, CPSR\n\t"
                     "str r1, [r0, #0x44]\n\t"  /* context->Cpsr */
-                    "mov PC, LR\n"
+                    "bx lr"
                     )
 
 
@@ -914,7 +920,7 @@ void signal_free_thread( TEB *teb )
 extern void set_tpidrurw( TEB *teb );
 __ASM_GLOBAL_FUNC( set_tpidrurw,
                    "mcr p15, 0, r0, c13, c0, 2\n\t" /* TEB -> TPIDRURW */
-                   "blx lr" )
+                   "bx lr" )
 #else
 void set_tpidrurw( TEB *teb )
 {

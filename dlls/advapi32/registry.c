@@ -849,7 +849,7 @@ LSTATUS WINAPI RegQueryInfoKeyW( HKEY hkey, LPWSTR class, LPDWORD class_len, LPD
     status = NtQueryKey( hkey, KeyFullInformation, buffer, sizeof(buffer), &total_size );
     if (status && status != STATUS_BUFFER_OVERFLOW) goto done;
 
-    if (class)
+    if (class && class_len && *class_len)
     {
         /* retry with a dynamically allocated buffer */
         while (status == STATUS_BUFFER_OVERFLOW)
@@ -865,7 +865,7 @@ LSTATUS WINAPI RegQueryInfoKeyW( HKEY hkey, LPWSTR class, LPDWORD class_len, LPD
 
         if (class_len && (info->ClassLength/sizeof(WCHAR) + 1 > *class_len))
         {
-            status = STATUS_BUFFER_OVERFLOW;
+            status = STATUS_BUFFER_TOO_SMALL;
         }
         else
         {
@@ -1049,17 +1049,18 @@ LSTATUS WINAPI RegQueryInfoKeyA( HKEY hkey, LPSTR class, LPDWORD class_len, LPDW
 
         if (status) goto done;
 
-        RtlUnicodeToMultiByteSize( &len, (WCHAR *)(buf_ptr + info->ClassOffset), info->ClassLength);
-        if (class_len)
+        len = 0;
+        if (class && class_len) len = *class_len;
+        RtlUnicodeToMultiByteN( class, len, class_len,
+                                (WCHAR *)(buf_ptr + info->ClassOffset), info->ClassLength );
+        if (len)
         {
-            if (len + 1 > *class_len) status = STATUS_BUFFER_OVERFLOW;
-            *class_len = len;
-        }
-        if (class && !status)
-        {
-            RtlUnicodeToMultiByteN( class, len, NULL, (WCHAR *)(buf_ptr + info->ClassOffset),
-                                    info->ClassLength );
-            class[len] = 0;
+            class[len - 1] = 0;
+            if (*class_len + 1 > len)
+            {
+                status = STATUS_BUFFER_OVERFLOW;
+                *class_len -= 1;
+            }
         }
     }
     else status = STATUS_SUCCESS;

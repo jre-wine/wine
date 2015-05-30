@@ -1050,7 +1050,7 @@
 @ cdecl _difftime64(long long) msvcr120._difftime64
 @ stub _dosmaperr
 @ stub _dpcomp
-@ stub _dsign
+@ cdecl _dsign(double) msvcr120._dsign
 @ extern _dstbias msvcr120._dstbias
 @ cdecl _dtest(ptr) msvcr120._dtest
 @ cdecl _dup(long) msvcr120._dup
@@ -1073,7 +1073,7 @@
 @ cdecl _fdclass(float) msvcr120._fdclass
 @ cdecl _fdopen(long str) msvcr120._fdopen
 @ stub _fdpcomp
-@ stub _fdsign
+@ cdecl _fdsign(float) msvcr120._fdsign
 @ cdecl _fdtest(ptr) msvcr120._fdtest
 @ cdecl _fflush_nolock(ptr) msvcr120._fflush_nolock
 @ cdecl _fgetc_nolock(ptr) msvcr120._fgetc_nolock
@@ -1257,7 +1257,7 @@
 @ cdecl _jn(long double) msvcr120._jn
 @ cdecl _ldclass(double) msvcr120._ldclass
 @ stub _ldpcomp
-@ stub _ldsign
+@ cdecl _ldsign(double) msvcr120._ldsign
 @ cdecl _ldtest(ptr) msvcr120._ldtest
 @ cdecl _lfind(ptr ptr ptr long ptr) msvcr120._lfind
 @ stub _lfind_s
@@ -1756,9 +1756,9 @@
 @ stub conj
 @ stub conjf
 @ stub conjl
-@ stub copysign
-@ stub copysignf
-@ stub copysignl
+@ cdecl copysign(double double) msvcr120.copysign
+@ cdecl copysignf(float float) msvcr120.copysignf
+@ cdecl copysignl(double double) msvcr120.copysignl
 @ cdecl cos(double) msvcr120.cos
 @ cdecl -arch=arm,x86_64 cosf(float) msvcr120.cosf
 @ cdecl cosh(double) msvcr120.cosh
@@ -1788,12 +1788,12 @@
 @ stub ctanhl
 @ stub ctanl
 @ cdecl -ret64 div(long long) msvcr120.div
-@ stub erf
+@ cdecl erf(double) msvcr120.erf
 @ stub erfc
 @ stub erfcf
 @ stub erfcl
-@ stub erff
-@ stub erfl
+@ cdecl erff(double) msvcr120.erff
+@ cdecl erfl(double) msvcr120.erfl
 @ cdecl exit(long) msvcr120.exit
 @ cdecl exp(double) msvcr120.exp
 @ cdecl exp2(double) msvcr120.exp2
@@ -1833,9 +1833,9 @@
 @ stub fma
 @ stub fmaf
 @ stub fmal
-@ stub fmax
-@ stub fmaxf
-@ stub fmaxl
+@ cdecl fmax(double double) msvcr120.fmax
+@ cdecl fmaxf(float float) msvcr120.fmaxf
+@ cdecl fmaxl(double double) msvcr120.fmaxl
 @ stub fmin
 @ stub fminf
 @ stub fminl

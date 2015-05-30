@@ -119,7 +119,6 @@ typedef struct
 typedef struct
 {
     DWORD    dwStructSize;    /* size of TBBUTTON struct */
-    INT      nWidth;          /* width of the toolbar */
     RECT     client_rect;
     RECT     rcBound;         /* bounding rectangle */
     INT      nButtonHeight;
@@ -258,6 +257,12 @@ static inline int default_top_margin(const TOOLBAR_INFO *infoPtr)
 static inline BOOL TOOLBAR_HasDropDownArrows(DWORD exStyle)
 {
     return (exStyle & TBSTYLE_EX_DRAWDDARROWS) != 0;
+}
+
+static inline BOOL button_has_ddarrow(const TOOLBAR_INFO *infoPtr, const TBUTTON_INFO *btnPtr)
+{
+    return (TOOLBAR_HasDropDownArrows( infoPtr->dwExStyle ) && (btnPtr->fsStyle & BTNS_DROPDOWN)) ||
+        (btnPtr->fsStyle & BTNS_WHOLEDROPDOWN);
 }
 
 static LPWSTR
@@ -824,9 +829,7 @@ static void
 TOOLBAR_DrawButton (const TOOLBAR_INFO *infoPtr, TBUTTON_INFO *btnPtr, HDC hdc, DWORD dwBaseCustDraw)
 {
     DWORD dwStyle = infoPtr->dwStyle;
-    BOOL hasDropDownArrow = (TOOLBAR_HasDropDownArrows(infoPtr->dwExStyle) &&
-                            (btnPtr->fsStyle & BTNS_DROPDOWN)) ||
-                            (btnPtr->fsStyle & BTNS_WHOLEDROPDOWN);
+    BOOL hasDropDownArrow = button_has_ddarrow( infoPtr, btnPtr );
     BOOL drawSepDropDownArrow = hasDropDownArrow && 
                                 (~btnPtr->fsStyle & BTNS_WHOLEDROPDOWN);
     RECT rc, rcArrow, rcBitmap, rcText;
@@ -1282,8 +1285,7 @@ static void
 TOOLBAR_WrapToolbar(TOOLBAR_INFO *infoPtr)
 {
     TBUTTON_INFO *btnPtr;
-    INT x, cx, i, j;
-    RECT rc;
+    INT x, cx, i, j, width;
     BOOL bButtonWrap;
 
     /* 	When the toolbar window style is not TBSTYLE_WRAPABLE,	*/
@@ -1294,26 +1296,12 @@ TOOLBAR_WrapToolbar(TOOLBAR_INFO *infoPtr)
 
     btnPtr = infoPtr->buttons;
     x  = infoPtr->nIndent;
-
-    if (GetParent(infoPtr->hwndSelf))
-    {
-        /* this can get the parents width, to know how far we can extend
-         * this toolbar.  We cannot use its height, as there may be multiple
-         * toolbars in a rebar control
-         */
-        GetClientRect( GetParent(infoPtr->hwndSelf), &rc );
-        infoPtr->nWidth = rc.right - rc.left;
-    }
-    else
-    {
-        GetWindowRect( infoPtr->hwndSelf, &rc );
-        infoPtr->nWidth = rc.right - rc.left;
-    }
+    width = infoPtr->client_rect.right - infoPtr->client_rect.left;
 
     bButtonWrap = FALSE;
 
-    TRACE("start ButtonWidth=%d, BitmapWidth=%d, nWidth=%d, nIndent=%d\n",
-	  infoPtr->nButtonWidth, infoPtr->nBitmapWidth, infoPtr->nWidth,
+    TRACE("start ButtonWidth=%d, BitmapWidth=%d, width=%d, nIndent=%d\n",
+	  infoPtr->nButtonWidth, infoPtr->nBitmapWidth, width,
 	  infoPtr->nIndent);
 
     for (i = 0; i < infoPtr->nNumButtons; i++ )
@@ -1331,6 +1319,9 @@ TOOLBAR_WrapToolbar(TOOLBAR_INFO *infoPtr)
             cx = (btnPtr[i].iBitmap > 0) ? btnPtr[i].iBitmap : SEPARATOR_WIDTH;
 	else
 	    cx = infoPtr->nButtonWidth;
+
+        if (!btnPtr[i].cx && button_has_ddarrow( infoPtr, btnPtr + i ))
+            cx += DDARROW_WIDTH;
 
 	/* Two or more adjacent separators form a separator group.   */
 	/* The first separator in a group should be wrapped to the   */
@@ -1351,9 +1342,8 @@ TOOLBAR_WrapToolbar(TOOLBAR_INFO *infoPtr)
 	/* The layout makes sure the bitmap is visible, but not the button. */
 	/* Test added to also wrap after a button that starts a row but     */
 	/* is bigger than the area.  - GA  8/01                             */
-	if (( x + cx - (infoPtr->nButtonWidth - infoPtr->nBitmapWidth) / 2
-	   > infoPtr->nWidth ) ||
-	    ((x == infoPtr->nIndent) && (cx > infoPtr->nWidth)))
+        if ((x + cx - (infoPtr->nButtonWidth - infoPtr->nBitmapWidth) / 2 > width) ||
+            ((x == infoPtr->nIndent) && (cx > width)))
 	{
 	    BOOL bFound = FALSE;
 
@@ -1645,7 +1635,6 @@ TOOLBAR_LayoutToolbar(TOOLBAR_INFO *infoPtr)
     INT x, y, cx, cy;
     BOOL bWrap;
     BOOL validImageList = TOOLBAR_IsValidImageList(infoPtr, 0);
-    BOOL hasDropDownArrows = TOOLBAR_HasDropDownArrows(infoPtr->dwExStyle);
 
     TOOLBAR_WrapToolbar(infoPtr);
 
@@ -1713,11 +1702,10 @@ TOOLBAR_LayoutToolbar(TOOLBAR_INFO *infoPtr)
 
             /* if size has been set manually then don't add on extra space
              * for the drop down arrow */
-	    if (!btnPtr->cx && hasDropDownArrows && 
-                ((btnPtr->fsStyle & BTNS_DROPDOWN) || (btnPtr->fsStyle & BTNS_WHOLEDROPDOWN)))
-	      cx += DDARROW_WIDTH;
+            if (!btnPtr->cx && button_has_ddarrow( infoPtr, btnPtr ))
+              cx += DDARROW_WIDTH;
 	}
-	if (btnPtr->fsState & TBSTATE_WRAP )
+	if (btnPtr->fsState & TBSTATE_WRAP)
 		    bWrap = TRUE;
 
 	SetRect (&btnPtr->rect, x, y, x + cx, y + cy);
@@ -3017,38 +3005,28 @@ TOOLBAR_AddStringA (TOOLBAR_INFO *infoPtr, HINSTANCE hInstance, LPARAM lParam)
 static LRESULT
 TOOLBAR_AutoSize (TOOLBAR_INFO *infoPtr)
 {
-    RECT parent_rect;
-    HWND parent;
-    INT  x, y;
-    INT  cx, cy;
-
     TRACE("auto sizing, style=%x!\n", infoPtr->dwStyle);
-
-    parent = GetParent (infoPtr->hwndSelf);
-
-    if (!parent || !infoPtr->bDoRedraw)
-        return 0;
-
-    GetClientRect(parent, &parent_rect);
-
-    x = parent_rect.left;
-    y = parent_rect.top;
-
     TRACE("nRows: %d, infoPtr->nButtonHeight: %d\n", infoPtr->nRows, infoPtr->nButtonHeight);
-
-    cy = TOP_BORDER + infoPtr->nRows * infoPtr->nButtonHeight + BOTTOM_BORDER;
-    cx = parent_rect.right - parent_rect.left;
-
-    if ((infoPtr->dwStyle & TBSTYLE_WRAPABLE) || (infoPtr->dwExStyle & TBSTYLE_EX_VERTICAL))
-    {
-        TOOLBAR_LayoutToolbar(infoPtr);
-        InvalidateRect( infoPtr->hwndSelf, NULL, TRUE );
-    }
 
     if (!(infoPtr->dwStyle & CCS_NORESIZE))
     {
-        RECT window_rect;
+        RECT window_rect, parent_rect;
         UINT uPosFlags = SWP_NOZORDER | SWP_NOACTIVATE;
+        HWND parent;
+        INT  x, y, cx, cy;
+
+        parent = GetParent (infoPtr->hwndSelf);
+
+        if (!parent || !infoPtr->bDoRedraw)
+            return 0;
+
+        GetClientRect(parent, &parent_rect);
+
+        x = parent_rect.left;
+        y = parent_rect.top;
+
+        cy = TOP_BORDER + infoPtr->nRows * infoPtr->nButtonHeight + BOTTOM_BORDER;
+        cx = parent_rect.right - parent_rect.left;
 
         if ((infoPtr->dwStyle & CCS_BOTTOM) == CCS_NOMOVEY)
         {
@@ -3075,6 +3053,12 @@ TOOLBAR_AutoSize (TOOLBAR_INFO *infoPtr)
         }
 
         SetWindowPos(infoPtr->hwndSelf, NULL, x, y, cx, cy, uPosFlags);
+    }
+
+    if ((infoPtr->dwStyle & TBSTYLE_WRAPABLE) || (infoPtr->dwExStyle & TBSTYLE_EX_VERTICAL))
+    {
+        TOOLBAR_LayoutToolbar(infoPtr);
+        InvalidateRect( infoPtr->hwndSelf, NULL, TRUE );
     }
 
     return 0;
@@ -4220,7 +4204,7 @@ TOOLBAR_SaveRestoreA (TOOLBAR_INFO *infoPtr, WPARAM wParam, const TBSAVEPARAMSA 
 
     len = MultiByteToWideChar(CP_ACP, 0, lpSave->pszSubKey, -1, NULL, 0);
     pszSubKey = Alloc(len * sizeof(WCHAR));
-    if (pszSubKey) goto exit;
+    if (!pszSubKey) goto exit;
     MultiByteToWideChar(CP_ACP, 0, lpSave->pszSubKey, -1, pszSubKey, len);
 
     len = MultiByteToWideChar(CP_ACP, 0, lpSave->pszValueName, -1, NULL, 0);
@@ -5946,7 +5930,6 @@ TOOLBAR_NCCreate (HWND hwnd, WPARAM wParam, const CREATESTRUCTW *lpcs)
     /* paranoid!! */
     infoPtr->dwStructSize = sizeof(TBBUTTON);
     infoPtr->nRows = 1;
-    infoPtr->nWidth = 0;
 
     /* initialize info structure */
     infoPtr->nButtonWidth = 23;

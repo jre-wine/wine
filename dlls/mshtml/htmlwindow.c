@@ -95,7 +95,7 @@ static inline HRESULT set_window_event(HTMLWindow *window, eventid_t eid, VARIAN
         return E_FAIL;
     }
 
-    return set_event_handler(&window->inner_window->event_target, window->inner_window->doc, eid, var);
+    return set_event_handler(&window->inner_window->event_target, eid, var);
 }
 
 static inline HRESULT get_window_event(HTMLWindow *window, eventid_t eid, VARIANT *var)
@@ -1654,7 +1654,7 @@ static HRESULT WINAPI HTMLWindow3_attachEvent(IHTMLWindow3 *iface, BSTR event, I
         return E_FAIL;
     }
 
-    return attach_event(&window->event_target, &window->doc->basedoc, event, pDisp, pfResult);
+    return attach_event(&window->event_target, event, pDisp, pfResult);
 }
 
 static HRESULT WINAPI HTMLWindow3_detachEvent(IHTMLWindow3 *iface, BSTR event, IDispatch *pDisp)
@@ -1669,7 +1669,7 @@ static HRESULT WINAPI HTMLWindow3_detachEvent(IHTMLWindow3 *iface, BSTR event, I
         return E_FAIL;
     }
 
-    return detach_event(&window->event_target, &window->doc->basedoc, event, pDisp);
+    return detach_event(&window->event_target, event, pDisp);
 }
 
 static HRESULT window_set_timer(HTMLInnerWindow *This, VARIANT *expr, LONG msec, VARIANT *language,
@@ -2854,12 +2854,19 @@ static event_target_t **HTMLWindow_get_event_target_ptr(DispatchEx *dispex)
     return &This->doc->body_event_target;
 }
 
+static void HTMLWindow_bind_event(DispatchEx *dispex, int eid)
+{
+    HTMLInnerWindow *This = impl_from_DispatchEx(dispex);
+    This->doc->node.event_target.dispex.data->vtbl->bind_event(&This->doc->node.event_target.dispex, eid);
+}
+
 static const dispex_static_data_vtbl_t HTMLWindow_dispex_vtbl = {
     NULL,
     NULL,
     HTMLWindow_invoke,
     NULL,
-    HTMLWindow_get_event_target_ptr
+    HTMLWindow_get_event_target_ptr,
+    HTMLWindow_bind_event
 };
 
 static const tid_t HTMLWindow_iface_tids[] = {

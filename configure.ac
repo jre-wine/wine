@@ -506,6 +506,7 @@ AC_CHECK_HEADERS(\
 	sys/user.h \
 	sys/utsname.h \
 	sys/vm86.h \
+	sys/vnode.h \
 	sys/wait.h \
 	syscall.h \
 	termios.h \
@@ -2589,6 +2590,8 @@ fi
 AC_CHECK_FUNCS(\
 	cbrt \
 	cbrtf \
+	erf \
+	erff \
 	exp2 \
 	exp2f \
 	llrint \
@@ -2721,6 +2724,7 @@ WINE_CONFIG_DLL(api-ms-win-core-localization-obsolete-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-localregistry-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-memory-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-memory-l1-1-1)
+WINE_CONFIG_DLL(api-ms-win-core-misc-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-namedpipe-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-namedpipe-l1-2-0)
 WINE_CONFIG_DLL(api-ms-win-core-processenvironment-l1-1-0)
@@ -3067,6 +3071,7 @@ WINE_CONFIG_DLL(mscoree,,[clean])
 WINE_CONFIG_TEST(dlls/mscoree/tests)
 WINE_CONFIG_DLL(msctf,,[clean])
 WINE_CONFIG_TEST(dlls/msctf/tests)
+WINE_CONFIG_DLL(msctfp,,[clean])
 WINE_CONFIG_DLL(msdaps,,[clean])
 WINE_CONFIG_DLL(msdmo,,[implib])
 WINE_CONFIG_TEST(dlls/msdmo/tests)
@@ -3217,7 +3222,7 @@ WINE_CONFIG_TEST(dlls/rasapi32/tests)
 WINE_CONFIG_DLL(rasdlg,,[implib])
 WINE_CONFIG_DLL(regapi)
 WINE_CONFIG_DLL(resutils,,[implib])
-WINE_CONFIG_DLL(riched20,,[implib])
+WINE_CONFIG_DLL(riched20,,[clean,implib])
 WINE_CONFIG_TEST(dlls/riched20/tests)
 WINE_CONFIG_DLL(riched32)
 WINE_CONFIG_TEST(dlls/riched32/tests)

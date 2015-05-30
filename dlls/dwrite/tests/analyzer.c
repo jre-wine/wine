@@ -21,6 +21,7 @@
 #define COBJMACROS
 
 #include <assert.h>
+#include <stdio.h>
 
 #include "initguid.h"
 #include "windows.h"
@@ -878,6 +879,13 @@ static struct sa_test sa_tests[] = {
       {0x2d30,0x2d4a,0}, 1,
           { { 0, 2, DWRITE_SCRIPT_SHAPES_DEFAULT }}
     },
+    {
+      /* LRE/PDF */
+      {0x202a,0x202c,'a','b','c','\r',0}, 3,
+          { { 0, 2, DWRITE_SCRIPT_SHAPES_NO_VISUAL },
+            { 2, 3, DWRITE_SCRIPT_SHAPES_DEFAULT   },
+            { 5, 1, DWRITE_SCRIPT_SHAPES_NO_VISUAL } }
+    },
     /* keep this as end marker */
     { {0} }
 };
@@ -1185,15 +1193,18 @@ static void test_GetGlyphs(void)
 {
     static const WCHAR test1W[] = {'<','B',' ','C',0};
     static const WCHAR test2W[] = {'<','B','\t','C',0};
+    static const WCHAR test3W[] = {0x202a,0x202c,0};
     DWRITE_SHAPING_GLYPH_PROPERTIES shapingprops[20];
     DWRITE_SHAPING_TEXT_PROPERTIES props[20];
     UINT32 maxglyphcount, actual_count;
     IDWriteTextAnalyzer *analyzer;
     IDWriteFontFace *fontface;
     DWRITE_SCRIPT_ANALYSIS sa;
+    DWRITE_GLYPH_OFFSET offsets[10];
     UINT16 clustermap[10];
     UINT16 glyphs1[10];
     UINT16 glyphs2[10];
+    FLOAT advances[10];
     HRESULT hr;
 
     hr = IDWriteFactory_CreateTextAnalyzer(factory, &analyzer);
@@ -1254,6 +1265,55 @@ if (0) {
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(actual_count == 4, "got %d\n", actual_count);
     ok(glyphs1[0] != glyphs2[0], "got %d\n", glyphs1[0]);
+
+    /* embedded control codes, with unknown script id 0 */
+    actual_count = 0;
+    hr = IDWriteTextAnalyzer_GetGlyphs(analyzer, test3W, lstrlenW(test3W), fontface, FALSE, TRUE, &sa, NULL,
+        NULL, NULL, NULL, 0, maxglyphcount, clustermap, props, glyphs1, shapingprops, &actual_count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(actual_count == 2, "got %d\n", actual_count);
+    ok(glyphs1[0] == 0, "got %d\n", glyphs1[0]);
+    ok(glyphs1[1] == 0, "got %d\n", glyphs1[1]);
+    ok(shapingprops[0].isClusterStart == 1, "got %d\n", shapingprops[0].isClusterStart);
+    ok(shapingprops[0].isZeroWidthSpace == 0, "got %d\n", shapingprops[0].isZeroWidthSpace);
+    ok(shapingprops[1].isClusterStart == 1, "got %d\n", shapingprops[1].isClusterStart);
+    ok(shapingprops[1].isZeroWidthSpace == 0, "got %d\n", shapingprops[1].isZeroWidthSpace);
+    ok(clustermap[0] == 0, "got %d\n", clustermap[0]);
+    ok(clustermap[1] == 1, "got %d\n", clustermap[1]);
+
+    memset(advances, 0, sizeof(advances));
+    hr = IDWriteTextAnalyzer_GetGlyphPlacements(analyzer, test3W, clustermap, props, lstrlenW(test3W),
+        glyphs1, shapingprops, actual_count, fontface, 10.0, FALSE, FALSE, &sa, NULL, NULL,
+        NULL, 0, advances, offsets);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(advances[0] == 10.0, "got %.2f\n", advances[0]);
+    ok(advances[1] == 10.0, "got %.2f\n", advances[1]);
+
+    /* embedded control codes with proper script */
+    sa.script = 0;
+    get_script_analysis(test3W, &sa);
+    ok(sa.script != 0, "got %d\n", sa.script);
+    actual_count = 0;
+    hr = IDWriteTextAnalyzer_GetGlyphs(analyzer, test3W, lstrlenW(test3W), fontface, FALSE, FALSE, &sa, NULL,
+        NULL, NULL, NULL, 0, maxglyphcount, clustermap, props, glyphs1, shapingprops, &actual_count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(actual_count == 2, "got %d\n", actual_count);
+    ok(glyphs1[0] == 0, "got %d\n", glyphs1[0]);
+    ok(glyphs1[1] == 0, "got %d\n", glyphs1[1]);
+    ok(shapingprops[0].isClusterStart == 1, "got %d\n", shapingprops[0].isClusterStart);
+    ok(shapingprops[0].isZeroWidthSpace == 0, "got %d\n", shapingprops[0].isZeroWidthSpace);
+    ok(shapingprops[1].isClusterStart == 1, "got %d\n", shapingprops[1].isClusterStart);
+    ok(shapingprops[1].isZeroWidthSpace == 0, "got %d\n", shapingprops[1].isZeroWidthSpace);
+    ok(clustermap[0] == 0, "got %d\n", clustermap[0]);
+    ok(clustermap[1] == 1, "got %d\n", clustermap[1]);
+
+    memset(advances, 0, sizeof(advances));
+    hr = IDWriteTextAnalyzer_GetGlyphPlacements(analyzer, test3W, clustermap, props, lstrlenW(test3W),
+        glyphs1, shapingprops, actual_count, fontface, 10.0, FALSE, FALSE, &sa, NULL, NULL,
+        NULL, 0, advances, offsets);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(advances[0] == 10.0, "got %.2f\n", advances[0]);
+    ok(advances[1] == 10.0, "got %.2f\n", advances[1]);
 
     IDWriteTextAnalyzer_Release(analyzer);
     IDWriteFontFace_Release(fontface);
@@ -1610,6 +1670,149 @@ static void test_ApplyCharacterSpacing(void)
     IDWriteTextAnalyzer1_Release(analyzer1);
 }
 
+struct orientation_transf_test {
+    DWRITE_GLYPH_ORIENTATION_ANGLE angle;
+    BOOL is_sideways;
+    DWRITE_MATRIX m;
+};
+
+static const struct orientation_transf_test ot_tests[] = {
+    { DWRITE_GLYPH_ORIENTATION_ANGLE_0_DEGREES,   FALSE, {  1.0,  0.0,  0.0,  1.0, 0.0, 0.0 } },
+    { DWRITE_GLYPH_ORIENTATION_ANGLE_90_DEGREES,  FALSE, {  0.0,  1.0, -1.0,  0.0, 0.0, 0.0 } },
+    { DWRITE_GLYPH_ORIENTATION_ANGLE_180_DEGREES, FALSE, { -1.0,  0.0,  0.0, -1.0, 0.0, 0.0 } },
+    { DWRITE_GLYPH_ORIENTATION_ANGLE_270_DEGREES, FALSE, {  0.0, -1.0,  1.0,  0.0, 0.0, 0.0 } },
+    { DWRITE_GLYPH_ORIENTATION_ANGLE_0_DEGREES,   TRUE,  {  0.0,  1.0, -1.0,  0.0, 0.0, 0.0 } },
+    { DWRITE_GLYPH_ORIENTATION_ANGLE_90_DEGREES,  TRUE,  { -1.0,  0.0,  0.0, -1.0, 0.0, 0.0 } },
+    { DWRITE_GLYPH_ORIENTATION_ANGLE_180_DEGREES, TRUE,  {  0.0, -1.0,  1.0,  0.0, 0.0, 0.0 } },
+    { DWRITE_GLYPH_ORIENTATION_ANGLE_270_DEGREES, TRUE,  {  1.0,  0.0,  0.0,  1.0, 0.0, 0.0 } }
+};
+
+static inline const char *dbgstr_matrix(const DWRITE_MATRIX *m)
+{
+    static char buff[64];
+    sprintf(buff, "{%.2f, %.2f, %.2f, %.2f, %.2f, %.2f}", m->m11, m->m12,
+        m->m21, m->m22, m->dx, m->dy);
+    return buff;
+}
+
+static void test_GetGlyphOrientationTransform(void)
+{
+    IDWriteTextAnalyzer2 *analyzer2;
+    IDWriteTextAnalyzer1 *analyzer1;
+    IDWriteTextAnalyzer *analyzer;
+    FLOAT originx, originy;
+    DWRITE_MATRIX m;
+    HRESULT hr;
+    int i;
+
+    hr = IDWriteFactory_CreateTextAnalyzer(factory, &analyzer);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextAnalyzer_QueryInterface(analyzer, &IID_IDWriteTextAnalyzer1, (void**)&analyzer1);
+    IDWriteTextAnalyzer_Release(analyzer);
+    if (hr != S_OK) {
+        win_skip("GetGlyphOrientationTransform() is not supported.\n");
+        return;
+    }
+
+    /* invalid angle value */
+    memset(&m, 0xcc, sizeof(m));
+    hr = IDWriteTextAnalyzer1_GetGlyphOrientationTransform(analyzer1,
+        DWRITE_GLYPH_ORIENTATION_ANGLE_270_DEGREES + 1, FALSE, &m);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(m.m11 == 0.0, "got %.2f\n", m.m11);
+
+    for (i = 0; i < sizeof(ot_tests)/sizeof(ot_tests[0]); i++) {
+        memset(&m, 0, sizeof(m));
+        hr = IDWriteTextAnalyzer1_GetGlyphOrientationTransform(analyzer1, ot_tests[i].angle,
+            ot_tests[i].is_sideways, &m);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(!memcmp(&ot_tests[i].m, &m, sizeof(m)), "%d: wrong matrix %s\n", i, dbgstr_matrix(&m));
+    }
+
+    hr = IDWriteTextAnalyzer1_QueryInterface(analyzer1, &IID_IDWriteTextAnalyzer2, (void**)&analyzer2);
+    IDWriteTextAnalyzer1_Release(analyzer1);
+    if (hr != S_OK) {
+        win_skip("IDWriteTextAnalyzer2::GetGlyphOrientationTransform() is not supported.\n");
+        return;
+    }
+
+    /* invalid angle value */
+    memset(&m, 0xcc, sizeof(m));
+    hr = IDWriteTextAnalyzer2_GetGlyphOrientationTransform(analyzer2,
+        DWRITE_GLYPH_ORIENTATION_ANGLE_270_DEGREES + 1, FALSE, 0.0, 0.0, &m);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(m.m11 == 0.0, "got %.2f\n", m.m11);
+
+    originx = 50.0;
+    originy = 60.0;
+    for (i = 0; i < sizeof(ot_tests)/sizeof(ot_tests[0]); i++) {
+        DWRITE_GLYPH_ORIENTATION_ANGLE angle = DWRITE_GLYPH_ORIENTATION_ANGLE_0_DEGREES;
+        DWRITE_MATRIX m_exp;
+
+        memset(&m, 0, sizeof(m));
+
+        /* zero offset gives same result as a call from IDWriteTextAnalyzer1 */
+        hr = IDWriteTextAnalyzer2_GetGlyphOrientationTransform(analyzer2, ot_tests[i].angle,
+            ot_tests[i].is_sideways, 0.0, 0.0, &m);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(!memcmp(&ot_tests[i].m, &m, sizeof(m)), "%d: wrong matrix %s\n", i, dbgstr_matrix(&m));
+
+        m_exp = ot_tests[i].m;
+        hr = IDWriteTextAnalyzer2_GetGlyphOrientationTransform(analyzer2, ot_tests[i].angle,
+            ot_tests[i].is_sideways, originx, originy, &m);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        /* 90 degrees more for sideways */
+        if (ot_tests[i].is_sideways) {
+            switch (ot_tests[i].angle)
+            {
+            case DWRITE_GLYPH_ORIENTATION_ANGLE_0_DEGREES:
+                angle = DWRITE_GLYPH_ORIENTATION_ANGLE_90_DEGREES;
+                break;
+            case DWRITE_GLYPH_ORIENTATION_ANGLE_90_DEGREES:
+                angle = DWRITE_GLYPH_ORIENTATION_ANGLE_180_DEGREES;
+                break;
+            case DWRITE_GLYPH_ORIENTATION_ANGLE_180_DEGREES:
+                angle = DWRITE_GLYPH_ORIENTATION_ANGLE_270_DEGREES;
+                break;
+            case DWRITE_GLYPH_ORIENTATION_ANGLE_270_DEGREES:
+                angle = DWRITE_GLYPH_ORIENTATION_ANGLE_0_DEGREES;
+                break;
+            default:
+                ;
+            }
+        }
+        else
+            angle = ot_tests[i].angle;
+
+        /* set expected offsets */
+        switch (angle)
+        {
+        case DWRITE_GLYPH_ORIENTATION_ANGLE_0_DEGREES:
+            break;
+        case DWRITE_GLYPH_ORIENTATION_ANGLE_90_DEGREES:
+            m_exp.dx = originx + originy;
+            m_exp.dy = originy - originx;
+            break;
+        case DWRITE_GLYPH_ORIENTATION_ANGLE_180_DEGREES:
+            m_exp.dx = originx + originx;
+            m_exp.dy = originy + originy;
+            break;
+        case DWRITE_GLYPH_ORIENTATION_ANGLE_270_DEGREES:
+            m_exp.dx = originx - originy;
+            m_exp.dy = originy + originx;
+            break;
+        default:
+            ;
+        }
+
+        ok(!memcmp(&m_exp, &m, sizeof(m)), "%d: wrong matrix %s\n", i, dbgstr_matrix(&m));
+    }
+
+    IDWriteTextAnalyzer2_Release(analyzer2);
+}
+
 START_TEST(analyzer)
 {
     HRESULT hr;
@@ -1634,6 +1837,7 @@ START_TEST(analyzer)
     test_GetTypographicFeatures();
     test_GetGlyphPlacements();
     test_ApplyCharacterSpacing();
+    test_GetGlyphOrientationTransform();
 
     IDWriteFactory_Release(factory);
 }

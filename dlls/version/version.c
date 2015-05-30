@@ -607,10 +607,33 @@ typedef struct
  */
 DWORD WINAPI GetFileVersionInfoSizeW( LPCWSTR filename, LPDWORD handle )
 {
+    return GetFileVersionInfoSizeExW( 0, filename, handle );
+}
+
+/***********************************************************************
+ *           GetFileVersionInfoSizeA         [VERSION.@]
+ */
+DWORD WINAPI GetFileVersionInfoSizeA( LPCSTR filename, LPDWORD handle )
+{
+    return GetFileVersionInfoSizeExA( 0, filename, handle );
+}
+
+/******************************************************************************
+ *           GetFileVersionInfoSizeExW       [VERSION.@]
+ */
+DWORD WINAPI GetFileVersionInfoSizeExW( DWORD flags, LPCWSTR filename, LPDWORD handle )
+{
     DWORD len, offset, magic = 1;
     HFILE lzfd;
     HMODULE hModule;
     OFSTRUCT ofs;
+
+    if (flags)
+    {
+        FIXME("stub: %x %s %p\n", flags, wine_dbgstr_w(filename), handle);
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        return 0;
+    }
 
     TRACE("(%s,%p)\n", debugstr_w(filename), handle );
 
@@ -676,10 +699,10 @@ DWORD WINAPI GetFileVersionInfoSizeW( LPCWSTR filename, LPDWORD handle )
     }
 }
 
-/***********************************************************************
- *           GetFileVersionInfoSizeA         [VERSION.@]
+/******************************************************************************
+ *           GetFileVersionInfoSizeExA       [VERSION.@]
  */
-DWORD WINAPI GetFileVersionInfoSizeA( LPCSTR filename, LPDWORD handle )
+DWORD WINAPI GetFileVersionInfoSizeExA( DWORD flags, LPCSTR filename, LPDWORD handle )
 {
     UNICODE_STRING filenameW;
     DWORD retval;
@@ -691,7 +714,7 @@ DWORD WINAPI GetFileVersionInfoSizeA( LPCSTR filename, LPDWORD handle )
     else
         filenameW.Buffer = NULL;
 
-    retval = GetFileVersionInfoSizeW(filenameW.Buffer, handle);
+    retval = GetFileVersionInfoSizeExW(0, filenameW.Buffer, handle);
 
     RtlFreeUnicodeString(&filenameW);
 
@@ -699,10 +722,9 @@ DWORD WINAPI GetFileVersionInfoSizeA( LPCSTR filename, LPDWORD handle )
 }
 
 /***********************************************************************
- *           GetFileVersionInfoW             [VERSION.@]
+ *           GetFileVersionInfoExW           [VERSION.@]
  */
-BOOL WINAPI GetFileVersionInfoW( LPCWSTR filename, DWORD handle,
-                                    DWORD datasize, LPVOID data )
+BOOL WINAPI GetFileVersionInfoExW( DWORD flags, LPCWSTR filename, DWORD handle, DWORD datasize, LPVOID data )
 {
     static const char signature[4] = "FE2X";
     DWORD len, offset, magic = 1;
@@ -710,6 +732,13 @@ BOOL WINAPI GetFileVersionInfoW( LPCWSTR filename, DWORD handle,
     OFSTRUCT ofs;
     HMODULE hModule;
     VS_VERSION_INFO_STRUCT32* vvis = data;
+
+    if (flags)
+    {
+        FIXME("stub: %x %s %u %u %p\n", flags, wine_dbgstr_w(filename), handle, datasize, data);
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        return 0;
+    }
 
     TRACE("(%s,%d,size=%d,data=%p)\n",
                 debugstr_w(filename), handle, datasize, data );
@@ -774,10 +803,9 @@ BOOL WINAPI GetFileVersionInfoW( LPCWSTR filename, DWORD handle,
 }
 
 /***********************************************************************
- *           GetFileVersionInfoA             [VERSION.@]
+ *           GetFileVersionInfoExA           [VERSION.@]
  */
-BOOL WINAPI GetFileVersionInfoA( LPCSTR filename, DWORD handle,
-                                    DWORD datasize, LPVOID data )
+BOOL WINAPI GetFileVersionInfoExA( DWORD flags, LPCSTR filename, DWORD handle, DWORD datasize, LPVOID data )
 {
     UNICODE_STRING filenameW;
     BOOL retval;
@@ -790,11 +818,27 @@ BOOL WINAPI GetFileVersionInfoA( LPCSTR filename, DWORD handle,
     else
         filenameW.Buffer = NULL;
 
-    retval = GetFileVersionInfoW(filenameW.Buffer, handle, datasize, data);
+    retval = GetFileVersionInfoExW(flags, filenameW.Buffer, handle, datasize, data);
 
     RtlFreeUnicodeString(&filenameW);
 
     return retval;
+}
+
+/***********************************************************************
+ *           GetFileVersionInfoW             [VERSION.@]
+ */
+BOOL WINAPI GetFileVersionInfoW( LPCWSTR filename, DWORD handle, DWORD datasize, LPVOID data )
+{
+    return GetFileVersionInfoExW(0, filename, handle, datasize, data);
+}
+
+/***********************************************************************
+ *           GetFileVersionInfoA             [VERSION.@]
+ */
+BOOL WINAPI GetFileVersionInfoA( LPCSTR filename, DWORD handle, DWORD datasize, LPVOID data )
+{
+    return GetFileVersionInfoExA(0, filename, handle, datasize, data);
 }
 
 /***********************************************************************
@@ -1612,44 +1656,4 @@ DWORD WINAPI VerInstallFileW(
     HeapFree( GetProcessHeap(), 0, wtmpf );
     HeapFree( GetProcessHeap(), 0, wcurd );
     return ret;
-}
-
-/******************************************************************************
- * GetFileVersionInfoSizeExA                    [VERSION.@]
- */
-DWORD WINAPI GetFileVersionInfoSizeExA(DWORD flags, LPCSTR filename, LPDWORD handle)
-{
-    FIXME("stub: %u %s %p\n", flags, wine_dbgstr_a(filename), handle);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-/******************************************************************************
- * GetFileVersionInfoSizeExW                     [VERSION.@]
- */
-DWORD WINAPI GetFileVersionInfoSizeExW(DWORD flags, LPCWSTR filename, LPDWORD handle)
-{
-    FIXME("stub: %u %s %p\n", flags, wine_dbgstr_w(filename), handle);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-/******************************************************************************
- * GetFileVersionInfoExA                     [VERSION.@]
- */
-BOOL WINAPI GetFileVersionInfoExA(DWORD flags, LPCSTR filename, DWORD handle, DWORD len, LPVOID data)
-{
-    FIXME("stub: %u %s %u %u %p\n", flags, wine_dbgstr_a(filename), handle, len, data);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-/******************************************************************************
- * GetFileVersionInfoExW                     [VERSION.@]
- */
-BOOL WINAPI GetFileVersionInfoExW(DWORD flags, LPCWSTR filename, DWORD handle, DWORD len, LPVOID data)
-{
-    FIXME("stub: %u %s %u %u %p\n", flags, wine_dbgstr_w(filename), handle, len, data);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
 }

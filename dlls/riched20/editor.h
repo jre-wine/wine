@@ -262,6 +262,7 @@ void ME_RTFTblAttrHook(struct _RTF_Info *info) DECLSPEC_HIDDEN;
 void ME_RTFSpecialCharHook(struct _RTF_Info *info) DECLSPEC_HIDDEN;
 void ME_StreamInFill(ME_InStream *stream) DECLSPEC_HIDDEN;
 extern BOOL me_debug DECLSPEC_HIDDEN;
+void ME_ReplaceSel(ME_TextEditor *editor, BOOL can_undo, const WCHAR *str, int len) DECLSPEC_HIDDEN;
 
 /* table.c */
 BOOL ME_IsInTable(ME_DisplayItem *pItem) DECLSPEC_HIDDEN;
@@ -349,3 +350,5 @@ LRESULT ME_StreamOut(ME_TextEditor *editor, DWORD dwFormat, EDITSTREAM *stream) 
 
 /* clipboard.c */
 HRESULT ME_GetDataObject(ME_TextEditor *editor, const ME_Cursor *start, int nChars, LPDATAOBJECT *lplpdataobj) DECLSPEC_HIDDEN;
+
+void release_typelib(void) DECLSPEC_HIDDEN;
