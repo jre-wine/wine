@@ -1,12 +1,27 @@
+wine-development (1.7.44-1) unstable; urgency=medium
+
+  * New upstream release 1.7.44, released May 29, 2015.
+    - More support for the COM interfaces of the RichEdit control.
+    - Initial version of a SmartTee filter.
+    - Some more support for the ARM64 platform (closes: #786493).
+    - Support for the null device kernel object.
+    - Various bug fixes.
+  * Add version constraints to the libwine dependency (closes: #786797).
+  * Remove all of the calls to exit in the shared library.
+  * Set wine as Multi-Arch foreign (closes: #787180).
+  * Add sylink to wine32 (closes: #786886)..
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 30 May 2015 17:09:25 +0000
+
 wine-development (1.7.43-1) unstable; urgency=medium
 
   * New upstream release 1.7.43, released May 15, 2015.
-  * - Improved support for Shell Browser windows.
-  * - Some more API Sets libraries.
-  * - Read/write operations support with built-in devices.
-  * - Major Catalan translation update.
-  * - Support for WoW64 mode on ARM64.
-  * - Various bug fixes.
+    - Improved support for Shell Browser windows.
+    - Some more API Sets libraries.
+    - Read/write operations support with built-in devices.
+    - Major Catalan translation update.
+    - Support for WoW64 mode on ARM64.
+    - Various bug fixes.
 
  -- Michael Gilbert <mgilbert@debian.org>  Fri, 15 May 2015 20:55:05 +0000
 
@@ -65,11 +80,11 @@ wine-development (1.7.40-1) experimental; urgency=medium
 wine-development (1.7.39-1) experimental; urgency=medium
 
   * New upstream release 1.7.39, released Mar 20, 2015.
-  * - Kerning support in DirectWrite.
-  * - Support for DirectX Media Objects filters.
-  * - Better support for animated GIFs in GdiPlus.
-  * - Improved support for Known Folders in Shell32.
-  * - Various bug fixes.
+    - Kerning support in DirectWrite.
+    - Support for DirectX Media Objects filters.
+    - Better support for animated GIFs in GdiPlus.
+    - Improved support for Known Folders in Shell32.
+    - Various bug fixes.
 
  -- Michael Gilbert <mgilbert@debian.org>  Fri, 20 Mar 2015 22:41:52 +0000
 

@@ -65,6 +65,7 @@ Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
 
 Package: wineVERSION
 Architecture: all
+Multi-Arch: foreign
 Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
@@ -72,10 +73,10 @@ Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This is a virtual package that depends on the standard Wine components.
+ This is package provides convenience tools for the standard Wine components.
 
 Package: wine32VERSION
-Architecture: any-i386 any-powerpc armhf
+Architecture: any-i386 any-powerpc armhf arm64
 Multi-Arch: foreign
 Depends:
  ${misc:Depends},
@@ -83,10 +84,12 @@ Depends:
  x11-utils,
  libncurses5,
  libfreetype6,
+ libwineVERSION (>= ${source:Version}),
+ libwineVERSION (<< ${source:Version}.1~),
 Recommends:
  wineVERSION,
  libgl1-mesa-dri,
- libwine-gecko-2.36 [!armhf],
+ libwine-gecko-2.36 [!armhf !arm64],
  libasound2-plugins,
 Suggests:
  wine32VERSION-preloader,
@@ -102,10 +105,12 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  x11-utils,
+ libwineVERSION (>= ${source:Version}),
+ libwineVERSION (<< ${source:Version}.1~),
 Recommends:
  wineVERSION,
  wine32VERSION (>= ${source:Version}),
- libwine-gecko-2.36 [!armhf],
+ libwine-gecko-2.36 [!armhf !arm64],
  libasound2-plugins,
 Suggests:
  wine64VERSION-preloader,
@@ -116,7 +121,7 @@ Description: Windows API implementation - 64-bit binary loader
  This package provides the binary loader for 64-bit Windows applications.
 
 Package: wine32VERSION-preloader
-Architecture: i386 powerpc armhf
+Architecture: i386 powerpc armhf arm64
 Depends:
  ${misc:Depends},
  wine32VERSION,
@@ -138,7 +143,7 @@ Description: Windows API implementation - prelinked 64-bit binary loader
  This package provides the prelinked loader for 64-bit Windows applications.
 
 Package: wine32VERSION-tools
-Architecture: any-i386 any-powerpc armhf
+Architecture: any-i386 any-powerpc armhf arm64
 Section: libdevel
 Multi-Arch: foreign
 Depends:
@@ -184,7 +189,7 @@ Description: Windows API implementation - fonts
 
 Package: libwineVERSION
 Section: libs
-Architecture: amd64 any-i386 any-powerpc armhf
+Architecture: amd64 any-i386 any-powerpc armhf arm64
 Multi-Arch: same
 Depends:
  ${misc:Depends},
@@ -205,7 +210,7 @@ Description: Windows API implementation - library
  This package provides the wine library.
 
 Package: libwineVERSION-dev
-Architecture: amd64 any-i386 any-powerpc armhf
+Architecture: amd64 any-i386 any-powerpc armhf arm64
 Section: libdevel
 Multi-Arch: same
 Depends:
@@ -221,7 +226,7 @@ Description: Windows API implementation - development files
  This package provides wine's C header files and development libraries.
 
 Package: libwineVERSION-dbg
-Architecture: amd64 any-i386 any-powerpc armhf
+Architecture: amd64 any-i386 any-powerpc armhf arm64
 Multi-Arch: same
 Section: debug
 Priority: extra
