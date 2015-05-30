@@ -3,7 +3,7 @@ manpages.patch
 
 printer-resolution.patch
 
-disable/exit-calls.patch
+disable/shlib-exit-calls.patch
 disable/downloading.patch
 
 winegcc.patch
