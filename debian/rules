@@ -4,7 +4,7 @@ DEB_BUILD_ARCH_OS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_OS)
 DEB_BUILD_ARCH_CPU=$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU)
 DEB_BUILD_ARCH_BITS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS)
 
-VERSION=$(shell dpkg-parsechangelog | grep ^Source | cut -d\  -f2 | sed s/wine//g)
+VERSION=$(shell dpkg-parsechangelog -S Source | sed s/wine//g)
 
 MANDIR=usr/share/man
 DATDIR=usr/share/wine$(VERSION)
@@ -26,13 +26,13 @@ export DEB_LDFLAGS_MAINT_APPEND+=-lfreebsd-glue
 endif
 
 # configure options
-CONFLAGS=--without-hal \
+CONFLAGS=--with-gnutls \
+         --without-hal \
          --without-v4l \
          --without-sane \
          --without-capi \
          --without-gphoto \
          --without-gstreamer \
-	 --with-gnutls \
          --disable-tests \
          --libdir=/$(LIBDIR) \
          --bindir=/$(LIBDIR) \
@@ -101,6 +101,4 @@ override_dh_strip:
 
 override_dh_clean:
 	dh_clean -- $(INSTALLS)
-	rm -f include/wine/wgl*
-	rm -f dlls/opengl32/opengl_norm.c dlls/opengl32/opengl_ext.c dlls/opengl32/opengl32.spec
 	make -f debian/rules debian/control
