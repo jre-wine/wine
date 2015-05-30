@@ -1419,129 +1419,49 @@ static void state_normalize(struct wined3d_context *context, const struct wined3
 
 void state_psizemin_w(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    union {
-        DWORD d;
-        float f;
-    } tmpvalue;
+    float min, max;
 
-    tmpvalue.d = state->render_states[WINED3D_RS_POINTSIZE_MIN];
-    if (tmpvalue.f != 1.0f)
-    {
-        FIXME("WINED3D_RS_POINTSIZE_MIN not supported on this opengl, value is %f\n", tmpvalue.f);
-    }
-    tmpvalue.d = state->render_states[WINED3D_RS_POINTSIZE_MAX];
-    if (tmpvalue.f != 64.0f)
-    {
-        FIXME("WINED3D_RS_POINTSIZE_MAX not supported on this opengl, value is %f\n", tmpvalue.f);
-    }
+    get_pointsize_minmax(context, state, &min, &max);
 
+    if (min != 1.0f)
+        FIXME("WINED3D_RS_POINTSIZE_MIN value %.8e not supported on this OpenGL implementation.\n", min);
+    if (max != 64.0f)
+        FIXME("WINED3D_RS_POINTSIZE_MAX value %.8e not supported on this OpenGL implementation.\n", max);
 }
 
 void state_psizemin_ext(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    union
-    {
-        DWORD d;
-        float f;
-    } min, max;
+    float min, max;
 
-    min.d = state->render_states[WINED3D_RS_POINTSIZE_MIN];
-    max.d = state->render_states[WINED3D_RS_POINTSIZE_MAX];
+    get_pointsize_minmax(context, state, &min, &max);
 
-    /* Max point size trumps min point size */
-    if(min.f > max.f) {
-        min.f = max.f;
-    }
-
-    GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MIN_EXT, min.f);
+    GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MIN_EXT, min);
     checkGLcall("glPointParameterfEXT(...)");
-    GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MAX_EXT, max.f);
+    GL_EXTCALL(glPointParameterfEXT)(GL_POINT_SIZE_MAX_EXT, max);
     checkGLcall("glPointParameterfEXT(...)");
 }
 
 void state_psizemin_arb(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    union
-    {
-        DWORD d;
-        float f;
-    } min, max;
+    float min, max;
 
-    min.d = state->render_states[WINED3D_RS_POINTSIZE_MIN];
-    max.d = state->render_states[WINED3D_RS_POINTSIZE_MAX];
+    get_pointsize_minmax(context, state, &min, &max);
 
-    /* Max point size trumps min point size */
-    if(min.f > max.f) {
-        min.f = max.f;
-    }
-
-    GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MIN_ARB, min.f);
+    GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MIN_ARB, min);
     checkGLcall("glPointParameterfARB(...)");
-    GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MAX_ARB, max.f);
+    GL_EXTCALL(glPointParameterfARB)(GL_POINT_SIZE_MAX_ARB, max);
     checkGLcall("glPointParameterfARB(...)");
 }
 
 void state_pscale(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    /* TODO: Group this with the viewport */
-    /*
-     * POINTSCALEENABLE controls how point size value is treated. If set to
-     * true, the point size is scaled with respect to height of viewport.
-     * When set to false point size is in pixels.
-     */
+    float att[3];
+    float pointsize;
 
-    /* Default values */
-    GLfloat att[3] = {1.0f, 0.0f, 0.0f};
-    union {
-        DWORD d;
-        float f;
-    } pointSize, A, B, C;
-
-    pointSize.d = state->render_states[WINED3D_RS_POINTSIZE];
-    A.d = state->render_states[WINED3D_RS_POINTSCALE_A];
-    B.d = state->render_states[WINED3D_RS_POINTSCALE_B];
-    C.d = state->render_states[WINED3D_RS_POINTSCALE_C];
-
-    if (state->render_states[WINED3D_RS_POINTSCALEENABLE])
-    {
-        DWORD h = state->viewport.height;
-        GLfloat scaleFactor;
-
-        if (pointSize.f < gl_info->limits.pointsize_min)
-        {
-            /* Minimum valid point size for OpenGL is driver specific. For Direct3D it is
-             * 0.0f. This means that OpenGL will clamp really small point sizes to the
-             * driver minimum. To correct for this we need to multiply by the scale factor when sizes
-             * are less than 1.0f. scale_factor =  1.0f / point_size.
-             */
-            scaleFactor = pointSize.f / gl_info->limits.pointsize_min;
-            /* Clamp the point size, don't rely on the driver to do it. MacOS says min point size
-             * is 1.0, but then accepts points below that and draws too small points
-             */
-            pointSize.f = gl_info->limits.pointsize_min;
-        }
-        else if(pointSize.f > gl_info->limits.pointsize_max)
-        {
-            /* gl already scales the input to glPointSize,
-             * d3d scales the result after the point size scale.
-             * If the point size is bigger than the max size, use the
-             * scaling to scale it bigger, and set the gl point size to max
-             */
-            scaleFactor = pointSize.f / gl_info->limits.pointsize_max;
-            TRACE("scale: %f\n", scaleFactor);
-            pointSize.f = gl_info->limits.pointsize_max;
-        } else {
-            scaleFactor = 1.0f;
-        }
-        scaleFactor = powf(h * scaleFactor, 2);
-
-        att[0] = A.f / scaleFactor;
-        att[1] = B.f / scaleFactor;
-        att[2] = C.f / scaleFactor;
-    }
+    get_pointsize(context, state, &pointsize, att);
 
     if (gl_info->supported[ARB_POINT_PARAMETERS])
     {
@@ -1558,7 +1478,7 @@ void state_pscale(struct wined3d_context *context, const struct wined3d_state *s
         WARN("POINT_PARAMETERS not supported in this version of opengl\n");
     }
 
-    gl_info->gl_ops.gl.p_glPointSize(pointSize.f);
+    gl_info->gl_ops.gl.p_glPointSize(max(pointsize, FLT_MIN));
     checkGLcall("glPointSize(...);");
 }
 

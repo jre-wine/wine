@@ -1258,7 +1258,6 @@ BOOL WINAPI DefineDosDeviceA(DWORD flags, LPCSTR devname, LPCSTR targetpath)
 DWORD WINAPI QueryDosDeviceW( LPCWSTR devname, LPWSTR target, DWORD bufsize )
 {
     static const WCHAR auxW[] = {'A','U','X',0};
-    static const WCHAR nulW[] = {'N','U','L',0};
     static const WCHAR prnW[] = {'P','R','N',0};
     static const WCHAR comW[] = {'C','O','M',0};
     static const WCHAR lptW[] = {'L','P','T',0};
@@ -1282,33 +1281,34 @@ DWORD WINAPI QueryDosDeviceW( LPCWSTR devname, LPWSTR target, DWORD bufsize )
     {
         WCHAR *p, name[5];
         char *path, *link;
+        WCHAR *buffer;
         DWORD dosdev, ret = 0;
 
         if ((dosdev = RtlIsDosDeviceName_U( devname )))
         {
             memcpy( name, devname + HIWORD(dosdev)/sizeof(WCHAR), LOWORD(dosdev) );
             name[LOWORD(dosdev)/sizeof(WCHAR)] = 0;
+            devname = name;
         }
-        else
-        {
-            WCHAR *buffer;
 
-            if (!(buffer = HeapAlloc( GetProcessHeap(), 0, sizeof(dosdevW) + strlenW(devname)*sizeof(WCHAR) )))
-            {
-                SetLastError( ERROR_OUTOFMEMORY );
-                return 0;
-            }
-            memcpy( buffer, dosdevW, sizeof(dosdevW) );
-            strcatW( buffer, devname );
-            status = read_nt_symlink( buffer, target, bufsize );
-            HeapFree( GetProcessHeap(), 0, buffer );
-            if (status)
-            {
-                SetLastError( RtlNtStatusToDosError(status) );
-                return 0;
-            }
+        if (!(buffer = HeapAlloc( GetProcessHeap(), 0, sizeof(dosdevW) + strlenW(devname)*sizeof(WCHAR) )))
+        {
+            SetLastError( ERROR_OUTOFMEMORY );
+            return 0;
+        }
+        memcpy( buffer, dosdevW, sizeof(dosdevW) );
+        strcatW( buffer, devname );
+        status = read_nt_symlink( buffer, target, bufsize );
+        HeapFree( GetProcessHeap(), 0, buffer );
+        if (!status)
+        {
             ret = strlenW( target ) + 1;
             goto done;
+        }
+        if (!dosdev)  /* not a special DOS device */
+        {
+            SetLastError( RtlNtStatusToDosError(status) );
+            return 0;
         }
 
         /* FIXME: should read NT symlink for all devices */
@@ -1322,7 +1322,7 @@ DWORD WINAPI QueryDosDeviceW( LPCWSTR devname, LPWSTR target, DWORD bufsize )
             ret = MultiByteToWideChar( CP_UNIXCP, 0, link, -1, target, bufsize );
             HeapFree( GetProcessHeap(), 0, link );
         }
-        else if (dosdev)  /* look for device defaults */
+        else  /* look for device defaults */
         {
             if (!strcmpiW( name, auxW ))
             {
@@ -1375,7 +1375,7 @@ DWORD WINAPI QueryDosDeviceW( LPCWSTR devname, LPWSTR target, DWORD bufsize )
         WCHAR *p = target;
         int i;
 
-        if (bufsize <= (sizeof(auxW)+sizeof(nulW)+sizeof(prnW))/sizeof(WCHAR))
+        if (bufsize <= (sizeof(auxW)+sizeof(prnW))/sizeof(WCHAR))
         {
             SetLastError( ERROR_INSUFFICIENT_BUFFER );
             return 0;
@@ -1385,8 +1385,6 @@ DWORD WINAPI QueryDosDeviceW( LPCWSTR devname, LPWSTR target, DWORD bufsize )
 
         memcpy( p, auxW, sizeof(auxW) );
         p += sizeof(auxW) / sizeof(WCHAR);
-        memcpy( p, nulW, sizeof(nulW) );
-        p += sizeof(nulW) / sizeof(WCHAR);
         memcpy( p, prnW, sizeof(prnW) );
         p += sizeof(prnW) / sizeof(WCHAR);
 
@@ -1610,7 +1608,15 @@ UINT WINAPI GetDriveTypeW(LPCWSTR root) /* [in] String describing drive */
     HANDLE handle;
     UINT ret;
 
-    if (!open_device_root( root, &handle )) return DRIVE_NO_ROOT_DIR;
+    if (!open_device_root( root, &handle ))
+    {
+        /* CD ROM devices do not necessarily have a volume, but a drive type */
+        ret = get_mountmgr_drive_type( root );
+        if (ret == DRIVE_CDROM || ret == DRIVE_REMOVABLE)
+            return ret;
+
+        return DRIVE_NO_ROOT_DIR;
+    }
 
     status = NtQueryVolumeInformationFile( handle, &io, &info, sizeof(info), FileFsDeviceInformation );
     NtClose( handle );

@@ -2605,3 +2605,81 @@ short CDECL MSVCR120__ldtest(LDOUBLE *x)
 {
     return MSVCR120__dclass(*x);
 }
+
+/*********************************************************************
+ *      erff (MSVCR120.@)
+ */
+float CDECL MSVCR120_erff(float x)
+{
+#ifdef HAVE_ERFF
+    return erff(x);
+#else
+    FIXME( "not implemented\n" );
+    return 0.0f;
+#endif
+}
+
+/*********************************************************************
+ *      erf (MSVCR120.@)
+ */
+double CDECL MSVCR120_erf(double x)
+{
+#ifdef HAVE_ERF
+    return erf(x);
+#else
+    FIXME( "not implemented\n" );
+    return 0.0;
+#endif
+}
+
+/*********************************************************************
+ *      erfl (MSVCR120.@)
+ */
+LDOUBLE CDECL MSVCR120_erfl(LDOUBLE x)
+{
+    return MSVCR120_erf(x);
+}
+
+/*********************************************************************
+ *      fmaxf (MSVCR120.@)
+ */
+float CDECL MSVCR120_fmaxf(float x, float y)
+{
+    if(isnanf(x))
+        return y;
+    if(isnanf(y))
+        return x;
+    if(x==0 && y==0)
+        return signbit(x) ? y : x;
+    return x<y ? y : x;
+}
+
+/*********************************************************************
+ *      fmax (MSVCR120.@)
+ */
+double CDECL MSVCR120_fmax(double x, double y)
+{
+    if(isnan(x))
+        return y;
+    if(isnan(y))
+        return x;
+    if(x==0 && y==0)
+        return signbit(x) ? y : x;
+    return x<y ? y : x;
+}
+
+/*********************************************************************
+ *      _fdsign (MSVCR120.@)
+ */
+int CDECL MSVCR120__fdsign(float x)
+{
+    return signbit(x) ? 0x8000 : 0;
+}
+
+/*********************************************************************
+ *      _dsign (MSVCR120.@)
+ */
+int CDECL MSVCR120__dsign(double x)
+{
+    return signbit(x) ? 0x8000 : 0;
+}

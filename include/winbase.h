@@ -823,6 +823,27 @@ typedef struct _FILE_ID_BOTH_DIR_INFO {
     WCHAR         FileName[1];
 } FILE_ID_BOTH_DIR_INFO, *PFILE_ID_BOTH_DIR_INFO;
 
+typedef struct _FILE_BASIC_INFO {
+    LARGE_INTEGER CreationTime;
+    LARGE_INTEGER LastAccessTime;
+    LARGE_INTEGER LastWriteTime;
+    LARGE_INTEGER ChangeTime;
+    DWORD         FileAttributes;
+} FILE_BASIC_INFO, *PFILE_BASIC_INFO;
+
+typedef struct _FILE_STANDARD_INFO {
+    LARGE_INTEGER AllocationSize;
+    LARGE_INTEGER EndOfFile;
+    DWORD         NumberOfLinks;
+    BOOLEAN       DeletePending;
+    BOOLEAN       Directory;
+} FILE_STANDARD_INFO, *PFILE_STANDARD_INFO;
+
+typedef struct _FILE_NAME_INFO {
+    DWORD         FileNameLength;
+    WCHAR         FileName[1];
+} FILE_NAME_INFO, *PFILE_NAME_INFO;
+
 #define PIPE_ACCESS_INBOUND  1
 #define PIPE_ACCESS_OUTBOUND 2
 #define PIPE_ACCESS_DUPLEX   3
@@ -2040,6 +2061,7 @@ WINBASEAPI BOOL        WINAPI GetSystemRegistryQuota(PDWORD,PDWORD);
 WINBASEAPI VOID        WINAPI GetSystemTime(LPSYSTEMTIME);
 WINBASEAPI BOOL        WINAPI GetSystemTimeAdjustment(PDWORD,PDWORD,PBOOL);
 WINBASEAPI VOID        WINAPI GetSystemTimeAsFileTime(LPFILETIME);
+WINBASEAPI VOID        WINAPI GetSystemTimePreciseAsFileTime(LPFILETIME);
 WINBASEAPI UINT        WINAPI GetSystemWindowsDirectoryA(LPSTR,UINT);
 WINBASEAPI UINT        WINAPI GetSystemWindowsDirectoryW(LPWSTR,UINT);
 #define                       GetSystemWindowsDirectory WINELIB_NAME_AW(GetSystemWindowsDirectory)

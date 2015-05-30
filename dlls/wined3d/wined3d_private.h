@@ -299,20 +299,21 @@ enum wined3d_shader_resource_type
 #define WINED3D_SHADER_CONST_VS_F           0x00000001
 #define WINED3D_SHADER_CONST_VS_I           0x00000002
 #define WINED3D_SHADER_CONST_VS_B           0x00000004
-#define WINED3D_SHADER_CONST_VS_POS_FIXUP   0x00000008
-#define WINED3D_SHADER_CONST_PS_F           0x00000010
-#define WINED3D_SHADER_CONST_PS_I           0x00000020
-#define WINED3D_SHADER_CONST_PS_B           0x00000040
-#define WINED3D_SHADER_CONST_PS_BUMP_ENV    0x00000080
-#define WINED3D_SHADER_CONST_PS_Y_CORR      0x00000100
-#define WINED3D_SHADER_CONST_PS_NP2_FIXUP   0x00000200
-#define WINED3D_SHADER_CONST_FFP_MODELVIEW  0x00000400
-#define WINED3D_SHADER_CONST_FFP_PROJ       0x00000800
-#define WINED3D_SHADER_CONST_FFP_TEXMATRIX  0x00001000
-#define WINED3D_SHADER_CONST_FFP_MATERIAL   0x00002000
-#define WINED3D_SHADER_CONST_FFP_LIGHTS     0x00004000
-#define WINED3D_SHADER_CONST_FFP_PS         0x00008000
-#define WINED3D_SHADER_CONST_FFP_COLOR_KEY  0x00010000
+#define WINED3D_SHADER_CONST_VS_POINTSIZE   0x00000008
+#define WINED3D_SHADER_CONST_VS_POS_FIXUP   0x00000010
+#define WINED3D_SHADER_CONST_PS_F           0x00000020
+#define WINED3D_SHADER_CONST_PS_I           0x00000040
+#define WINED3D_SHADER_CONST_PS_B           0x00000080
+#define WINED3D_SHADER_CONST_PS_BUMP_ENV    0x00000100
+#define WINED3D_SHADER_CONST_PS_Y_CORR      0x00000200
+#define WINED3D_SHADER_CONST_PS_NP2_FIXUP   0x00000400
+#define WINED3D_SHADER_CONST_FFP_MODELVIEW  0x00000800
+#define WINED3D_SHADER_CONST_FFP_PROJ       0x00001000
+#define WINED3D_SHADER_CONST_FFP_TEXMATRIX  0x00002000
+#define WINED3D_SHADER_CONST_FFP_MATERIAL   0x00004000
+#define WINED3D_SHADER_CONST_FFP_LIGHTS     0x00008000
+#define WINED3D_SHADER_CONST_FFP_PS         0x00010000
+#define WINED3D_SHADER_CONST_FFP_COLOR_KEY  0x00020000
 
 enum wined3d_shader_register_type
 {
@@ -1514,8 +1515,8 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_6200        = 0x014f,
     CARD_NVIDIA_GEFORCE_6600GT      = 0x0140,
     CARD_NVIDIA_GEFORCE_6800        = 0x0041,
-    CARD_NVIDIA_GEFORCE_7400        = 0x01d8,
     CARD_NVIDIA_GEFORCE_7300        = 0x01d7, /* GeForce Go 7300 */
+    CARD_NVIDIA_GEFORCE_7400        = 0x01d8,
     CARD_NVIDIA_GEFORCE_7600        = 0x0391,
     CARD_NVIDIA_GEFORCE_7800GT      = 0x0092,
     CARD_NVIDIA_GEFORCE_8200        = 0x0849, /* Other PCI ID 0x084b */
@@ -2318,7 +2319,7 @@ struct fbo_entry
     struct list entry;
     struct wined3d_surface **render_targets;
     struct wined3d_surface *depth_stencil;
-    DWORD location;
+    DWORD color_location, ds_location;
     DWORD rt_mask;
     BOOL attached;
     GLuint id;
@@ -3070,6 +3071,10 @@ void get_projection_matrix(const struct wined3d_context *context, const struct w
         struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
 void get_texture_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
         unsigned int tex, struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
+void get_pointsize_minmax(const struct wined3d_context *context, const struct wined3d_state *state,
+        float *out_min, float *out_max) DECLSPEC_HIDDEN;
+void get_pointsize(const struct wined3d_context *context, const struct wined3d_state *state,
+        float *out_pointsize, float *out_att) DECLSPEC_HIDDEN;
 
 /* Using additional shader constants (uniforms in GLSL / program environment
  * or local parameters in ARB) is costly:

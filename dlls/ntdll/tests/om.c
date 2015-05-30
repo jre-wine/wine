@@ -150,7 +150,7 @@ static void test_namespace_pipe(void)
 
     pRtlInitUnicodeString(&str, buffer3);
     InitializeObjectAttributes(&attr, &str, 0, 0, NULL);
-    status = pNtOpenFile(&h, GENERIC_READ, &attr, &iosb, FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_OPEN);
+    status = pNtOpenFile(&h, GENERIC_READ, &attr, &iosb, FILE_SHARE_READ|FILE_SHARE_WRITE, 0);
     ok(status == STATUS_OBJECT_PATH_NOT_FOUND ||
        status == STATUS_PIPE_NOT_AVAILABLE ||
        status == STATUS_OBJECT_NAME_INVALID || /* vista */
@@ -159,7 +159,7 @@ static void test_namespace_pipe(void)
 
     pRtlInitUnicodeString(&str, buffer4);
     InitializeObjectAttributes(&attr, &str, OBJ_CASE_INSENSITIVE, 0, NULL);
-    status = pNtOpenFile(&h, GENERIC_READ, &attr, &iosb, FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_OPEN);
+    status = pNtOpenFile(&h, GENERIC_READ, &attr, &iosb, FILE_SHARE_READ|FILE_SHARE_WRITE, 0);
     ok(status == STATUS_OBJECT_NAME_NOT_FOUND ||
        status == STATUS_OBJECT_NAME_INVALID, /* vista */
         "NtOpenFile should have failed with STATUS_OBJECT_NAME_NOT_FOUND got(%08x)\n", status);
@@ -657,8 +657,10 @@ static void test_symboliclink(void)
     pRtlFreeUnicodeString(&target);
 
     pRtlCreateUnicodeStringFromAsciiz(&str, "test-link\\NUL");
-    status = pNtOpenFile(&h, GENERIC_READ, &attr, &iosb, FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_OPEN);
-    todo_wine ok(status == STATUS_SUCCESS, "Failed to open NUL device(%08x)\n", status);
+    status = pNtOpenFile(&h, GENERIC_READ, &attr, &iosb, FILE_SHARE_READ|FILE_SHARE_WRITE, 0);
+    ok(status == STATUS_SUCCESS, "Failed to open NUL device(%08x)\n", status);
+    status = pNtOpenFile(&h, GENERIC_READ, &attr, &iosb, FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE);
+    ok(status == STATUS_SUCCESS, "Failed to open NUL device(%08x)\n", status);
     pRtlFreeUnicodeString(&str);
 
     pNtClose(h);
@@ -1032,6 +1034,97 @@ static void test_keyed_events(void)
     NtClose( event );
 }
 
+static void test_null_device(void)
+{
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK iosb;
+    UNICODE_STRING str;
+    NTSTATUS status;
+    DWORD num_bytes;
+    OVERLAPPED ov;
+    char buf[64];
+    HANDLE null;
+    BOOL ret;
+
+    memset(buf, 0xAA, sizeof(buf));
+    memset(&ov, 0, sizeof(ov));
+    ov.hEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
+
+    pRtlCreateUnicodeStringFromAsciiz(&str, "\\Device\\Null");
+    InitializeObjectAttributes(&attr, &str, OBJ_CASE_INSENSITIVE, 0, NULL);
+    status = pNtOpenSymbolicLinkObject(&null, SYMBOLIC_LINK_QUERY, &attr);
+    ok(status == STATUS_OBJECT_TYPE_MISMATCH,
+       "expected STATUS_OBJECT_TYPE_MISMATCH, got %08x\n", status);
+
+    status = pNtOpenFile(&null, GENERIC_READ | GENERIC_WRITE, &attr, &iosb,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE, 0);
+    ok(status == STATUS_SUCCESS,
+       "expected STATUS_SUCCESS, got %08x\n", status);
+
+    SetLastError(0xdeadbeef);
+    ret = WriteFile(null, buf, sizeof(buf), &num_bytes, NULL);
+    ok(!ret, "WriteFile unexpectedly succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = ReadFile(null, buf, sizeof(buf), &num_bytes, NULL);
+    ok(!ret, "ReadFile unexpectedly succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    num_bytes = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = WriteFile(null, buf, sizeof(buf), &num_bytes, &ov);
+    if (ret || GetLastError() != ERROR_IO_PENDING)
+    {
+        ok(ret, "WriteFile failed with error %u\n", GetLastError());
+    }
+    else
+    {
+        num_bytes = 0xdeadbeef;
+        ret = GetOverlappedResult(null, &ov, &num_bytes, TRUE);
+        ok(ret, "GetOverlappedResult failed with error %u\n", GetLastError());
+    }
+    ok(num_bytes == sizeof(buf), "expected num_bytes = %u, got %u\n",
+       (DWORD)sizeof(buf), num_bytes);
+
+    num_bytes = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    ret = ReadFile(null, buf, sizeof(buf), &num_bytes, &ov);
+    if (ret || GetLastError() != ERROR_IO_PENDING)
+    {
+        ok(!ret, "ReadFile unexpectedly succeeded\n");
+    }
+    else
+    {
+        num_bytes = 0xdeadbeef;
+        ret = GetOverlappedResult(null, &ov, &num_bytes, TRUE);
+        ok(!ret, "GetOverlappedResult unexpectedly succeeded\n");
+    }
+    ok(GetLastError() == ERROR_HANDLE_EOF,
+       "expected ERROR_HANDLE_EOF, got %u\n", GetLastError());
+
+    pNtClose(null);
+
+    null = CreateFileA("\\\\.\\Null", GENERIC_READ | GENERIC_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(null == INVALID_HANDLE_VALUE, "CreateFileA unexpectedly succeeded\n");
+    ok(GetLastError() == ERROR_FILE_NOT_FOUND,
+       "expected ERROR_FILE_NOT_FOUND, got %u\n", GetLastError());
+
+    null = CreateFileA("\\\\.\\Device\\Null", GENERIC_READ | GENERIC_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    ok(null == INVALID_HANDLE_VALUE, "CreateFileA unexpectedly succeeded\n");
+    ok(GetLastError() == ERROR_PATH_NOT_FOUND,
+       "expected ERROR_PATH_NOT_FOUND, got %u\n", GetLastError());
+
+    pRtlFreeUnicodeString(&str);
+    CloseHandle(ov.hEvent);
+}
+
 START_TEST(om)
 {
     HMODULE hntdll = GetModuleHandleA("ntdll.dll");
@@ -1081,4 +1174,5 @@ START_TEST(om)
     test_type_mismatch();
     test_event();
     test_keyed_events();
+    test_null_device();
 }

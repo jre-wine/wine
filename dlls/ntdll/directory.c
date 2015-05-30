@@ -47,6 +47,9 @@
 #ifdef HAVE_SYS_ATTR_H
 #include <sys/attr.h>
 #endif
+#ifdef HAVE_SYS_VNODE_H
+#include <sys/vnode.h>
+#endif
 #ifdef HAVE_SYS_IOCTL_H
 #include <sys/ioctl.h>
 #endif
@@ -980,43 +983,35 @@ static void add_fs_cache( dev_t dev, fsid_t fsid, BOOLEAN case_sensitive )
 }
 
 /***********************************************************************
- *           get_dir_case_sensitivity_attr
+ *           get_dir_case_sensitivity_attr_by_id
  *
- * Checks if the volume containing the specified directory is case
- * sensitive or not. Uses getattrlist(2).
+ * Checks if the volume with the specified device and file system IDs
+ * is case sensitive or not. Uses getattrlist(2).
  */
-static int get_dir_case_sensitivity_attr( const char *dir )
+static int get_dir_case_sensitivity_attr_by_id( dev_t dev, fsid_t fsid )
 {
     char *mntpoint = NULL;
     struct attrlist attr;
     struct vol_caps caps;
-    struct get_fsid get_fsid;
     struct fs_cache *entry;
 
-    /* First get the FS ID of the volume */
-    attr.bitmapcount = ATTR_BIT_MAP_COUNT;
-    attr.reserved = 0;
-    attr.commonattr = ATTR_CMN_DEVID|ATTR_CMN_FSID;
-    attr.volattr = attr.dirattr = attr.fileattr = attr.forkattr = 0;
-    get_fsid.size = 0;
-    if (getattrlist( dir, &attr, &get_fsid, sizeof(get_fsid), 0 ) != 0 ||
-        get_fsid.size != sizeof(get_fsid))
-        return -1;
     /* Try to look it up in the cache */
-    entry = look_up_fs_cache( get_fsid.dev );
-    if (entry && !memcmp( &entry->fsid, &get_fsid.fsid, sizeof(fsid_t) ))
+    entry = look_up_fs_cache( dev );
+    if (entry && !memcmp( &entry->fsid, &fsid, sizeof(fsid_t) ))
         /* Cache lookup succeeded */
         return entry->case_sensitive;
     /* Cache is stale at this point, we have to update it */
 
-    mntpoint = get_device_mount_point( get_fsid.dev );
+    mntpoint = get_device_mount_point( dev );
     /* Now look up the case-sensitivity */
-    attr.commonattr = 0;
+    attr.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attr.reserved = attr.commonattr = 0;
     attr.volattr = ATTR_VOL_INFO|ATTR_VOL_CAPABILITIES;
+    attr.dirattr = attr.fileattr = attr.forkattr = 0;
     if (getattrlist( mntpoint, &attr, &caps, sizeof(caps), 0 ) < 0)
     {
         RtlFreeHeap( GetProcessHeap(), 0, mntpoint );
-        add_fs_cache( get_fsid.dev, get_fsid.fsid, TRUE );
+        add_fs_cache( dev, fsid, TRUE );
         return TRUE;
     }
     RtlFreeHeap( GetProcessHeap(), 0, mntpoint );
@@ -1033,10 +1028,33 @@ static int get_dir_case_sensitivity_attr( const char *dir )
         else
             ret = TRUE;
         /* Update the cache */
-        add_fs_cache( get_fsid.dev, get_fsid.fsid, ret );
+        add_fs_cache( dev, fsid, ret );
         return ret;
     }
     return FALSE;
+}
+
+/***********************************************************************
+ *           get_dir_case_sensitivity_attr
+ *
+ * Checks if the volume containing the specified directory is case
+ * sensitive or not. Uses getattrlist(2).
+ */
+static int get_dir_case_sensitivity_attr( const char *dir )
+{
+    struct attrlist attr;
+    struct get_fsid get_fsid;
+
+    /* First get the FS ID of the volume */
+    attr.bitmapcount = ATTR_BIT_MAP_COUNT;
+    attr.reserved = 0;
+    attr.commonattr = ATTR_CMN_DEVID|ATTR_CMN_FSID;
+    attr.volattr = attr.dirattr = attr.fileattr = attr.forkattr = 0;
+    get_fsid.size = 0;
+    if (getattrlist( dir, &attr, &get_fsid, sizeof(get_fsid), 0 ) != 0 ||
+        get_fsid.size != sizeof(get_fsid))
+        return -1;
+    return get_dir_case_sensitivity_attr_by_id( get_fsid.dev, get_fsid.fsid );
 }
 #endif
 
@@ -2065,8 +2083,9 @@ static int read_directory_stat( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG
     int unix_len, ret, used_default;
     char *unix_name;
     struct stat st;
+    BOOL case_sensitive = get_dir_case_sensitivity(".");
 
-    TRACE("trying optimisation for file %s\n", debugstr_us( mask ));
+    TRACE("looking up file %s\n", debugstr_us( mask ));
 
     unix_len = ntdll_wcstoumbs( 0, mask->Buffer, mask->Length / sizeof(WCHAR), NULL, 0, NULL, NULL );
     if (!(unix_name = RtlAllocateHeap( GetProcessHeap(), 0, unix_len + 1)))
@@ -2091,7 +2110,7 @@ static int read_directory_stat( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG
         }
 
         ret = stat( unix_name, &st );
-        if (!ret)
+        if (case_sensitive && !ret)
         {
             union file_directory_info *info = append_entry( buffer, io, length, unix_name, NULL, NULL, class );
             if (info)
@@ -2100,6 +2119,19 @@ static int read_directory_stat( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG
                 if (io->u.Status != STATUS_BUFFER_OVERFLOW) lseek( fd, 1, SEEK_CUR );
             }
             else io->u.Status = STATUS_NO_MORE_FILES;
+        }
+        else if (!case_sensitive && ret && (errno == ENOENT || errno == ENOTDIR))
+        {
+            /* If the file does not exist, return that info.
+             * If the file DOES exist, return failure and fallback to the next
+             * read_directory_* function (we need to return the case-preserved
+             * filename stored on the filesystem). */
+            ret = 0;
+            io->u.Status = STATUS_NO_MORE_FILES;
+        }
+        else
+        {
+            ret = -1;
         }
     }
     else ret = -1;
@@ -2111,6 +2143,96 @@ done:
 
     return ret;
 }
+
+#ifdef HAVE_GETATTRLIST
+/***********************************************************************
+ *           read_directory_getattrlist
+ *
+ * Read a single file from a directory by determining whether the file
+ * identified by mask exists using getattrlist.
+ */
+static int read_directory_getattrlist( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG length,
+                                       BOOLEAN single_entry, const UNICODE_STRING *mask,
+                                       BOOLEAN restart_scan, FILE_INFORMATION_CLASS class )
+{
+    int unix_len, ret, used_default;
+    char *unix_name;
+    struct attrlist attrlist;
+#include "pshpack4.h"
+    struct
+    {
+        u_int32_t length;
+        struct attrreference name_reference;
+        dev_t devid;
+        fsid_t fsid;
+        fsobj_type_t type;
+        char name[NAME_MAX * 3 + 1];
+    } attrlist_buffer;
+#include "poppack.h"
+
+    TRACE("looking up file %s\n", debugstr_us( mask ));
+
+    unix_len = ntdll_wcstoumbs( 0, mask->Buffer, mask->Length / sizeof(WCHAR), NULL, 0, NULL, NULL );
+    if (!(unix_name = RtlAllocateHeap( GetProcessHeap(), 0, unix_len + 1)))
+    {
+        io->u.Status = STATUS_NO_MEMORY;
+        return 0;
+    }
+    ret = ntdll_wcstoumbs( 0, mask->Buffer, mask->Length / sizeof(WCHAR), unix_name, unix_len,
+                           NULL, &used_default );
+    if (ret > 0 && !used_default)
+    {
+        unix_name[ret] = 0;
+        if (restart_scan)
+        {
+            lseek( fd, 0, SEEK_SET );
+        }
+        else if (lseek( fd, 0, SEEK_CUR ) != 0)
+        {
+            io->u.Status = STATUS_NO_MORE_FILES;
+            ret = 0;
+            goto done;
+        }
+
+        memset( &attrlist, 0, sizeof(attrlist) );
+        attrlist.bitmapcount = ATTR_BIT_MAP_COUNT;
+        attrlist.commonattr = ATTR_CMN_NAME | ATTR_CMN_DEVID | ATTR_CMN_FSID | ATTR_CMN_OBJTYPE;
+        ret = getattrlist( unix_name, &attrlist, &attrlist_buffer, sizeof(attrlist_buffer), FSOPT_NOFOLLOW );
+        /* If unix_name named a symlink, the above may have succeeded even if the symlink is broken.
+           Check that with another call without FSOPT_NOFOLLOW.  We don't ask for any attributes. */
+        if (!ret && attrlist_buffer.type == VLNK)
+        {
+            u_int32_t dummy;
+            attrlist.commonattr = 0;
+            ret = getattrlist( unix_name, &attrlist, &dummy, sizeof(dummy), 0 );
+        }
+        if (!ret)
+        {
+            union file_directory_info *info = append_entry( buffer, io, length, attrlist_buffer.name, NULL, NULL, class );
+            if (info)
+            {
+                info->next = 0;
+                if (io->u.Status != STATUS_BUFFER_OVERFLOW) lseek( fd, 1, SEEK_CUR );
+            }
+            else io->u.Status = STATUS_NO_MORE_FILES;
+        }
+        else if ((errno == ENOENT || errno == ENOTDIR) &&
+                 !get_dir_case_sensitivity_attr_by_id( attrlist_buffer.devid, attrlist_buffer.fsid ))
+        {
+            io->u.Status = STATUS_NO_MORE_FILES;
+            ret = 0;
+        }
+    }
+    else ret = -1;
+
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, unix_name );
+
+    TRACE("returning %d\n", ret);
+
+    return ret;
+}
+#endif
 
 
 /******************************************************************************
@@ -2173,9 +2295,15 @@ NTSTATUS WINAPI NtQueryDirectoryFile( HANDLE handle, HANDLE event,
         if ((read_directory_vfat( fd, io, buffer, length, single_entry,
                                   mask, restart_scan, info_class )) != -1) goto done;
 #endif
-        if (!has_wildcard( mask ) &&
-            read_directory_stat( fd, io, buffer, length, single_entry,
+        if (!has_wildcard( mask ))
+        {
+#ifdef HAVE_GETATTRLIST
+            if (read_directory_getattrlist( fd, io, buffer, length, single_entry,
                                  mask, restart_scan, info_class ) != -1) goto done;
+#endif
+            if (read_directory_stat( fd, io, buffer, length, single_entry,
+                                 mask, restart_scan, info_class ) != -1) goto done;
+        }
 #ifdef USE_GETDENTS
         if ((read_directory_getdents( fd, io, buffer, length, single_entry,
                                       mask, restart_scan, info_class )) != -1) goto done;
@@ -2622,12 +2750,6 @@ static NTSTATUS get_dos_device( const WCHAR *name, UINT name_len, ANSI_STRING *u
         if (!strcmp( dev, "prn" ))
         {
             strcpy( dev, "lpt1" );
-            continue;
-        }
-        if (!strcmp( dev, "nul" ))
-        {
-            strcpy( unix_name, "/dev/null" );
-            dev = NULL; /* last try */
             continue;
         }
 
