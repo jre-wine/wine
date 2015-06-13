@@ -842,8 +842,8 @@
 @ stub -arch=win64 _SetImageBase
 @ stub -arch=win64 _SetThrowImageBase
 @ cdecl _Strftime(str long str ptr ptr) msvcr120._Strftime
-@ stub _W_Getdays
-@ stub _W_Getmonths
+@ cdecl _W_Getdays() msvcr120._W_Getdays
+@ cdecl _W_Getmonths() msvcr120._W_Getmonths
 @ stub _W_Gettnames
 @ stub _Wcsftime
 @ cdecl _XcptFilter(long ptr) msvcr120._XcptFilter
@@ -966,7 +966,7 @@
 @ extern __setlc_active msvcr120.__setlc_active
 @ cdecl __setusermatherr(ptr) msvcr120.__setusermatherr
 @ stub __strncnt
-@ stub __swprintf_l
+@ varargs __swprintf_l(ptr wstr ptr) msvcr120.__swprintf_l
 @ cdecl __sys_errlist() msvcr120.__sys_errlist
 @ cdecl __sys_nerr() msvcr120.__sys_nerr
 @ cdecl __threadhandle() msvcr120.__threadhandle

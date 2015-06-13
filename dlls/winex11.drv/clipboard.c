@@ -129,7 +129,6 @@ static int selectionAcquired = 0;              /* Contains the current selection
 static Window selectionWindow = None;          /* The top level X window which owns the selection */
 static Atom selectionCacheSrc = XA_PRIMARY;    /* The selection source from which the clipboard cache was filled */
 
-void CDECL X11DRV_EmptyClipboard(BOOL keepunowned);
 void CDECL X11DRV_EndClipboardUpdate(void);
 static HANDLE X11DRV_CLIPBOARD_ImportClipboardData(Display *d, Window w, Atom prop);
 static HANDLE X11DRV_CLIPBOARD_ImportEnhMetaFile(Display *d, Window w, Atom prop);
@@ -171,6 +170,7 @@ static BOOL X11DRV_CLIPBOARD_RenderSynthesizedDIB(Display *display);
 static BOOL X11DRV_CLIPBOARD_RenderSynthesizedBitmap(Display *display);
 static BOOL X11DRV_CLIPBOARD_RenderSynthesizedEnhMetaFile(Display *display);
 static void X11DRV_HandleSelectionRequest( HWND hWnd, XSelectionRequestEvent *event, BOOL bIsMultiple );
+static void empty_clipboard( BOOL keepunowned );
 
 /* Clipboard formats */
 
@@ -621,7 +621,7 @@ static BOOL X11DRV_CLIPBOARD_UpdateCache(void)
         }
         else if (wSeqNo < seqno)
         {
-            X11DRV_EmptyClipboard(TRUE);
+            empty_clipboard( TRUE );
 
             if (X11DRV_CLIPBOARD_QueryAvailableData(thread_init_display()) < 0)
             {
@@ -2862,7 +2862,7 @@ static void X11DRV_CLIPBOARD_ReleaseSelection(Display *display, Atom selType, Wi
 
         selectionWindow = None;
 
-        X11DRV_EmptyClipboard(FALSE);
+        empty_clipboard( FALSE );
 
         /* Reset the selection flags now that we are done */
         selectionAcquired = S_NOSELECTION;
@@ -2924,9 +2924,9 @@ static DWORD WINAPI selection_thread_proc(LPVOID p)
 }
 
 /**************************************************************************
- *		AcquireClipboard (X11DRV.@)
+ *		X11DRV_AcquireClipboard
  */
-int CDECL X11DRV_AcquireClipboard(HWND hWndClipWindow)
+void X11DRV_AcquireClipboard(HWND hWndClipWindow)
 {
     DWORD procid;
     HANDLE selectionThread;
@@ -2953,7 +2953,8 @@ int CDECL X11DRV_AcquireClipboard(HWND hWndClipWindow)
                 GetCurrentThreadId(),
                 GetWindowThreadProcessId(hWndClipWindow, NULL), hWndClipWindow);
 
-            return SendMessageW(hWndClipWindow, WM_X11DRV_ACQUIRE_SELECTION, 0, 0);
+            SendMessageW(hWndClipWindow, WM_X11DRV_ACQUIRE_SELECTION, 0, 0);
+            return;
         }
     }
 
@@ -2966,28 +2967,17 @@ int CDECL X11DRV_AcquireClipboard(HWND hWndClipWindow)
         HANDLE event = CreateEventW(NULL, FALSE, FALSE, NULL);
         selectionThread = CreateThread(NULL, 0, selection_thread_proc, event, 0, NULL);
 
-        if (!selectionThread)
+        if (selectionThread)
         {
-            WARN("Could not start clipboard thread\n");
-            CloseHandle(event);
-            return 0;
+            WaitForSingleObject(event, INFINITE);
+            CloseHandle(selectionThread);
         }
-
-        WaitForSingleObject(event, INFINITE);
         CloseHandle(event);
-        CloseHandle(selectionThread);
     }
-
-    return 1;
 }
 
 
-/**************************************************************************
- *	X11DRV_EmptyClipboard
- *
- * Empty cached clipboard data. 
- */
-void CDECL X11DRV_EmptyClipboard(BOOL keepunowned)
+static void empty_clipboard(BOOL keepunowned)
 {
     WINE_CLIPDATA *data, *next;
 
@@ -3003,7 +2993,16 @@ void CDECL X11DRV_EmptyClipboard(BOOL keepunowned)
     TRACE(" %d entries remaining in cache.\n", ClipDataCount);
 }
 
-
+/**************************************************************************
+ *	X11DRV_EmptyClipboard
+ *
+ * Empty cached clipboard data.
+ */
+void CDECL X11DRV_EmptyClipboard(void)
+{
+    X11DRV_AcquireClipboard( GetOpenClipboardWindow() );
+    empty_clipboard( FALSE );
+}
 
 /**************************************************************************
  *		X11DRV_SetClipboardData
@@ -3154,7 +3153,7 @@ void X11DRV_ResetSelectionOwner(void)
     WARN("Failed to find another thread to take selection ownership. Clipboard data will be lost.\n");
 
     X11DRV_CLIPBOARD_ReleaseOwnership();
-    X11DRV_EmptyClipboard(FALSE);
+    empty_clipboard( FALSE );
 }
 
 

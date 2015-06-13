@@ -1338,8 +1338,14 @@ HRESULT HTMLCurrentStyle_Create(HTMLElement *elem, IHTMLCurrentStyle **p)
     nsAString_Init(&nsempty_str, NULL);
     nsres = nsIDOMWindow_GetComputedStyle(nsview, (nsIDOMElement*)elem->nselem, &nsempty_str, &nsstyle);
     nsAString_Finish(&nsempty_str);
+    nsIDOMWindow_Release(nsview);
     if(NS_FAILED(nsres)) {
         ERR("GetComputedStyle failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    if(!nsstyle) {
+        ERR("GetComputedStyle returned NULL nsstyle\n");
         return E_FAIL;
     }
 

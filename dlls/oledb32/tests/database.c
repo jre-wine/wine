@@ -21,6 +21,7 @@
 
 #define COBJMACROS
 #define CONST_VTABLE
+#define DBINITCONSTANTS
 
 #include "windef.h"
 #include "winbase.h"
@@ -29,6 +30,7 @@
 #include "msdasc.h"
 #include "msdaguid.h"
 #include "initguid.h"
+#include "oledb.h"
 #include "oledberr.h"
 
 #include "wine/test.h"
@@ -36,6 +38,14 @@
 DEFINE_GUID(CSLID_MSDAER, 0xc8b522cf,0x5cf3,0x11ce,0xad,0xe5,0x00,0xaa,0x00,0x44,0x77,0x3d);
 
 static WCHAR initstring_default[] = {'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y',';',0};
+
+#define EXPECT_REF(obj,ref) _expect_ref((IUnknown*)obj, ref, __LINE__)
+static void _expect_ref(IUnknown* obj, ULONG ref, int line)
+{
+    ULONG rc = IUnknown_AddRef(obj);
+    IUnknown_Release(obj);
+    ok_(__FILE__,line)(rc-1 == ref, "expected refcount %d, got %d\n", ref, rc-1);
+}
 
 static void test_GetDataSource(WCHAR *initstring)
 {
@@ -48,11 +58,16 @@ static void test_GetDataSource(WCHAR *initstring)
     hr = CoCreateInstance(&CLSID_MSDAINITIALIZE, NULL, CLSCTX_INPROC_SERVER, &IID_IDataInitialize,(void**)&datainit);
     ok(hr == S_OK, "got %08x\n", hr);
 
+    EXPECT_REF(datainit, 1);
+
     /* a failure to create data source here may indicate provider is simply not present */
     hr = IDataInitialize_GetDataSource(datainit, NULL, CLSCTX_INPROC_SERVER, initstring, &IID_IDBInitialize, (IUnknown**)&dbinit);
     if(SUCCEEDED(hr))
     {
         IDBProperties *props = NULL;
+
+        EXPECT_REF(datainit, 1);
+        EXPECT_REF(dbinit, 1);
 
         hr = IDBInitialize_QueryInterface(dbinit, &IID_IDBProperties, (void**)&props);
         ok(hr == S_OK, "got %08x\n", hr);
@@ -62,6 +77,8 @@ static void test_GetDataSource(WCHAR *initstring)
             DBPROPINFOSET *pInfoset;
             OLECHAR *ary;
 
+            EXPECT_REF(dbinit, 2);
+            EXPECT_REF(props, 2);
             hr = IDBProperties_GetPropertyInfo(props, 0, NULL, &cnt, &pInfoset, &ary);
             todo_wine ok(hr == S_OK, "got %08x\n", hr);
             if(hr == S_OK)
@@ -73,14 +90,194 @@ static void test_GetDataSource(WCHAR *initstring)
                                              pInfoset->rgPropertyInfos[i].vtType);
                 }
 
+                CoTaskMemFree(pInfoset);
                 CoTaskMemFree(ary);
             }
 
             IDBProperties_Release(props);
         }
 
+        EXPECT_REF(dbinit, 1);
         IDBInitialize_Release(dbinit);
     }
+
+    EXPECT_REF(datainit, 1);
+    IDataInitialize_Release(datainit);
+}
+
+/* IDBProperties stub */
+static HRESULT WINAPI dbprops_QI(IDBProperties *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IDBProperties) || IsEqualIID(riid, &IID_IUnknown)) {
+        *obj = iface;
+        IDBProperties_AddRef(iface);
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI dbprops_AddRef(IDBProperties *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI dbprops_Release(IDBProperties *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI dbprops_GetProperties(IDBProperties *iface, ULONG cPropertyIDSets,
+    const DBPROPIDSET rgPropertyIDSets[], ULONG *pcPropertySets, DBPROPSET **prgPropertySets)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dbprops_GetPropertyInfo(IDBProperties *iface, ULONG cPropertyIDSets,
+    const DBPROPIDSET rgPropertyIDSets[], ULONG *pcPropertyInfoSets, DBPROPINFOSET **prgPropertyInfoSets,
+    OLECHAR **ppDescBuffer)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dbprops_SetProperties(IDBProperties *iface, ULONG set_count, DBPROPSET propsets[])
+{
+    ok(set_count == 1, "got %u\n", set_count);
+
+    ok(IsEqualIID(&propsets->guidPropertySet, &DBPROPSET_DBINIT), "set guid %s\n", wine_dbgstr_guid(&propsets->guidPropertySet));
+    ok(propsets->cProperties == 2, "got propcount %u\n", propsets->cProperties);
+
+if (propsets->cProperties == 2) {
+    ok(propsets->rgProperties[0].dwPropertyID == DBPROP_INIT_DATASOURCE, "got propid[0] %u\n", propsets->rgProperties[0].dwPropertyID);
+    ok(propsets->rgProperties[0].dwOptions == DBPROPOPTIONS_REQUIRED, "got options[0] %u\n", propsets->rgProperties[0].dwOptions);
+    ok(propsets->rgProperties[0].dwStatus == 0, "got status[0] %u\n", propsets->rgProperties[0].dwStatus);
+    ok(V_VT(&propsets->rgProperties[0].vValue) == VT_BSTR, "got vartype[0] %u\n", V_VT(&propsets->rgProperties[0].vValue));
+
+    ok(propsets->rgProperties[1].dwPropertyID == DBPROP_INIT_PROVIDERSTRING, "got propid[1] %u\n", propsets->rgProperties[1].dwPropertyID);
+    ok(propsets->rgProperties[1].dwOptions == DBPROPOPTIONS_REQUIRED, "got options[1] %u\n", propsets->rgProperties[1].dwOptions);
+    ok(propsets->rgProperties[1].dwStatus == 0, "got status[1] %u\n", propsets->rgProperties[1].dwStatus);
+    ok(V_VT(&propsets->rgProperties[1].vValue) == VT_BSTR, "got vartype[1] %u\n", V_VT(&propsets->rgProperties[1].vValue));
+}
+    return S_OK;
+}
+
+static const IDBPropertiesVtbl dbpropsvtbl = {
+    dbprops_QI,
+    dbprops_AddRef,
+    dbprops_Release,
+    dbprops_GetProperties,
+    dbprops_GetPropertyInfo,
+    dbprops_SetProperties
+};
+
+static IDBProperties dbprops = { &dbpropsvtbl };
+
+/* IPersist stub */
+static HRESULT WINAPI dbpersist_QI(IPersist *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IPersist) || IsEqualIID(riid, &IID_IUnknown)) {
+        *obj = iface;
+        IPersist_AddRef(iface);
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI dbpersist_AddRef(IPersist *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI dbpersist_Release(IPersist *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI dbpersist_GetClassID(IPersist *iface, CLSID *clsid)
+{
+    static const WCHAR msdasqlW[] = {'M','S','D','A','S','Q','L',0};
+    return CLSIDFromProgID(msdasqlW, clsid);
+}
+
+static const IPersistVtbl dbpersistvtbl = {
+    dbpersist_QI,
+    dbpersist_AddRef,
+    dbpersist_Release,
+    dbpersist_GetClassID
+};
+
+static IPersist dbpersist = { &dbpersistvtbl };
+
+/* IDBInitialize stub */
+static HRESULT WINAPI dbinit_QI(IDBInitialize *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IDBInitialize) || IsEqualIID(riid, &IID_IUnknown)) {
+        *obj = iface;
+        IDBInitialize_AddRef(iface);
+        return S_OK;
+    }
+    else if (IsEqualIID(riid, &IID_IPersist)) {
+        *obj = &dbpersist;
+        return S_OK;
+    }
+    else if (IsEqualIID(riid, &IID_IDBProperties)) {
+        *obj = &dbprops;
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI dbinit_AddRef(IDBInitialize *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI dbinit_Release(IDBInitialize *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI dbinit_Initialize(IDBInitialize *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI dbinit_Uninitialize(IDBInitialize *iface)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static const IDBInitializeVtbl dbinitvtbl = {
+    dbinit_QI,
+    dbinit_AddRef,
+    dbinit_Release,
+    dbinit_Initialize,
+    dbinit_Uninitialize
+};
+
+static IDBInitialize dbinittest = { &dbinitvtbl };
+
+static void test_GetDataSource2(WCHAR *initstring)
+{
+    IDataInitialize *datainit = NULL;
+    IDBInitialize *dbinit = NULL;
+    HRESULT hr;
+
+    hr = CoCreateInstance(&CLSID_MSDAINITIALIZE, NULL, CLSCTX_INPROC_SERVER, &IID_IDataInitialize,(void**)&datainit);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    dbinit = &dbinittest;
+    hr = IDataInitialize_GetDataSource(datainit, NULL, CLSCTX_INPROC_SERVER, initstring, &IID_IDBInitialize, (IUnknown**)&dbinit);
+    ok(hr == S_OK, "got %08x\n", hr);
 
     IDataInitialize_Release(datainit);
 }
@@ -92,6 +289,8 @@ static void test_database(void)
          'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y',';',
          'P','e','r','s','i','s','t',' ','S','e','c','u','r','i','t','y',' ','I','n','f','o','=','F','a','l','s','e',';',0};
     static WCHAR initstring_lower[] = {'d','a','t','a',' ','s','o','u','r','c','e','=','d','u','m','m','y',';',0};
+    static WCHAR customprop[] = {'d','a','t','a',' ','s','o','u','r','c','e','=','d','u','m','m','y',';',
+        'c','u','s','t','o','m','p','r','o','p','=','1','2','3','.','4',';',0};
     IDataInitialize *datainit = NULL;
     HRESULT hr;
 
@@ -107,6 +306,7 @@ static void test_database(void)
     test_GetDataSource(initstring_jet);
     test_GetDataSource(initstring_default);
     test_GetDataSource(initstring_lower);
+    test_GetDataSource2(customprop);
 }
 
 static void test_errorinfo(void)
@@ -185,7 +385,7 @@ static void test_initializationstring(void)
     static const WCHAR initstring_sqloledb[] = {'P','r','o','v','i','d','e','r','=','S','Q','L','O','L','E','D','B','.','1',';',
          'D','a','t','a',' ','S','o','u','r','c','e','=','d','u','m','m','y', 0};
     IDataInitialize *datainit = NULL;
-    IDBInitialize *dbinit = NULL;
+    IDBInitialize *dbinit;
     HRESULT hr;
     WCHAR *initstring = NULL;
 
@@ -193,10 +393,16 @@ static void test_initializationstring(void)
     ok(hr == S_OK, "got %08x\n", hr);
     if(SUCCEEDED(hr))
     {
+        EXPECT_REF(datainit, 1);
+
+        dbinit = NULL;
         hr = IDataInitialize_GetDataSource(datainit, NULL, CLSCTX_INPROC_SERVER, initstring_default,
                                                                 &IID_IDBInitialize, (IUnknown**)&dbinit);
         if(SUCCEEDED(hr))
         {
+            EXPECT_REF(datainit, 1);
+            EXPECT_REF(dbinit, 1);
+
             hr = IDataInitialize_GetInitializationString(datainit, (IUnknown*)dbinit, 0, &initstring);
             ok(hr == S_OK, "got %08x\n", hr);
             if(hr == S_OK)
@@ -209,6 +415,8 @@ static void test_initializationstring(void)
 
             IDBInitialize_Release(dbinit);
         }
+        else
+            ok(dbinit == NULL, "got %p\n", dbinit);
 
         IDataInitialize_Release(datainit);
     }
@@ -529,10 +737,8 @@ static void test_dslocator(void)
     {
         COMPATIBLE_LONG hwnd = 0;
 
-        /* Crashes under Window 7
-        hr = IDataSourceLocator_get_hWnd(dslocator, NULL);
-        ok(hr == E_INVALIDARG, "got %08x\n", hr);
-        */
+        if (0) /* Crashes under Window 7 */
+            hr = IDataSourceLocator_get_hWnd(dslocator, NULL);
 
         hr = IDataSourceLocator_get_hWnd(dslocator, &hwnd);
         ok(hr == S_OK, "got %08x\n", hr);
@@ -547,7 +753,7 @@ static void test_dslocator(void)
         hr = IDataSourceLocator_put_hWnd(dslocator, hwnd);
         ok(hr == S_OK, "got %08x\n", hr);
 
-        hwnd = 0xDEADBEEF;
+        hwnd = 0;
         hr = IDataSourceLocator_get_hWnd(dslocator, &hwnd);
         ok(hr == S_OK, "got %08x\n", hr);
         ok(hwnd == 0xDEADBEEF, "got %p\n", (HWND)hwnd);

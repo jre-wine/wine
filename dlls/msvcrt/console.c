@@ -113,13 +113,12 @@ static const struct {unsigned vk; unsigned ch[4][2];} enh_map[] = {
 };
 
 /*********************************************************************
- *		_getch (MSVCRT.@)
+ *		_getch_nolock (MSVCR80.@)
  */
-int CDECL _getch(void)
+int CDECL _getch_nolock(void)
 {
   int retval = MSVCRT_EOF;
 
-  LOCK_CONSOLE;
   if (__MSVCRT_console_buffer != MSVCRT_EOF)
   {
     retval = __MSVCRT_console_buffer;
@@ -179,8 +178,31 @@ int CDECL _getch(void)
     if (mode)
       SetConsoleMode(MSVCRT_console_in, mode);
   }
-  UNLOCK_CONSOLE;
   return retval;
+}
+
+/*********************************************************************
+ *		_getch (MSVCRT.@)
+ */
+int CDECL _getch(void)
+{
+    int ret;
+
+    LOCK_CONSOLE;
+    ret = _getch_nolock();
+    UNLOCK_CONSOLE;
+    return ret;
+}
+
+/*********************************************************************
+ *		_putch_nolock (MSVCR80.@)
+ */
+int CDECL _putch_nolock(int c)
+{
+  DWORD count;
+  if (WriteConsoleA(MSVCRT_console_out, &c, 1, &count, NULL) && count == 1)
+    return c;
+  return MSVCRT_EOF;
 }
 
 /*********************************************************************
@@ -188,12 +210,21 @@ int CDECL _getch(void)
  */
 int CDECL _putch(int c)
 {
-  int retval = MSVCRT_EOF;
-  DWORD count;
-  LOCK_CONSOLE;
-  if (WriteConsoleA(MSVCRT_console_out, &c, 1, &count, NULL) && count == 1)
-    retval = c;
-  UNLOCK_CONSOLE;
+    LOCK_CONSOLE;
+    c = _putch_nolock(c);
+    UNLOCK_CONSOLE;
+    return c;
+}
+
+/*********************************************************************
+ *		_getche_nolock (MSVCR80.@)
+ */
+int CDECL _getche_nolock(void)
+{
+  int retval;
+  retval = _getch_nolock();
+  if (retval != MSVCRT_EOF)
+    retval = _putch_nolock(retval);
   return retval;
 }
 
@@ -202,13 +233,12 @@ int CDECL _putch(int c)
  */
 int CDECL _getche(void)
 {
-  int retval;
-  LOCK_CONSOLE;
-  retval = _getch();
-  if (retval != MSVCRT_EOF)
-    retval = _putch(retval);
-  UNLOCK_CONSOLE;
-  return retval;
+    int ret;
+
+    LOCK_CONSOLE;
+    ret = _getche_nolock();
+    UNLOCK_CONSOLE;
+    return ret;
 }
 
 /*********************************************************************
@@ -250,16 +280,25 @@ char* CDECL _cgets(char* str)
 }
 
 /*********************************************************************
+ *		_ungetch_nolock (MSVCRT.@)
+ */
+int CDECL _ungetch_nolock(int c)
+{
+  int retval = MSVCRT_EOF;
+  if (c != MSVCRT_EOF && __MSVCRT_console_buffer == MSVCRT_EOF)
+    retval = __MSVCRT_console_buffer = c;
+  return retval;
+}
+
+/*********************************************************************
  *		_ungetch (MSVCRT.@)
  */
 int CDECL _ungetch(int c)
 {
-  int retval = MSVCRT_EOF;
-  LOCK_CONSOLE;
-  if (c != MSVCRT_EOF && __MSVCRT_console_buffer == MSVCRT_EOF)
-    retval = __MSVCRT_console_buffer = c;
-  UNLOCK_CONSOLE;
-  return retval;
+    LOCK_CONSOLE;
+    c = _ungetch_nolock(c);
+    UNLOCK_CONSOLE;
+    return c;
 }
 
 /*********************************************************************

@@ -1006,47 +1006,8 @@ void state_fogstartend(struct wined3d_context *context, const struct wined3d_sta
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     float fogstart, fogend;
-    union {
-        DWORD d;
-        float f;
-    } tmpvalue;
 
-    switch(context->fog_source) {
-        case FOGSOURCE_VS:
-            fogstart = 1.0f;
-            fogend = 0.0f;
-            break;
-
-        case FOGSOURCE_COORD:
-            fogstart = 255.0f;
-            fogend = 0.0f;
-            break;
-
-        case FOGSOURCE_FFP:
-            tmpvalue.d = state->render_states[WINED3D_RS_FOGSTART];
-            fogstart = tmpvalue.f;
-            tmpvalue.d = state->render_states[WINED3D_RS_FOGEND];
-            fogend = tmpvalue.f;
-            /* Special handling for fogstart == fogend. In d3d with vertex
-             * fog, everything is fogged. With table fog, everything with
-             * fog_coord < fog_start is unfogged, and fog_coord > fog_start
-             * is fogged. Windows drivers disagree when fog_coord == fog_start. */
-            if (state->render_states[WINED3D_RS_FOGTABLEMODE] == WINED3D_FOG_NONE
-                    && fogstart == fogend)
-            {
-                fogstart = -INFINITY;
-                fogend = 0.0f;
-            }
-            break;
-
-        default:
-            /* This should not happen.context->fog_source is set in wined3d, not the app.
-             * Still this is needed to make the compiler happy
-             */
-            ERR("Unexpected fog coordinate source\n");
-            fogstart = 0.0f;
-            fogend = 0.0f;
-    }
+    get_fog_start_end(context, state, &fogstart, &fogend);
 
     gl_info->gl_ops.gl.p_glFogf(GL_FOG_START, fogstart);
     checkGLcall("glFogf(GL_FOG_START, fogstart)");
@@ -1417,7 +1378,7 @@ static void state_normalize(struct wined3d_context *context, const struct wined3
     }
 }
 
-void state_psizemin_w(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void state_psizemin_w(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     float min, max;
 
@@ -1429,7 +1390,7 @@ void state_psizemin_w(struct wined3d_context *context, const struct wined3d_stat
         FIXME("WINED3D_RS_POINTSIZE_MAX value %.8e not supported on this OpenGL implementation.\n", max);
 }
 
-void state_psizemin_ext(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void state_psizemin_ext(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     float min, max;
@@ -1442,7 +1403,7 @@ void state_psizemin_ext(struct wined3d_context *context, const struct wined3d_st
     checkGLcall("glPointParameterfEXT(...)");
 }
 
-void state_psizemin_arb(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void state_psizemin_arb(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     float min, max;
@@ -1455,7 +1416,7 @@ void state_psizemin_arb(struct wined3d_context *context, const struct wined3d_st
     checkGLcall("glPointParameterfARB(...)");
 }
 
-void state_pscale(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
+static void state_pscale(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     float att[3];
@@ -4002,7 +3963,9 @@ static void load_numbered_arrays(struct wined3d_context *context,
         {
             if (context->numbered_array_mask & (1 << i))
                 unload_numbered_array(context, i);
-            if (state->shader[WINED3D_SHADER_TYPE_VERTEX]->reg_maps.input_registers & (1 << i))
+            if (!use_vs(state) && i == WINED3D_FFP_DIFFUSE)
+                GL_EXTCALL(glVertexAttrib4f(i, 1.0f, 1.0f, 1.0f, 1.0f));
+            else
                 GL_EXTCALL(glVertexAttrib4f(i, 0.0f, 0.0f, 0.0f, 0.0f));
             continue;
         }
@@ -4409,8 +4372,10 @@ static void load_vertex_data(struct wined3d_context *context,
 
 static void streamsrc(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    BOOL load_numbered = use_vs(state) && !context->use_immediate_mode_draw;
-    BOOL load_named = !use_vs(state) && !context->use_immediate_mode_draw;
+    BOOL load_numbered = context->d3d_info->ffp_generic_attributes
+            || (use_vs(state) && !context->use_immediate_mode_draw);
+    BOOL load_named = !context->d3d_info->ffp_generic_attributes
+            && !use_vs(state) && !context->use_immediate_mode_draw;
 
     if (isStateDirty(context, STATE_VDECL)) return;
     if (context->numberedArraysLoaded && !load_numbered)
@@ -5487,7 +5452,7 @@ static const struct StateEntryTemplate vp_ffp_states[] =
     { STATE_SAMPLER(7),                                   { 0,                                                  NULL                }, ARB_TEXTURE_NON_POWER_OF_TWO    },
     { STATE_SAMPLER(7),                                   { 0,                                                  NULL                }, WINED3D_GL_NORMALIZED_TEXRECT   },
     { STATE_SAMPLER(7),                                   { STATE_SAMPLER(7),                                   sampler_texmatrix   }, WINED3D_GL_EXT_NONE             },
-    { STATE_POINT_SIZE_ENABLE,                            { STATE_POINT_SIZE_ENABLE,                            state_nop           }, WINED3D_GL_EXT_NONE             },
+    { STATE_POINT_ENABLE,                                 { STATE_POINT_ENABLE,                                 state_nop           }, WINED3D_GL_EXT_NONE             },
     {0 /* Terminate */,                                   { 0,                                                  0                   }, WINED3D_GL_EXT_NONE             },
 };
 
@@ -5611,6 +5576,7 @@ static void ffp_free(struct wined3d_device *device) {}
 static void vp_ffp_get_caps(const struct wined3d_gl_info *gl_info, struct wined3d_vertex_caps *caps)
 {
     caps->xyzrhw = FALSE;
+    caps->ffp_generic_attributes = FALSE;
     caps->max_active_lights = gl_info->limits.lights;
     caps->max_vertex_blend_matrices = gl_info->limits.blends;
     caps->max_vertex_blend_matrix_index = 0;
@@ -5854,7 +5820,7 @@ static void validate_state_table(struct StateEntry *state_table)
         STATE_POINTSPRITECOORDORIGIN,
         STATE_BASEVERTEXINDEX,
         STATE_FRAMEBUFFER,
-        STATE_POINT_SIZE_ENABLE,
+        STATE_POINT_ENABLE,
         STATE_COLOR_KEY,
     };
     unsigned int i, current;

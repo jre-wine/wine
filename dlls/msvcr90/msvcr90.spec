@@ -290,7 +290,7 @@
 @ extern __setlc_active MSVCRT___setlc_active
 @ cdecl __setusermatherr(ptr) MSVCRT___setusermatherr
 @ stub __strncnt
-@ stub __swprintf_l
+@ varargs  __swprintf_l(ptr wstr ptr) MSVCRT___swprintf_l
 @ cdecl __sys_errlist()
 @ cdecl __sys_nerr()
 @ cdecl __threadhandle() kernel32.GetCurrentThread
@@ -541,9 +541,9 @@
 @ cdecl _get_wpgmptr(ptr)
 @ cdecl _getc_nolock(ptr) MSVCRT__fgetc_nolock
 @ cdecl _getch()
-@ stub _getch_nolock
+@ cdecl _getch_nolock()
 @ cdecl _getche()
-@ stub _getche_nolock
+@ cdecl _getche_nolock()
 @ cdecl _getcwd(str long) MSVCRT__getcwd
 @ cdecl _getdcwd(long str long) MSVCRT__getdcwd
 @ stub _getdcwd_nolock
@@ -884,7 +884,7 @@
 @ cdecl _purecall()
 @ cdecl _putc_nolock(long ptr) MSVCRT__fputc_nolock
 @ cdecl _putch(long)
-@ stub _putch_nolock
+@ cdecl _putch_nolock(long)
 @ cdecl _putenv(str)
 @ cdecl _putenv_s(str str)
 @ cdecl _putw(long ptr) MSVCRT__putw
@@ -1065,7 +1065,7 @@
 @ stub _umask_s
 @ cdecl _ungetc_nolock(long ptr) MSVCRT__ungetc_nolock
 @ cdecl _ungetch(long)
-@ stub _ungetch_nolock
+@ cdecl _ungetch_nolock(long)
 @ cdecl _ungetwc_nolock(long ptr) MSVCRT__ungetwc_nolock
 @ stub _ungetwch
 @ stub _ungetwch_nolock

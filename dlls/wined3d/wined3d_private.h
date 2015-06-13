@@ -305,15 +305,16 @@ enum wined3d_shader_resource_type
 #define WINED3D_SHADER_CONST_PS_I           0x00000040
 #define WINED3D_SHADER_CONST_PS_B           0x00000080
 #define WINED3D_SHADER_CONST_PS_BUMP_ENV    0x00000100
-#define WINED3D_SHADER_CONST_PS_Y_CORR      0x00000200
-#define WINED3D_SHADER_CONST_PS_NP2_FIXUP   0x00000400
-#define WINED3D_SHADER_CONST_FFP_MODELVIEW  0x00000800
-#define WINED3D_SHADER_CONST_FFP_PROJ       0x00001000
-#define WINED3D_SHADER_CONST_FFP_TEXMATRIX  0x00002000
-#define WINED3D_SHADER_CONST_FFP_MATERIAL   0x00004000
-#define WINED3D_SHADER_CONST_FFP_LIGHTS     0x00008000
-#define WINED3D_SHADER_CONST_FFP_PS         0x00010000
-#define WINED3D_SHADER_CONST_FFP_COLOR_KEY  0x00020000
+#define WINED3D_SHADER_CONST_PS_FOG         0x00000200
+#define WINED3D_SHADER_CONST_PS_Y_CORR      0x00000400
+#define WINED3D_SHADER_CONST_PS_NP2_FIXUP   0x00000800
+#define WINED3D_SHADER_CONST_FFP_MODELVIEW  0x00001000
+#define WINED3D_SHADER_CONST_FFP_PROJ       0x00002000
+#define WINED3D_SHADER_CONST_FFP_TEXMATRIX  0x00004000
+#define WINED3D_SHADER_CONST_FFP_MATERIAL   0x00008000
+#define WINED3D_SHADER_CONST_FFP_LIGHTS     0x00010000
+#define WINED3D_SHADER_CONST_FFP_PS         0x00020000
+#define WINED3D_SHADER_CONST_FFP_COLOR_KEY  0x00040000
 
 enum wined3d_shader_register_type
 {
@@ -640,7 +641,8 @@ struct wined3d_shader_reg_maps
     WORD usesifc        : 1;
     WORD usescall       : 1;
     WORD usespow        : 1;
-    WORD padding        : 3;
+    WORD point_size     : 1;
+    WORD padding        : 2;
 
     DWORD rt_mask; /* Used render targets, 32 max. */
 
@@ -784,7 +786,8 @@ enum wined3d_gl_resource_type
     WINED3D_GL_RES_TYPE_TEX_CUBE        = 3,
     WINED3D_GL_RES_TYPE_TEX_RECT        = 4,
     WINED3D_GL_RES_TYPE_BUFFER          = 5,
-    WINED3D_GL_RES_TYPE_COUNT           = 6,
+    WINED3D_GL_RES_TYPE_RB              = 6,
+    WINED3D_GL_RES_TYPE_COUNT           = 7,
 };
 
 enum vertexprocessing_mode {
@@ -834,6 +837,7 @@ struct ps_compile_args {
        D3D9 has a limit of 16 samplers and the fixup is superfluous
        in D3D10 (unconditional NP2 support mandatory). */
     WORD shadow; /* MAX_FRAGMENT_SAMPLERS, 16 */
+    BOOL pointsprite;
 };
 
 enum fog_src_type {
@@ -841,10 +845,14 @@ enum fog_src_type {
     VS_FOG_COORD    = 1
 };
 
-struct vs_compile_args {
-    BYTE                        fog_src;
-    BYTE                        clip_enabled;
-    WORD                        swizzle_map;   /* MAX_ATTRIBS, 16 */
+struct vs_compile_args
+{
+    BYTE fog_src;
+    BYTE clip_enabled : 1;
+    BYTE point_size : 1;
+    BYTE per_vertex_point_size : 1;
+    BYTE padding : 5;
+    WORD swizzle_map;   /* MAX_ATTRIBS, 16 */
 };
 
 struct wined3d_context;
@@ -871,6 +879,7 @@ struct wined3d_shader_backend_ops
     void (*shader_free_private)(struct wined3d_device *device);
     BOOL (*shader_allocate_context_data)(struct wined3d_context *context);
     void (*shader_free_context_data)(struct wined3d_context *context);
+    void (*shader_init_context_state)(struct wined3d_context *context);
     void (*shader_get_caps)(const struct wined3d_gl_info *gl_info, struct shader_caps *caps);
     BOOL (*shader_color_fixup_supported)(struct color_fixup_desc fixup);
     BOOL (*shader_has_ffp_proj_control)(void *shader_priv);
@@ -939,6 +948,7 @@ enum wined3d_ffp_idx
     WINED3D_FFP_TEXCOORD5 = 12,
     WINED3D_FFP_TEXCOORD6 = 13,
     WINED3D_FFP_TEXCOORD7 = 14,
+    WINED3D_FFP_ATTRIBS_COUNT = 15,
 };
 
 enum wined3d_ffp_emit_idx
@@ -1069,10 +1079,10 @@ DWORD get_flexible_vertex_size(DWORD d3dvtVertexType) DECLSPEC_HIDDEN;
 #define STATE_FRAMEBUFFER (STATE_BASEVERTEXINDEX + 1)
 #define STATE_IS_FRAMEBUFFER(a) ((a) == STATE_FRAMEBUFFER)
 
-#define STATE_POINT_SIZE_ENABLE (STATE_FRAMEBUFFER + 1)
-#define STATE_IS_POINT_SIZE_ENABLE(a) ((a) == STATE_POINT_SIZE_ENABLE)
+#define STATE_POINT_ENABLE (STATE_FRAMEBUFFER + 1)
+#define STATE_IS_POINT_ENABLE(a) ((a) == STATE_POINT_ENABLE)
 
-#define STATE_COLOR_KEY (STATE_POINT_SIZE_ENABLE + 1)
+#define STATE_COLOR_KEY (STATE_POINT_ENABLE + 1)
 #define STATE_IS_COLOR_KEY(a) ((a) == STATE_COLOR_KEY)
 
 #define STATE_HIGHEST (STATE_COLOR_KEY)
@@ -1292,6 +1302,7 @@ struct fragment_pipeline
 struct wined3d_vertex_caps
 {
     BOOL xyzrhw;
+    BOOL ffp_generic_attributes;
     DWORD max_active_lights;
     DWORD max_vertex_blend_matrices;
     DWORD max_vertex_blend_matrix_index;
@@ -1752,6 +1763,7 @@ struct wined3d_d3d_info
     struct wined3d_d3d_limits limits;
     struct wined3d_ffp_attrib_ops ffp_attrib_ops;
     BOOL xyzrhw;
+    BOOL ffp_generic_attributes;
     BOOL vs_clipping;
     BOOL shader_color_key;
     DWORD valid_rt_mask;
@@ -1887,7 +1899,7 @@ struct wined3d_ffp_vs_settings
     DWORD ortho_fog       : 1;
     DWORD padding         : 14;
 
-    BYTE texgen[MAX_TEXTURES];
+    DWORD texgen[MAX_TEXTURES];
 };
 
 struct wined3d_ffp_vs_desc
@@ -2146,7 +2158,7 @@ static inline ULONG wined3d_resource_decref(struct wined3d_resource *resource)
 
 void resource_cleanup(struct wined3d_resource *resource) DECLSPEC_HIDDEN;
 HRESULT resource_init(struct wined3d_resource *resource, struct wined3d_device *device,
-        enum wined3d_resource_type type, enum wined3d_gl_resource_type gl_type, const struct wined3d_format *format,
+        enum wined3d_resource_type type, const struct wined3d_format *format,
         enum wined3d_multisample_type multisample_type, UINT multisample_quality,
         DWORD usage, enum wined3d_pool pool, UINT width, UINT height, UINT depth, UINT size,
         void *parent, const struct wined3d_parent_ops *parent_ops,
@@ -2836,17 +2848,9 @@ void state_clipping(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void clipplane(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
-void state_psizemin_w(struct wined3d_context *context,
-        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
-void state_psizemin_ext(struct wined3d_context *context,
-        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
-void state_psizemin_arb(struct wined3d_context *context,
-        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void state_pointsprite_w(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 void state_pointsprite(struct wined3d_context *context,
-        const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
-void state_pscale(struct wined3d_context *context,
         const struct wined3d_state *state, DWORD state_id) DECLSPEC_HIDDEN;
 
 BOOL getColorBits(const struct wined3d_format *format,
@@ -3075,6 +3079,8 @@ void get_pointsize_minmax(const struct wined3d_context *context, const struct wi
         float *out_min, float *out_max) DECLSPEC_HIDDEN;
 void get_pointsize(const struct wined3d_context *context, const struct wined3d_state *state,
         float *out_pointsize, float *out_att) DECLSPEC_HIDDEN;
+void get_fog_start_end(const struct wined3d_context *context, const struct wined3d_state *state,
+        float *start, float *end) DECLSPEC_HIDDEN;
 
 /* Using additional shader constants (uniforms in GLSL / program environment
  * or local parameters in ARB) is costly:

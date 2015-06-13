@@ -1880,17 +1880,6 @@ static void check_clipboard_ownership(HWND *owner)
 
 
 /**************************************************************************
- *              AcquireClipboard (MACDRV.@)
- */
-int CDECL macdrv_AcquireClipboard(HWND hwnd)
-{
-    TRACE("hwnd %p\n", hwnd);
-    check_clipboard_ownership(NULL);
-    return 0;
-}
-
-
-/**************************************************************************
  *              CountClipboardFormats (MACDRV.@)
  */
 INT CDECL macdrv_CountClipboardFormats(void)
@@ -1952,9 +1941,10 @@ INT CDECL macdrv_CountClipboardFormats(void)
  *
  * Empty cached clipboard data.
  */
-void CDECL macdrv_EmptyClipboard(BOOL keepunowned)
+void CDECL macdrv_EmptyClipboard(void)
 {
-    TRACE("keepunowned %d\n", keepunowned);
+    TRACE("()\n");
+    check_clipboard_ownership(NULL);
     macdrv_clear_pasteboard();
 }
 

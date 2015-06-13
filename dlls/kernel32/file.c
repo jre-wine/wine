@@ -897,14 +897,9 @@ BOOL WINAPI GetFileInformationByHandleEx( HANDLE handle, FILE_INFO_BY_HANDLE_CLA
 
     switch (class)
     {
-    case FileRenameInfo:
-    case FileDispositionInfo:
-    case FileAllocationInfo:
-    case FileEndOfFileInfo:
     case FileStreamInfo:
     case FileCompressionInfo:
     case FileAttributeTagInfo:
-    case FileIoPriorityHintInfo:
     case FileRemoteProtocolInfo:
     case FileFullDirectoryInfo:
     case FileFullDirectoryRestartInfo:
@@ -936,6 +931,11 @@ BOOL WINAPI GetFileInformationByHandleEx( HANDLE handle, FILE_INFO_BY_HANDLE_CLA
                                        (class == FileIdBothDirectoryRestartInfo) );
         break;
 
+    case FileRenameInfo:
+    case FileDispositionInfo:
+    case FileAllocationInfo:
+    case FileIoPriorityHintInfo:
+    case FileEndOfFileInfo:
     default:
         SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
@@ -1040,11 +1040,60 @@ BOOL WINAPI SetEndOfFile( HANDLE hFile )
     return FALSE;
 }
 
+
+/***********************************************************************
+ *           SetFileInformationByHandle   (KERNEL32.@)
+ */
 BOOL WINAPI SetFileInformationByHandle( HANDLE file, FILE_INFO_BY_HANDLE_CLASS class, VOID *info, DWORD size )
 {
-    FIXME("%p %u %p %u - stub\n", file, class, info, size);
-    return FALSE;
+    NTSTATUS status;
+    IO_STATUS_BLOCK io;
+
+    TRACE( "%p %u %p %u\n", file, class, info, size );
+
+    switch (class)
+    {
+    case FileBasicInfo:
+    case FileNameInfo:
+    case FileRenameInfo:
+    case FileAllocationInfo:
+    case FileEndOfFileInfo:
+    case FileStreamInfo:
+    case FileIdBothDirectoryInfo:
+    case FileIdBothDirectoryRestartInfo:
+    case FileIoPriorityHintInfo:
+    case FileFullDirectoryInfo:
+    case FileFullDirectoryRestartInfo:
+    case FileStorageInfo:
+    case FileAlignmentInfo:
+    case FileIdInfo:
+    case FileIdExtdDirectoryInfo:
+    case FileIdExtdDirectoryRestartInfo:
+        FIXME( "%p, %u, %p, %u\n", file, class, info, size );
+        SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+        return FALSE;
+
+    case FileDispositionInfo:
+        status = NtSetInformationFile( file, &io, info, size, FileDispositionInformation );
+        break;
+
+    case FileStandardInfo:
+    case FileCompressionInfo:
+    case FileAttributeTagInfo:
+    case FileRemoteProtocolInfo:
+    default:
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError( status ) );
+        return FALSE;
+    }
+    return TRUE;
 }
+
 
 /***********************************************************************
  *           SetFilePointer   (KERNEL32.@)
