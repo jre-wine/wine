@@ -1,3 +1,10 @@
+wine-development (1.7.44-2) unstable; urgency=medium
+
+  * Fix wine32 symlink (closes: #787302).
+  * Move development-only patches into a separate directory.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 05 Jun 2015 00:53:12 +0000
+
 wine-development (1.7.44-1) unstable; urgency=medium
 
   * New upstream release 1.7.44, released May 29, 2015.

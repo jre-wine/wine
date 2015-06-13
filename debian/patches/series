@@ -1,14 +1,15 @@
 makefile.patch
 manpages.patch
 
-printer-resolution.patch
-
 disable/shlib-exit-calls.patch
 disable/downloading.patch
 
-winegcc.patch
+development/winegcc.patch
+development/winemenubuilder.patch
+
+printer-resolution.patch
+
 wineapploader.patch
-winemenubuilder.patch
 
 addons-path.patch
 

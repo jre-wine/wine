@@ -4,3 +4,9 @@ tools/config.*
 debian/control
 include/config.h.in
 programs/cscript/ihost.h
+
+# automatically generated opengl spec files
+include/wine/wgl*
+dlls/opengl32/opengl_ext.c
+dlls/opengl32/opengl_norm.c
+dlls/opengl32/opengl32.spec
