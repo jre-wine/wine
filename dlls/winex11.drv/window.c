@@ -573,7 +573,6 @@ static BOOL create_icon_pixmaps( HDC hdc, const ICONINFO *icon, Pixmap *icon_ret
 
 failed:
     if (color_pixmap) XFreePixmap( gdi_display, color_pixmap );
-    if (mask_pixmap) XFreePixmap( gdi_display, mask_pixmap );
     HeapFree( GetProcessHeap(), 0, bits.ptr );
     return FALSE;
 }
@@ -2593,7 +2592,8 @@ LRESULT CDECL X11DRV_WindowMessage( HWND hwnd, UINT msg, WPARAM wp, LPARAM lp )
     switch(msg)
     {
     case WM_X11DRV_ACQUIRE_SELECTION:
-        return X11DRV_AcquireClipboard( hwnd );
+        X11DRV_AcquireClipboard( hwnd );
+        return 0;
     case WM_X11DRV_SET_WIN_REGION:
         if ((data = get_win_data( hwnd )))
         {

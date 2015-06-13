@@ -3390,6 +3390,10 @@ static GLuint create_arb_blt_fragment_program(const struct wined3d_gl_info *gl_i
         "TEX R0.x, fragment.texcoord[0], texture[0], RECT;\n"
         "MOV result.depth.z, R0.x;\n"
         "END\n",
+        /* WINED3D_GL_RES_TYPE_BUFFER */
+        NULL,
+        /* WINED3D_GL_RES_TYPE_RB */
+        NULL,
     };
 
     static const char * const blt_fprograms_masked[WINED3D_GL_RES_TYPE_COUNT] =
@@ -3428,6 +3432,10 @@ static GLuint create_arb_blt_fragment_program(const struct wined3d_gl_info *gl_i
         "TEX R0.x, fragment.texcoord[0], texture[0], RECT;\n"
         "MOV result.depth.z, R0.x;\n"
         "END\n",
+        /* WINED3D_GL_RES_TYPE_BUFFER */
+        NULL,
+        /* WINED3D_GL_RES_TYPE_RB */
+        NULL,
     };
 
     fprogram = masked ? blt_fprograms_masked[tex_type] : blt_fprograms_full[tex_type];
@@ -5059,6 +5067,8 @@ static void shader_arb_free_context_data(struct wined3d_context *context)
         priv->last_context = NULL;
 }
 
+static void shader_arb_init_context_state(struct wined3d_context *context) {}
+
 static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct shader_caps *caps)
 {
     if (gl_info->supported[ARB_VERTEX_PROGRAM])
@@ -5738,6 +5748,7 @@ const struct wined3d_shader_backend_ops arb_program_shader_backend =
     shader_arb_free,
     shader_arb_allocate_context_data,
     shader_arb_free_context_data,
+    shader_arb_init_context_state,
     shader_arb_get_caps,
     shader_arb_color_fixup_supported,
     shader_arb_has_ffp_proj_control,

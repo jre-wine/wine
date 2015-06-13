@@ -424,6 +424,7 @@ AC_CHECK_HEADERS(\
 	lber.h \
 	ldap.h \
 	libproc.h \
+	libunwind.h \
 	link.h \
 	linux/cdrom.h \
 	linux/compiler.h \
@@ -1987,6 +1988,10 @@ then
    AC_SUBST([UNWINDFLAGS],[-fasynchronous-unwind-tables])
 else
    AC_DEFINE([__ASM_CFI(str)],[""])
+   if test "x$enable_win64" = "xyes"
+   then
+      WINE_WARNING([building 64-bit Wine without support for CFI directives; exception handling will not work properly.])
+   fi
 fi
 
 asm_func_code="$asm_func_header\" code \"$asm_func_trailer"
@@ -3099,6 +3104,7 @@ WINE_CONFIG_DLL(mssip32)
 WINE_CONFIG_DLL(mstask,,[clean])
 WINE_CONFIG_TEST(dlls/mstask/tests)
 WINE_CONFIG_DLL(msvcirt)
+WINE_CONFIG_TEST(dlls/msvcirt/tests)
 WINE_CONFIG_DLL(msvcm80)
 WINE_CONFIG_DLL(msvcm90)
 WINE_CONFIG_DLL(msvcp100)
@@ -3414,7 +3420,7 @@ WINE_CONFIG_DLL(xapofx1_1)
 WINE_CONFIG_DLL(xapofx1_3)
 WINE_CONFIG_DLL(xapofx1_4)
 WINE_CONFIG_DLL(xapofx1_5)
-WINE_CONFIG_DLL(xaudio2_7)
+WINE_CONFIG_DLL(xaudio2_7,,[clean])
 WINE_CONFIG_DLL(xinput1_1)
 WINE_CONFIG_DLL(xinput1_2)
 WINE_CONFIG_DLL(xinput1_3,,[implib],[xinput])

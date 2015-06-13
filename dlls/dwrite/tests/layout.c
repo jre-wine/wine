@@ -31,13 +31,152 @@
 static const WCHAR tahomaW[] = {'T','a','h','o','m','a',0};
 static const WCHAR enusW[] = {'e','n','-','u','s',0};
 
-#define EXPECT_REF(obj,ref) _expect_ref((IUnknown*)obj, ref, __LINE__)
-static void _expect_ref(IUnknown* obj, ULONG ref, int line)
+static DWRITE_SCRIPT_ANALYSIS g_sa;
+static DWRITE_SCRIPT_ANALYSIS g_control_sa;
+
+/* test IDWriteTextAnalysisSink */
+static HRESULT WINAPI analysissink_QueryInterface(IDWriteTextAnalysisSink *iface, REFIID riid, void **obj)
 {
-    ULONG rc = IUnknown_AddRef(obj);
-    IUnknown_Release(obj);
-    ok_(__FILE__,line)(rc-1 == ref, "expected refcount %d, got %d\n", ref, rc-1);
+    if (IsEqualIID(riid, &IID_IDWriteTextAnalysisSink) || IsEqualIID(riid, &IID_IUnknown))
+    {
+        *obj = iface;
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
 }
+
+static ULONG WINAPI analysissink_AddRef(IDWriteTextAnalysisSink *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI analysissink_Release(IDWriteTextAnalysisSink *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI analysissink_SetScriptAnalysis(IDWriteTextAnalysisSink *iface,
+    UINT32 position, UINT32 length, DWRITE_SCRIPT_ANALYSIS const* sa)
+{
+    g_sa = *sa;
+    return S_OK;
+}
+
+static HRESULT WINAPI analysissink_SetLineBreakpoints(IDWriteTextAnalysisSink *iface,
+    UINT32 position, UINT32 length, DWRITE_LINE_BREAKPOINT const* breakpoints)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI analysissink_SetBidiLevel(IDWriteTextAnalysisSink *iface,
+    UINT32 position, UINT32 length, UINT8 explicitLevel, UINT8 resolvedLevel)
+{
+    ok(0, "unexpected\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI analysissink_SetNumberSubstitution(IDWriteTextAnalysisSink *iface,
+    UINT32 position, UINT32 length, IDWriteNumberSubstitution* substitution)
+{
+    ok(0, "unexpected\n");
+    return E_NOTIMPL;
+}
+
+static IDWriteTextAnalysisSinkVtbl analysissinkvtbl = {
+    analysissink_QueryInterface,
+    analysissink_AddRef,
+    analysissink_Release,
+    analysissink_SetScriptAnalysis,
+    analysissink_SetLineBreakpoints,
+    analysissink_SetBidiLevel,
+    analysissink_SetNumberSubstitution
+};
+
+static IDWriteTextAnalysisSink analysissink = { &analysissinkvtbl };
+
+/* test IDWriteTextAnalysisSource */
+static HRESULT WINAPI analysissource_QueryInterface(IDWriteTextAnalysisSource *iface,
+    REFIID riid, void **obj)
+{
+    ok(0, "QueryInterface not expected\n");
+    return E_NOTIMPL;
+}
+
+static ULONG WINAPI analysissource_AddRef(IDWriteTextAnalysisSource *iface)
+{
+    ok(0, "AddRef not expected\n");
+    return 2;
+}
+
+static ULONG WINAPI analysissource_Release(IDWriteTextAnalysisSource *iface)
+{
+    ok(0, "Release not expected\n");
+    return 1;
+}
+
+static const WCHAR *g_source;
+
+static HRESULT WINAPI analysissource_GetTextAtPosition(IDWriteTextAnalysisSource *iface,
+    UINT32 position, WCHAR const** text, UINT32* text_len)
+{
+    if (position >= lstrlenW(g_source))
+    {
+        *text = NULL;
+        *text_len = 0;
+    }
+    else
+    {
+        *text = &g_source[position];
+        *text_len = lstrlenW(g_source) - position;
+    }
+
+    return S_OK;
+}
+
+static HRESULT WINAPI analysissource_GetTextBeforePosition(IDWriteTextAnalysisSource *iface,
+    UINT32 position, WCHAR const** text, UINT32* text_len)
+{
+    ok(0, "unexpected\n");
+    return E_NOTIMPL;
+}
+
+static DWRITE_READING_DIRECTION WINAPI analysissource_GetParagraphReadingDirection(
+    IDWriteTextAnalysisSource *iface)
+{
+    ok(0, "unexpected\n");
+    return DWRITE_READING_DIRECTION_RIGHT_TO_LEFT;
+}
+
+static HRESULT WINAPI analysissource_GetLocaleName(IDWriteTextAnalysisSource *iface,
+    UINT32 position, UINT32* text_len, WCHAR const** locale)
+{
+    *locale = NULL;
+    *text_len = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI analysissource_GetNumberSubstitution(IDWriteTextAnalysisSource *iface,
+    UINT32 position, UINT32* text_len, IDWriteNumberSubstitution **substitution)
+{
+    ok(0, "unexpected\n");
+    return E_NOTIMPL;
+}
+
+static IDWriteTextAnalysisSourceVtbl analysissourcevtbl = {
+    analysissource_QueryInterface,
+    analysissource_AddRef,
+    analysissource_Release,
+    analysissource_GetTextAtPosition,
+    analysissource_GetTextBeforePosition,
+    analysissource_GetParagraphReadingDirection,
+    analysissource_GetLocaleName,
+    analysissource_GetNumberSubstitution
+};
+
+static IDWriteTextAnalysisSource analysissource = { &analysissourcevtbl };
 
 static IDWriteFactory *create_factory(void)
 {
@@ -45,6 +184,35 @@ static IDWriteFactory *create_factory(void)
     HRESULT hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED, &IID_IDWriteFactory, (IUnknown**)&factory);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     return factory;
+}
+
+/* obvious limitation is that only last script data is returned, so this
+   helper is suitable for single script strings only */
+static void get_script_analysis(const WCHAR *str, UINT32 len, DWRITE_SCRIPT_ANALYSIS *sa)
+{
+    IDWriteTextAnalyzer *analyzer;
+    IDWriteFactory *factory;
+    HRESULT hr;
+
+    g_source = str;
+
+    factory = create_factory();
+    hr = IDWriteFactory_CreateTextAnalyzer(factory, &analyzer);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextAnalyzer_AnalyzeScript(analyzer, &analysissource, 0, len, &analysissink);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    *sa = g_sa;
+    IDWriteFactory_Release(factory);
+}
+
+#define EXPECT_REF(obj,ref) _expect_ref((IUnknown*)obj, ref, __LINE__)
+static void _expect_ref(IUnknown* obj, ULONG ref, int line)
+{
+    ULONG rc = IUnknown_AddRef(obj);
+    IUnknown_Release(obj);
+    ok_(__FILE__,line)(rc-1 == ref, "expected refcount %d, got %d\n", ref, rc-1);
 }
 
 enum drawcall_kind {
@@ -63,6 +231,7 @@ static const char *get_draw_kind_name(enum drawcall_kind kind)
 
 struct drawcall_entry {
     enum drawcall_kind kind;
+    WCHAR string[10]; /* only meaningful for DrawGlyphRun() */
 };
 
 struct drawcall_sequence
@@ -158,6 +327,18 @@ static void ok_sequence_(struct drawcall_sequence **seq, int sequence_index,
                 ok_(file, line) (0, "%s: call %s was expected, but got call %s instead\n",
                     context, get_draw_kind_name(expected->kind), get_draw_kind_name(actual->kind));
         }
+        else if (expected->kind == DRAW_GLYPHRUN) {
+            int cmp = lstrcmpW(expected->string, actual->string);
+            if (cmp != 0 && todo) {
+                failcount++;
+            todo_wine
+                ok_(file, line) (0, "%s: glyphrun string %s was expected, but got %s instead\n",
+                    context, wine_dbgstr_w(expected->string), wine_dbgstr_w(actual->string));
+            }
+            else
+                ok_(file, line) (cmp == 0, "%s: glyphrun string %s was expected, but got %s instead\n",
+                    context, wine_dbgstr_w(expected->string), wine_dbgstr_w(actual->string));
+        }
         expected++;
         actual++;
     }
@@ -246,11 +427,35 @@ static HRESULT WINAPI testrenderer_DrawGlyphRun(IDWriteTextRenderer *iface,
     FLOAT baselineOriginX,
     FLOAT baselineOriginY,
     DWRITE_MEASURING_MODE mode,
-    DWRITE_GLYPH_RUN const *glyph_run,
-    DWRITE_GLYPH_RUN_DESCRIPTION const *run_descr,
+    DWRITE_GLYPH_RUN const *run,
+    DWRITE_GLYPH_RUN_DESCRIPTION const *descr,
     IUnknown *drawing_effect)
 {
     struct drawcall_entry entry;
+    DWRITE_SCRIPT_ANALYSIS sa;
+
+    ok(descr->stringLength < sizeof(entry.string)/sizeof(WCHAR), "string is too long\n");
+    if (descr->stringLength && descr->stringLength < sizeof(entry.string)/sizeof(WCHAR)) {
+        memcpy(entry.string, descr->string, descr->stringLength*sizeof(WCHAR));
+        entry.string[descr->stringLength] = 0;
+    }
+    else
+        entry.string[0] = 0;
+
+    /* see what's reported for control codes runs */
+    get_script_analysis(descr->string, descr->stringLength, &sa);
+    if (sa.script == g_control_sa.script) {
+        /* glyphs are not reported at all for control code runs */
+        ok(run->glyphCount == 0, "got %u\n", run->glyphCount);
+        ok(run->glyphAdvances != NULL, "advances array %p\n", run->glyphAdvances);
+        ok(run->glyphOffsets != NULL, "offsets array %p\n", run->glyphOffsets);
+        ok(run->fontFace != NULL, "got %p\n", run->fontFace);
+        /* text positions are still valid */
+        ok(descr->string != NULL, "got string %p\n", descr->string);
+        ok(descr->stringLength > 0, "got string length %u\n", descr->stringLength);
+        ok(descr->clusterMap != NULL, "clustermap %p\n", descr->clusterMap);
+    }
+
     entry.kind = DRAW_GLYPHRUN;
     add_call(sequences, RENDERER_ID, &entry);
     return S_OK;
@@ -311,6 +516,69 @@ static const IDWriteTextRendererVtbl testrenderervtbl = {
 };
 
 static IDWriteTextRenderer testrenderer = { &testrenderervtbl };
+
+/* test IDWriteInlineObject */
+static HRESULT WINAPI testinlineobj_QI(IDWriteInlineObject *iface, REFIID riid, void **obj)
+{
+    if (IsEqualIID(riid, &IID_IDWriteInlineObject) || IsEqualIID(riid, &IID_IUnknown)) {
+        *obj = iface;
+        IDWriteInlineObject_AddRef(iface);
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI testinlineobj_AddRef(IDWriteInlineObject *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI testinlineobj_Release(IDWriteInlineObject *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI testinlineobj_Draw(IDWriteInlineObject *iface,
+    void* client_drawingontext, IDWriteTextRenderer* renderer,
+    FLOAT originX, FLOAT originY, BOOL is_sideways, BOOL is_rtl, IUnknown *drawing_effect)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testinlineobj_GetMetrics(IDWriteInlineObject *iface, DWRITE_INLINE_OBJECT_METRICS *metrics)
+{
+    metrics->width = 123.0;
+    return 0x8faecafe;
+}
+
+static HRESULT WINAPI testinlineobj_GetOverhangMetrics(IDWriteInlineObject *iface, DWRITE_OVERHANG_METRICS *overhangs)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI testinlineobj_GetBreakConditions(IDWriteInlineObject *iface, DWRITE_BREAK_CONDITION *before,
+    DWRITE_BREAK_CONDITION *after)
+{
+    *before = *after = DWRITE_BREAK_CONDITION_MUST_BREAK;
+    return 0x8feacafe;
+}
+
+static IDWriteInlineObjectVtbl testinlineobjvtbl = {
+    testinlineobj_QI,
+    testinlineobj_AddRef,
+    testinlineobj_Release,
+    testinlineobj_Draw,
+    testinlineobj_GetMetrics,
+    testinlineobj_GetOverhangMetrics,
+    testinlineobj_GetBreakConditions
+};
+
+static IDWriteInlineObject testinlineobj = { &testinlineobjvtbl };
+static IDWriteInlineObject testinlineobj2 = { &testinlineobjvtbl };
 
 static void test_CreateTextLayout(void)
 {
@@ -653,10 +921,20 @@ static void test_fontweight(void)
     weight = IDWriteTextFormat_GetFontWeight(fmt2);
     ok(weight == DWRITE_FONT_WEIGHT_BOLD, "got %u\n", weight);
 
+    range.startPosition = range.length = 0;
+    hr = IDWriteTextLayout_GetFontWeight(layout, 0, &weight, &range);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(range.startPosition == 0 && range.length == ~0u, "got %u, %u\n", range.startPosition, range.length);
+
     range.startPosition = 0;
     range.length = 6;
     hr = IDWriteTextLayout_SetFontWeight(layout, DWRITE_FONT_WEIGHT_NORMAL, range);
     ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    range.startPosition = range.length = 0;
+    hr = IDWriteTextLayout_GetFontWeight(layout, 0, &weight, &range);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(range.startPosition == 0 && range.length == 6, "got %u, %u\n", range.startPosition, range.length);
 
     /* IDWriteTextFormat methods output doesn't reflect layout changes */
     weight = IDWriteTextFormat_GetFontWeight(fmt2);
@@ -855,10 +1133,10 @@ static void test_SetInlineObject(void)
 /* drawing calls sequence doesn't depend on run order, instead all runs are
    drawn first, inline objects next and then underline/strikes */
 static const struct drawcall_entry draw_seq[] = {
-    { DRAW_GLYPHRUN },
-    { DRAW_GLYPHRUN },
-    { DRAW_GLYPHRUN },
-    { DRAW_GLYPHRUN },
+    { DRAW_GLYPHRUN, {'s',0}     },
+    { DRAW_GLYPHRUN, {'r','i',0} },
+    { DRAW_GLYPHRUN, {'n',0}     },
+    { DRAW_GLYPHRUN, {'g',0}     },
     { DRAW_INLINE },
     { DRAW_UNDERLINE },
     { DRAW_STRIKETHROUGH },
@@ -866,18 +1144,44 @@ static const struct drawcall_entry draw_seq[] = {
 };
 
 static const struct drawcall_entry draw_seq2[] = {
+    { DRAW_GLYPHRUN, {'s',0} },
+    { DRAW_GLYPHRUN, {'t',0} },
+    { DRAW_GLYPHRUN, {'r',0} },
+    { DRAW_GLYPHRUN, {'i',0} },
+    { DRAW_GLYPHRUN, {'n',0} },
+    { DRAW_GLYPHRUN, {'g',0} },
+    { DRAW_LAST_KIND }
+};
+
+static const struct drawcall_entry draw_seq3[] = {
     { DRAW_GLYPHRUN },
-    { DRAW_GLYPHRUN },
-    { DRAW_GLYPHRUN },
-    { DRAW_GLYPHRUN },
-    { DRAW_GLYPHRUN },
-    { DRAW_GLYPHRUN },
+    { DRAW_GLYPHRUN, {'a','b',0} },
+    { DRAW_LAST_KIND }
+};
+
+static const struct drawcall_entry draw_seq4[] = {
+    { DRAW_GLYPHRUN, {'s','t','r',0} },
+    { DRAW_GLYPHRUN, {'i','n','g',0} },
+    { DRAW_STRIKETHROUGH },
+    { DRAW_LAST_KIND }
+};
+
+static const struct drawcall_entry draw_seq5[] = {
+    { DRAW_GLYPHRUN, {'s','t',0} },
+    { DRAW_GLYPHRUN, {'r','i',0} },
+    { DRAW_GLYPHRUN, {'n','g',0} },
+    { DRAW_STRIKETHROUGH },
+    { DRAW_LAST_KIND }
+};
+
+static const struct drawcall_entry draw_seq6[] = {
     { DRAW_LAST_KIND }
 };
 
 static void test_Draw(void)
 {
     static const WCHAR strW[] = {'s','t','r','i','n','g',0};
+    static const WCHAR str2W[] = {0x202a,0x202c,'a','b',0};
     static const WCHAR ruW[] = {'r','u',0};
 
     IDWriteInlineObject *inlineobj;
@@ -893,7 +1197,7 @@ static void test_Draw(void)
         DWRITE_FONT_STRETCH_NORMAL, 10.0, ruW, &format);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
-    hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 6, format, 100.0, 100.0, 1.0, NULL, FALSE, &layout);
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 6, format, 100.0, 100.0, &layout);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     hr = IDWriteFactory_CreateEllipsisTrimmingSign(factory, format, &inlineobj);
@@ -921,7 +1225,6 @@ static void test_Draw(void)
 
     flush_sequence(sequences, RENDERER_ID);
     hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
-todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_seq, "draw test", TRUE);
     IDWriteTextLayout_Release(layout);
@@ -933,8 +1236,58 @@ todo_wine
     hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_seq2, "draw test 2", TRUE);
-
     IDWriteTextLayout_Release(layout);
+
+    /* string with control characters */
+    hr = IDWriteFactory_CreateTextLayout(factory, str2W, 4, format, 500.0, 100.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    flush_sequence(sequences, RENDERER_ID);
+    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok_sequence(sequences, RENDERER_ID, draw_seq3, "draw test 3", TRUE);
+    IDWriteTextLayout_Release(layout);
+
+    /* strikethrough splits ranges from renderer point of view, but doesn't break
+       shaping */
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 6, format, 500.0, 100.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    flush_sequence(sequences, RENDERER_ID);
+
+    range.startPosition = 0;
+    range.length = 3;
+    hr = IDWriteTextLayout_SetStrikethrough(layout, TRUE, range);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok_sequence(sequences, RENDERER_ID, draw_seq4, "draw test 4", FALSE);
+    IDWriteTextLayout_Release(layout);
+
+    /* strikethrough somewhere in the middle */
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 6, format, 500.0, 100.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    flush_sequence(sequences, RENDERER_ID);
+
+    range.startPosition = 2;
+    range.length = 2;
+    hr = IDWriteTextLayout_SetStrikethrough(layout, TRUE, range);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok_sequence(sequences, RENDERER_ID, draw_seq5, "draw test 5", FALSE);
+    IDWriteTextLayout_Release(layout);
+
+    /* empty string */
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 0, format, 500.0, 100.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    flush_sequence(sequences, RENDERER_ID);
+    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok_sequence(sequences, RENDERER_ID, draw_seq6, "draw test 6", FALSE);
+    IDWriteTextLayout_Release(layout);
+
     IDWriteTextFormat_Release(format);
     IDWriteFactory_Release(factory);
 }
@@ -1110,7 +1463,6 @@ todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(count == 3, "got %u\n", count);
 
-todo_wine
     ok(metrics[0].width == 0.0, "got %.2f\n", metrics[0].width);
     ok(metrics[0].length == 1, "got %d\n", metrics[0].length);
     ok(metrics[0].canWrapLineAfter == 0, "got %d\n", metrics[0].canWrapLineAfter);
@@ -1119,7 +1471,6 @@ todo_wine
     ok(metrics[0].isSoftHyphen == 0, "got %d\n", metrics[0].isSoftHyphen);
     ok(metrics[0].isRightToLeft == 0, "got %d\n", metrics[0].isRightToLeft);
 
-todo_wine
     ok(metrics[1].width == 0.0, "got %.2f\n", metrics[1].width);
     ok(metrics[1].length == 1, "got %d\n", metrics[1].length);
     ok(metrics[1].canWrapLineAfter == 0, "got %d\n", metrics[1].canWrapLineAfter);
@@ -1137,6 +1488,73 @@ todo_wine
     ok(metrics[2].isSoftHyphen == 0, "got %d\n", metrics[2].isSoftHyphen);
     ok(metrics[2].isRightToLeft == 0, "got %d\n", metrics[2].isRightToLeft);
 
+    IDWriteTextLayout_Release(layout);
+
+    /* single inline object that fails to report its metrics */
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    range.startPosition = 0;
+    range.length = 4;
+    hr = IDWriteTextLayout_SetInlineObject(layout, &testinlineobj, range);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    count = 0;
+    memset(metrics, 0, sizeof(metrics));
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, metrics, 3, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(count == 1, "got %u\n", count);
+
+    /* object sets a width to 123.0, but returns failure from GetMetrics() */
+    ok(metrics[0].width == 0.0, "got %.2f\n", metrics[0].width);
+    ok(metrics[0].length == 4, "got %d\n", metrics[0].length);
+todo_wine
+    ok(metrics[0].canWrapLineAfter == 1, "got %d\n", metrics[0].canWrapLineAfter);
+    ok(metrics[0].isWhitespace == 0, "got %d\n", metrics[0].isWhitespace);
+    ok(metrics[0].isNewline == 0, "got %d\n", metrics[0].isNewline);
+    ok(metrics[0].isSoftHyphen == 0, "got %d\n", metrics[0].isSoftHyphen);
+    ok(metrics[0].isRightToLeft == 0, "got %d\n", metrics[0].isRightToLeft);
+
+    /* now set two inline object for [0,1] and [2,3], both fail to report break conditions */
+    range.startPosition = 2;
+    range.length = 2;
+    hr = IDWriteTextLayout_SetInlineObject(layout, &testinlineobj2, range);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    count = 0;
+    memset(metrics, 0, sizeof(metrics));
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, metrics, 3, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(count == 2, "got %u\n", count);
+
+    ok(metrics[0].width == 0.0, "got %.2f\n", metrics[0].width);
+    ok(metrics[0].length == 2, "got %d\n", metrics[0].length);
+    ok(metrics[0].canWrapLineAfter == 0, "got %d\n", metrics[0].canWrapLineAfter);
+    ok(metrics[0].isWhitespace == 0, "got %d\n", metrics[0].isWhitespace);
+    ok(metrics[0].isNewline == 0, "got %d\n", metrics[0].isNewline);
+    ok(metrics[0].isSoftHyphen == 0, "got %d\n", metrics[0].isSoftHyphen);
+    ok(metrics[0].isRightToLeft == 0, "got %d\n", metrics[0].isRightToLeft);
+
+    ok(metrics[1].width == 0.0, "got %.2f\n", metrics[1].width);
+    ok(metrics[1].length == 2, "got %d\n", metrics[1].length);
+todo_wine
+    ok(metrics[1].canWrapLineAfter == 1, "got %d\n", metrics[1].canWrapLineAfter);
+    ok(metrics[1].isWhitespace == 0, "got %d\n", metrics[1].isWhitespace);
+    ok(metrics[1].isNewline == 0, "got %d\n", metrics[1].isNewline);
+    ok(metrics[1].isSoftHyphen == 0, "got %d\n", metrics[1].isSoftHyphen);
+    ok(metrics[1].isRightToLeft == 0, "got %d\n", metrics[1].isRightToLeft);
+
+    IDWriteTextLayout_Release(layout);
+
+    /* zero length string */
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 0, format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    count = 1;
+    memset(metrics, 0, sizeof(metrics));
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, metrics, 3, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(count == 0, "got %u\n", count);
     IDWriteTextLayout_Release(layout);
 
     IDWriteInlineObject_Release(trimm);
@@ -1420,14 +1838,431 @@ static void test_DetermineMinWidth(void)
     IDWriteTextFormat_Release(format);
 }
 
+static void test_SetFontSize(void)
+{
+    static const WCHAR strW[] = {'a','b','c','d',0};
+    IDWriteTextFormat *format;
+    IDWriteTextLayout *layout;
+    IDWriteFactory *factory;
+    DWRITE_TEXT_RANGE r;
+    FLOAT size;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* negative/zero size */
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetFontSize(layout, -15.0, r);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextLayout_SetFontSize(layout, 0.0, r);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    r.startPosition = 1;
+    r.length = 0;
+    size = 0.0;
+    hr = IDWriteTextLayout_GetFontSize(layout, 0, &size, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 0 && r.length == ~0u, "got %u, %u\n", r.startPosition, r.length);
+    ok(size == 10.0, "got %.2f\n", size);
+
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetFontSize(layout, 15.0, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* zero length range */
+    r.startPosition = 1;
+    r.length = 0;
+    hr = IDWriteTextLayout_SetFontSize(layout, 123.0, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    size = 0.0;
+    hr = IDWriteTextLayout_GetFontSize(layout, 1, &size, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(size == 15.0, "got %.2f\n", size);
+
+    r.startPosition = 0;
+    r.length = 4;
+    hr = IDWriteTextLayout_SetFontSize(layout, 15.0, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    size = 0.0;
+    hr = IDWriteTextLayout_GetFontSize(layout, 1, &size, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(size == 15.0, "got %.2f\n", size);
+
+    size = 0.0;
+    hr = IDWriteTextLayout_GetFontSize(layout, 0, &size, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 0 && r.length == 4, "got %u, %u\n", r.startPosition, r.length);
+    ok(size == 15.0, "got %.2f\n", size);
+
+    size = 15.0;
+    r.startPosition = r.length = 0;
+    hr = IDWriteTextLayout_GetFontSize(layout, 20, &size, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 4 && r.length == ~0u-4, "got %u, %u\n", r.startPosition, r.length);
+    ok(size == 10.0, "got %.2f\n", size);
+
+    r.startPosition = 100;
+    r.length = 4;
+    hr = IDWriteTextLayout_SetFontSize(layout, 25.0, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    size = 15.0;
+    r.startPosition = r.length = 0;
+    hr = IDWriteTextLayout_GetFontSize(layout, 100, &size, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 100 && r.length == 4, "got %u, %u\n", r.startPosition, r.length);
+    ok(size == 25.0, "got %.2f\n", size);
+
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+}
+
+static void test_SetFontFamilyName(void)
+{
+    static const WCHAR taHomaW[] = {'T','a','H','o','m','a',0};
+    static const WCHAR arialW[] = {'A','r','i','a','l',0};
+    static const WCHAR strW[] = {'a','b','c','d',0};
+    IDWriteTextFormat *format;
+    IDWriteTextLayout *layout;
+    IDWriteFactory *factory;
+    DWRITE_TEXT_RANGE r;
+    WCHAR nameW[50];
+    HRESULT hr;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* NULL name */
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetFontFamilyName(layout, NULL, r);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    r.startPosition = 1;
+    r.length = 0;
+    nameW[0] = 0;
+    hr = IDWriteTextLayout_GetFontFamilyName(layout, 1, nameW, sizeof(nameW)/sizeof(WCHAR), &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 0 && r.length == ~0u, "got %u, %u\n", r.startPosition, r.length);
+
+    /* set name only different in casing */
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetFontFamilyName(layout, taHomaW, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* zero length range */
+    r.startPosition = 1;
+    r.length = 0;
+    hr = IDWriteTextLayout_SetFontFamilyName(layout, arialW, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    r.startPosition = 0;
+    r.length = 0;
+    nameW[0] = 0;
+    hr = IDWriteTextLayout_GetFontFamilyName(layout, 1, nameW, sizeof(nameW)/sizeof(WCHAR), &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!lstrcmpW(nameW, taHomaW), "got %s\n", wine_dbgstr_w(nameW));
+    ok(r.startPosition == 1 && r.length == 1, "got %u, %u\n", r.startPosition, r.length);
+
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetFontFamilyName(layout, arialW, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    r.startPosition = 1;
+    r.length = 0;
+    hr = IDWriteTextLayout_GetFontFamilyName(layout, 1, nameW, sizeof(nameW)/sizeof(WCHAR), &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 1 && r.length == 1, "got %u, %u\n", r.startPosition, r.length);
+
+    r.startPosition = 0;
+    r.length = 4;
+    hr = IDWriteTextLayout_SetFontFamilyName(layout, arialW, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    nameW[0] = 0;
+    hr = IDWriteTextLayout_GetFontFamilyName(layout, 1, nameW, sizeof(nameW)/sizeof(WCHAR), &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 0 && r.length == 4, "got %u, %u\n", r.startPosition, r.length);
+    ok(!lstrcmpW(nameW, arialW), "got name %s\n", wine_dbgstr_w(nameW));
+
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+}
+
+static void test_SetFontStyle(void)
+{
+    static const WCHAR strW[] = {'a','b','c','d',0};
+    IDWriteTextFormat *format;
+    IDWriteTextLayout *layout;
+    IDWriteFactory *factory;
+    DWRITE_FONT_STYLE style;
+    DWRITE_TEXT_RANGE r;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* invalid style value */
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetFontStyle(layout, DWRITE_FONT_STYLE_ITALIC+1, r);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    r.startPosition = 1;
+    r.length = 0;
+    hr = IDWriteTextLayout_GetFontStyle(layout, 0, &style, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 0 && r.length == ~0u, "got %u, %u\n", r.startPosition, r.length);
+    ok(style == DWRITE_FONT_STYLE_NORMAL, "got %d\n", style);
+
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetFontStyle(layout, DWRITE_FONT_STYLE_ITALIC, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* zero length range */
+    r.startPosition = 1;
+    r.length = 0;
+    hr = IDWriteTextLayout_SetFontStyle(layout, DWRITE_FONT_STYLE_NORMAL, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    style = DWRITE_FONT_STYLE_NORMAL;
+    hr = IDWriteTextLayout_GetFontStyle(layout, 1, &style, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(style == DWRITE_FONT_STYLE_ITALIC, "got %d\n", style);
+
+    r.startPosition = 0;
+    r.length = 4;
+    hr = IDWriteTextLayout_SetFontStyle(layout, DWRITE_FONT_STYLE_OBLIQUE, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    style = DWRITE_FONT_STYLE_ITALIC;
+    hr = IDWriteTextLayout_GetFontStyle(layout, 1, &style, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(style == DWRITE_FONT_STYLE_OBLIQUE, "got %d\n", style);
+
+    style = DWRITE_FONT_STYLE_ITALIC;
+    hr = IDWriteTextLayout_GetFontStyle(layout, 0, &style, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 0 && r.length == 4, "got %u, %u\n", r.startPosition, r.length);
+    ok(style == DWRITE_FONT_STYLE_OBLIQUE, "got %d\n", style);
+
+    style = DWRITE_FONT_STYLE_ITALIC;
+    r.startPosition = r.length = 0;
+    hr = IDWriteTextLayout_GetFontStyle(layout, 20, &style, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 4 && r.length == ~0u-4, "got %u, %u\n", r.startPosition, r.length);
+    ok(style == DWRITE_FONT_STYLE_NORMAL, "got %d\n", style);
+
+    r.startPosition = 100;
+    r.length = 4;
+    hr = IDWriteTextLayout_SetFontStyle(layout, DWRITE_FONT_STYLE_OBLIQUE, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    style = DWRITE_FONT_STYLE_NORMAL;
+    r.startPosition = r.length = 0;
+    hr = IDWriteTextLayout_GetFontStyle(layout, 100, &style, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 100 && r.length == 4, "got %u, %u\n", r.startPosition, r.length);
+    ok(style == DWRITE_FONT_STYLE_OBLIQUE, "got %d\n", style);
+
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+}
+
+static void test_SetFontStretch(void)
+{
+    static const WCHAR strW[] = {'a','b','c','d',0};
+    DWRITE_FONT_STRETCH stretch;
+    IDWriteTextFormat *format;
+    IDWriteTextLayout *layout;
+    IDWriteFactory *factory;
+    DWRITE_TEXT_RANGE r;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* invalid stretch value */
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetFontStretch(layout, DWRITE_FONT_STRETCH_ULTRA_EXPANDED+1, r);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    r.startPosition = 1;
+    r.length = 0;
+    stretch = DWRITE_FONT_STRETCH_UNDEFINED;
+    hr = IDWriteTextLayout_GetFontStretch(layout, 0, &stretch, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 0 && r.length == ~0u, "got %u, %u\n", r.startPosition, r.length);
+    ok(stretch == DWRITE_FONT_STRETCH_NORMAL, "got %d\n", stretch);
+
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetFontStretch(layout, DWRITE_FONT_STRETCH_CONDENSED, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* zero length range */
+    r.startPosition = 1;
+    r.length = 0;
+    hr = IDWriteTextLayout_SetFontStretch(layout, DWRITE_FONT_STRETCH_NORMAL, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    stretch = DWRITE_FONT_STRETCH_UNDEFINED;
+    hr = IDWriteTextLayout_GetFontStretch(layout, 1, &stretch, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(stretch == DWRITE_FONT_STRETCH_CONDENSED, "got %d\n", stretch);
+
+    r.startPosition = 0;
+    r.length = 4;
+    hr = IDWriteTextLayout_SetFontStretch(layout, DWRITE_FONT_STRETCH_EXPANDED, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    stretch = DWRITE_FONT_STRETCH_UNDEFINED;
+    hr = IDWriteTextLayout_GetFontStretch(layout, 1, &stretch, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(stretch == DWRITE_FONT_STRETCH_EXPANDED, "got %d\n", stretch);
+
+    stretch = DWRITE_FONT_STRETCH_UNDEFINED;
+    hr = IDWriteTextLayout_GetFontStretch(layout, 0, &stretch, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 0 && r.length == 4, "got %u, %u\n", r.startPosition, r.length);
+    ok(stretch == DWRITE_FONT_STRETCH_EXPANDED, "got %d\n", stretch);
+
+    stretch = DWRITE_FONT_STRETCH_UNDEFINED;
+    r.startPosition = r.length = 0;
+    hr = IDWriteTextLayout_GetFontStretch(layout, 20, &stretch, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 4 && r.length == ~0u-4, "got %u, %u\n", r.startPosition, r.length);
+    ok(stretch == DWRITE_FONT_STRETCH_NORMAL, "got %d\n", stretch);
+
+    r.startPosition = 100;
+    r.length = 4;
+    hr = IDWriteTextLayout_SetFontStretch(layout, DWRITE_FONT_STRETCH_EXPANDED, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    stretch = DWRITE_FONT_STRETCH_UNDEFINED;
+    r.startPosition = r.length = 0;
+    hr = IDWriteTextLayout_GetFontStretch(layout, 100, &stretch, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 100 && r.length == 4, "got %u, %u\n", r.startPosition, r.length);
+    ok(stretch == DWRITE_FONT_STRETCH_EXPANDED, "got %d\n", stretch);
+
+    /* trying to set undefined value */
+    r.startPosition = 0;
+    r.length = 2;
+    hr = IDWriteTextLayout_SetFontStretch(layout, DWRITE_FONT_STRETCH_UNDEFINED, r);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+}
+
+static void test_SetStrikethrough(void)
+{
+    static const WCHAR strW[] = {'a','b','c','d',0};
+    IDWriteTextFormat *format;
+    IDWriteTextLayout *layout;
+    IDWriteFactory *factory;
+    DWRITE_TEXT_RANGE r;
+    BOOL value;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 4, format, 1000.0, 1000.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    r.startPosition = 1;
+    r.length = 0;
+    value = TRUE;
+    hr = IDWriteTextLayout_GetStrikethrough(layout, 0, &value, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 0 && r.length == ~0u, "got %u, %u\n", r.startPosition, r.length);
+    ok(value == FALSE, "got %d\n", value);
+
+    r.startPosition = 1;
+    r.length = 1;
+    hr = IDWriteTextLayout_SetStrikethrough(layout, TRUE, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    value = FALSE;
+    hr = IDWriteTextLayout_GetStrikethrough(layout, 1, &value, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(value == TRUE, "got %d\n", value);
+    ok(r.startPosition == 1 && r.length == 1, "got %u, %u\n", r.startPosition, r.length);
+
+    value = TRUE;
+    r.startPosition = r.length = 0;
+    hr = IDWriteTextLayout_GetStrikethrough(layout, 20, &value, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 2 && r.length == ~0u-2, "got %u, %u\n", r.startPosition, r.length);
+    ok(value == FALSE, "got %d\n", value);
+
+    r.startPosition = 100;
+    r.length = 4;
+    hr = IDWriteTextLayout_SetStrikethrough(layout, TRUE, r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    value = FALSE;
+    r.startPosition = r.length = 0;
+    hr = IDWriteTextLayout_GetStrikethrough(layout, 100, &value, &r);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(r.startPosition == 100 && r.length == 4, "got %u, %u\n", r.startPosition, r.length);
+    ok(value == TRUE, "got %d\n", value);
+
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+}
+
 START_TEST(layout)
 {
+    static const WCHAR ctrlstrW[] = {0x202a,0};
     IDWriteFactory *factory;
 
     if (!(factory = create_factory())) {
         win_skip("failed to create factory\n");
         return;
     }
+
+    /* actual script ids are not fixed */
+    get_script_analysis(ctrlstrW, 1, &g_control_sa);
 
     init_call_sequences(sequences, NUM_CALL_SEQUENCES);
     init_call_sequences(expected_seq, 1);
@@ -1447,6 +2282,11 @@ START_TEST(layout)
     test_SetVerticalGlyphOrientation();
     test_fallback();
     test_DetermineMinWidth();
+    test_SetFontSize();
+    test_SetFontFamilyName();
+    test_SetFontStyle();
+    test_SetFontStretch();
+    test_SetStrikethrough();
 
     IDWriteFactory_Release(factory);
 }

@@ -544,27 +544,24 @@ static void test_GetText(void)
   hres = ITextDocument_Range(txtDoc, 0, 4, &range);
   ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = ITextRange_GetText(range, &bstr);
-todo_wine {
   ok(hres == S_OK, "got 0x%08x\n", hres);
   ok(!lstrcmpW(bstr, bufW1), "got wrong text: %s\n", wine_dbgstr_w(bstr));
-}
+
   SysFreeString(bstr);
   ITextRange_Release(range);
 
   hres = ITextDocument_Range(txtDoc, 4, 0, &range);
   ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = ITextRange_GetText(range, &bstr);
-todo_wine {
   ok(hres == S_OK, "got 0x%08x\n", hres);
   ok(!lstrcmpW(bstr, bufW1), "got wrong text: %s\n", wine_dbgstr_w(bstr));
-}
+
   SysFreeString(bstr);
   ITextRange_Release(range);
 
   hres = ITextDocument_Range(txtDoc, 1, 1, &range);
   ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = ITextRange_GetText(range, &bstr);
-todo_wine
   ok(hres == S_OK, "got 0x%08x\n", hres);
   ok(!bstr, "got wrong text: %s\n", wine_dbgstr_w(bstr));
   if (!is64bit)
@@ -577,37 +574,33 @@ todo_wine
   hres = ITextDocument_Range(txtDoc, 8, 12, &range);
   ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = ITextRange_GetText(range, &bstr);
-todo_wine {
   ok(hres == S_OK, "got 0x%08x\n", hres);
   ok(!lstrcmpW(bstr, bufW3), "got wrong text: %s\n", wine_dbgstr_w(bstr));
-}
+
   SysFreeString(bstr);
   ITextRange_Release(range);
 
   hres = ITextDocument_Range(txtDoc, 8, 13, &range);
   ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = ITextRange_GetText(range, &bstr);
-todo_wine {
   ok(hres == S_OK, "got 0x%08x\n", hres);
   ok(!lstrcmpW(bstr, bufW2), "got wrong text: %s\n", wine_dbgstr_w(bstr));
-}
+
   SysFreeString(bstr);
   ITextRange_Release(range);
 
   hres = ITextDocument_Range(txtDoc, 12, 13, &range);
   ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = ITextRange_GetText(range, &bstr);
-todo_wine {
   ok(hres == S_OK, "got 0x%08x\n", hres);
   ok(!lstrcmpW(bstr, bufW5), "got wrong text: %s\n", wine_dbgstr_w(bstr));
-}
+
   SysFreeString(bstr);
   ITextRange_Release(range);
 
   hres = ITextDocument_Range(txtDoc, 0, -1, &range);
   ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = ITextRange_GetText(range, &bstr);
-todo_wine
   ok(hres == S_OK, "got 0x%08x\n", hres);
   ok(!bstr, "got wrong text: %s\n", wine_dbgstr_w(bstr));
   ITextRange_Release(range);
@@ -615,10 +608,9 @@ todo_wine
   hres = ITextDocument_Range(txtDoc, -1, 9, &range);
   ok(hres == S_OK, "got 0x%08x\n", hres);
   hres = ITextRange_GetText(range, &bstr);
-todo_wine {
   ok(hres == S_OK, "got 0x%08x\n", hres);
   ok(!lstrcmpW(bstr, bufW6), "got wrong text: %s\n", wine_dbgstr_w(bstr));
-}
+
   SysFreeString(bstr);
 
   release_interfaces(&w, &reOle, &txtDoc, NULL);
@@ -1481,7 +1473,7 @@ static void test_ITextSelection_Collapse(void)
   ITextSelection_Release(txtSel);
 }
 
-static void test_IOleClientSite_QueryInterface(void)
+static void test_GetClientSite(void)
 {
   HWND w;
   IRichEditOle *reOle = NULL, *reOle1 = NULL;
@@ -1495,17 +1487,20 @@ static void test_IOleClientSite_QueryInterface(void)
   create_interfaces(&w, &reOle, &txtDoc, NULL);
   hres = IRichEditOle_GetClientSite(reOle, &clientSite);
   ok(hres == S_OK, "IRichEditOle_QueryInterface: 0x%08x\n", hres);
-  refcount1 = get_refcount((IUnknown *)clientSite);
-  todo_wine ok(refcount1 == 1, "got wrong ref count: %d\n", refcount1);
+  EXPECT_REF(clientSite, 1);
 
   hres = IOleClientSite_QueryInterface(clientSite, &IID_IRichEditOle, (void **)&reOle1);
   ok(hres == E_NOINTERFACE, "IOleClientSite_QueryInterface: %x\n", hres);
 
+  hres = IRichEditOle_GetClientSite(reOle, &clientSite1);
+  ok(hres == S_OK, "got 0x%08x\n", hres);
+  ok(clientSite != clientSite1, "got %p, %p\n", clientSite, clientSite1);
+  IOleClientSite_Release(clientSite1);
+
   hres = IOleClientSite_QueryInterface(clientSite, &IID_IOleClientSite, (void **)&clientSite1);
   ok(hres == S_OK, "IOleClientSite_QueryInterface: 0x%08x\n", hres);
   ok(clientSite == clientSite1, "Should not return a new pointer.\n");
-  refcount1 = get_refcount((IUnknown *)clientSite);
-  todo_wine ok(refcount1 == 2, "got wrong ref count: %d\n", refcount1);
+  EXPECT_REF(clientSite, 2);
 
   /* IOleWindow interface */
   hres = IOleClientSite_QueryInterface(clientSite, &IID_IOleWindow, (void **)&oleWin);
@@ -2621,6 +2616,7 @@ static void test_SetText(void)
   str = SysAllocString(textW);
   hr = ITextRange_SetText(range, str);
   ok(hr == S_OK, "got 0x%08x\n", hr);
+  SysFreeString(str);
 
   value = 1;
   hr = ITextRange_GetStart(range, &value);
@@ -3077,6 +3073,184 @@ static void test_SetFont(void)
   ITextSelection_Release(selection);
 }
 
+static void test_InsertObject(void)
+{
+  IRichEditOle *reole = NULL;
+  ITextDocument *doc = NULL;
+  IOleClientSite *clientsite;
+  REOBJECT reo;
+  HRESULT hr;
+  HWND hwnd;
+
+  create_interfaces(&hwnd, &reole, &doc, NULL);
+
+  hr = IRichEditOle_InsertObject(reole, NULL);
+  ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+  hr = IRichEditOle_GetClientSite(reole, &clientsite);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+
+  reo.cbStruct = sizeof(reo);
+  reo.cp = 0;
+  memset(&reo.clsid, 0, sizeof(reo.clsid));
+  reo.poleobj = NULL;
+  reo.pstg = NULL;
+  reo.polesite = clientsite;
+  reo.sizel.cx = 10;
+  reo.sizel.cy = 10;
+  reo.dvaspect = DVASPECT_CONTENT;
+  reo.dwFlags = 0;
+  reo.dwUser = 0;
+
+  hr = IRichEditOle_InsertObject(reole, &reo);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+
+  IOleClientSite_Release(clientsite);
+  release_interfaces(&hwnd, &reole, &doc, NULL);
+}
+
+static void test_GetStoryLength(void)
+{
+  static const CHAR test_text1[] = "TestSomeText";
+  IRichEditOle *reOle = NULL;
+  ITextDocument *doc = NULL;
+  ITextSelection *selection;
+  ITextRange *range;
+  LONG value;
+  HRESULT hr;
+  HWND hwnd;
+
+  create_interfaces(&hwnd, &reOle, &doc, &selection);
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text1);
+  SendMessageA(hwnd, EM_SETSEL, 1, 2);
+
+  hr = ITextDocument_Range(doc, 0, 4, &range);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+
+  hr = ITextRange_GetStoryLength(range, NULL);
+  ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+  value = 0;
+  hr = ITextRange_GetStoryLength(range, &value);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+  ok(value == 13, "got %d\n", value);
+
+  hr = ITextSelection_GetStoryLength(selection, NULL);
+  ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+  value = 0;
+  hr = ITextSelection_GetStoryLength(selection, &value);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+  ok(value == 13, "got %d\n", value);
+
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"");
+
+  value = 0;
+  hr = ITextRange_GetStoryLength(range, &value);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+  ok(value == 1, "got %d\n", value);
+
+  value = 0;
+  hr = ITextSelection_GetStoryLength(selection, &value);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+  ok(value == 1, "got %d\n", value);
+
+  release_interfaces(&hwnd, &reOle, &doc, NULL);
+
+  hr = ITextRange_GetStoryLength(range, NULL);
+  ok(hr == CO_E_RELEASED, "got 0x%08x\n", hr);
+
+  value = 100;
+  hr = ITextRange_GetStoryLength(range, &value);
+  ok(hr == CO_E_RELEASED, "got 0x%08x\n", hr);
+  ok(value == 100, "got %d\n", value);
+
+  hr = ITextSelection_GetStoryLength(selection, NULL);
+  ok(hr == CO_E_RELEASED, "got 0x%08x\n", hr);
+
+  value = 100;
+  hr = ITextSelection_GetStoryLength(selection, &value);
+  ok(hr == CO_E_RELEASED, "got 0x%08x\n", hr);
+  ok(value == 100, "got %d\n", value);
+
+  ITextSelection_Release(selection);
+  ITextRange_Release(range);
+}
+
+static void test_ITextSelection_GetDuplicate(void)
+{
+  static const CHAR test_text1[] = "TestSomeText";
+  IRichEditOle *reOle = NULL;
+  ITextDocument *doc = NULL;
+  ITextSelection *selection, *sel2;
+  ITextRange *range, *range2;
+  ITextFont *font;
+  LONG value;
+  HRESULT hr;
+  HWND hwnd;
+
+  create_interfaces(&hwnd, &reOle, &doc, &selection);
+  SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)test_text1);
+  SendMessageA(hwnd, EM_SETSEL, 1, 2);
+
+  hr = ITextSelection_GetDuplicate(selection, NULL);
+  ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+  EXPECT_REF(selection, 2);
+
+  hr = ITextSelection_GetDuplicate(selection, &range);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+
+  hr = ITextSelection_GetDuplicate(selection, &range2);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+  ok(range != range2, "got %p, %p\n", range, range2);
+
+  EXPECT_REF(selection, 2);
+  EXPECT_REF(range, 1);
+  EXPECT_REF(range2, 1);
+
+  ITextRange_Release(range2);
+
+  value = 0;
+  hr = ITextRange_GetStart(range, &value);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+  ok(value == 1, "got %d\n", value);
+
+  value = 0;
+  hr = ITextRange_GetEnd(range, &value);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+  ok(value == 2, "got %d\n", value);
+
+  SendMessageA(hwnd, EM_SETSEL, 2, 3);
+
+  value = 0;
+  hr = ITextRange_GetStart(range, &value);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+  ok(value == 1, "got %d\n", value);
+
+  value = 0;
+  hr = ITextRange_GetEnd(range, &value);
+  ok(hr == S_OK, "got 0x%08x\n", hr);
+  ok(value == 2, "got %d\n", value);
+
+  hr = ITextRange_QueryInterface(range, &IID_ITextSelection, (void**)&sel2);
+  ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+  release_interfaces(&hwnd, &reOle, &doc, NULL);
+
+  hr = ITextSelection_GetDuplicate(selection, NULL);
+  ok(hr == CO_E_RELEASED, "got 0x%08x\n", hr);
+
+  hr = ITextSelection_GetDuplicate(selection, &range);
+  ok(hr == CO_E_RELEASED, "got 0x%08x\n", hr);
+
+  hr = ITextRange_GetFont(range, &font);
+  ok(hr == CO_E_RELEASED, "got 0x%08x\n", hr);
+
+  ITextSelection_Release(selection);
+  ITextRange_Release(range);
+}
+
 START_TEST(richole)
 {
   /* Must explicitly LoadLibrary(). The test has no references to functions in
@@ -3095,7 +3269,7 @@ START_TEST(richole)
   test_ITextRange_GetStart_GetEnd();
   test_ITextRange_GetDuplicate();
   test_ITextRange_Collapse();
-  test_IOleClientSite_QueryInterface();
+  test_GetClientSite();
   test_IOleWindow_GetWindow();
   test_IOleInPlaceSite_GetWindow();
   test_GetFont();
@@ -3109,4 +3283,7 @@ START_TEST(richole)
   test_Select();
   test_GetStoryType();
   test_SetFont();
+  test_InsertObject();
+  test_GetStoryLength();
+  test_ITextSelection_GetDuplicate();
 }

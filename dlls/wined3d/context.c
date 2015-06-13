@@ -128,7 +128,7 @@ static void context_attach_depth_stencil_fbo(struct wined3d_context *context,
 
     if (depth_stencil)
     {
-        DWORD format_flags = depth_stencil->resource.format_flags;
+        DWORD format_flags = depth_stencil->container->resource.format_flags;
 
         if (depth_stencil->current_renderbuffer)
         {
@@ -420,6 +420,7 @@ static void context_apply_fbo_entry(struct wined3d_context *context, GLenum targ
     const struct wined3d_gl_info *gl_info = context->gl_info;
     unsigned int i;
     GLuint read_binding, draw_binding;
+    struct wined3d_surface *depth_stencil = entry->depth_stencil;
 
     if (entry->attached)
     {
@@ -437,10 +438,22 @@ static void context_apply_fbo_entry(struct wined3d_context *context, GLenum targ
         context_attach_surface_fbo(context, target, i, entry->render_targets[i], entry->color_location);
     }
 
-    /* Apply depth targets */
-    if (entry->depth_stencil)
-        surface_set_compatible_renderbuffer(entry->depth_stencil, entry->render_targets[0]);
-    context_attach_depth_stencil_fbo(context, target, entry->depth_stencil, entry->ds_location);
+    if (depth_stencil && entry->render_targets[0]
+            && (depth_stencil->resource.multisample_type
+            != entry->render_targets[0]->resource.multisample_type
+            || depth_stencil->resource.multisample_quality
+            != entry->render_targets[0]->resource.multisample_quality))
+    {
+        WARN("Color multisample type %u and quality %u, depth stencil has %u and %u, disabling ds buffer.\n",
+                entry->render_targets[0]->resource.multisample_quality,
+                entry->render_targets[0]->resource.multisample_type,
+                depth_stencil->resource.multisample_quality, depth_stencil->resource.multisample_type);
+        depth_stencil = NULL;
+    }
+
+    if (depth_stencil)
+        surface_set_compatible_renderbuffer(depth_stencil, entry->render_targets[0]);
+    context_attach_depth_stencil_fbo(context, target, depth_stencil, entry->ds_location);
 
     /* Set valid read and draw buffer bindings to satisfy pedantic pre-ES2_compatibility
      * GL contexts requirements. */
@@ -1762,6 +1775,7 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
     {
         GL_EXTCALL(glProvokingVertexEXT(GL_FIRST_VERTEX_CONVENTION_EXT));
     }
+    device->shader_backend->shader_init_context_state(ret);
     ret->shader_update_mask = (1 << WINED3D_SHADER_TYPE_PIXEL)
             | (1 << WINED3D_SHADER_TYPE_VERTEX)
             | (1 << WINED3D_SHADER_TYPE_GEOMETRY);
@@ -3185,12 +3199,12 @@ static void context_setup_target(struct wined3d_context *context, struct wined3d
         {
             /* Disable blending when the alpha mask has changed and when a format doesn't support blending. */
             if ((old->alpha_size && !new->alpha_size) || (!old->alpha_size && new->alpha_size)
-                    || !(target->resource.format_flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING))
+                    || !(target->container->resource.format_flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING))
                 context_invalidate_state(context, STATE_RENDER(WINED3D_RS_ALPHABLENDENABLE));
 
             /* Update sRGB writing when switching between formats that do/do not support sRGB writing */
-            if ((context->current_rt->resource.format_flags & WINED3DFMT_FLAG_SRGB_WRITE)
-                    != (target->resource.format_flags & WINED3DFMT_FLAG_SRGB_WRITE))
+            if ((context->current_rt->container->resource.format_flags & WINED3DFMT_FLAG_SRGB_WRITE)
+                    != (target->container->resource.format_flags & WINED3DFMT_FLAG_SRGB_WRITE))
                 context_invalidate_state(context, STATE_RENDER(WINED3D_RS_SRGBWRITEENABLE));
         }
 

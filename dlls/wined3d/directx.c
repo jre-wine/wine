@@ -3562,6 +3562,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
 
     adapter->vertex_pipe->vp_get_caps(gl_info, &vertex_caps);
     adapter->d3d_info.xyzrhw = vertex_caps.xyzrhw;
+    adapter->d3d_info.ffp_generic_attributes = vertex_caps.ffp_generic_attributes;
 
     adapter->fragment_pipe->get_caps(gl_info, &fragment_caps);
     adapter->d3d_info.limits.ffp_blend_stages = fragment_caps.MaxTextureBlendStages;
@@ -4384,6 +4385,8 @@ static BOOL CheckSurfaceCapability(const struct wined3d_adapter *adapter,
     /* All depth stencil formats are supported on surfaces */
     if (CheckDepthStencilCapability(adapter, adapter_format, check_format, WINED3D_GL_RES_TYPE_TEX_2D))
         return TRUE;
+    if (CheckDepthStencilCapability(adapter, adapter_format, check_format, WINED3D_GL_RES_TYPE_RB))
+        return TRUE;
 
     /* If opengl can't process the format natively, the blitter may be able to convert it */
     if (adapter->blitter->blit_supported(&adapter->gl_info, &adapter->d3d_info,
@@ -4456,7 +4459,7 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
             allowed_usage = WINED3DUSAGE_DEPTHSTENCIL
                     | WINED3DUSAGE_RENDERTARGET
                     | WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING;
-            gl_type = WINED3D_GL_RES_TYPE_TEX_2D;
+            gl_type = WINED3D_GL_RES_TYPE_RB;
             break;
 
         case WINED3D_RTYPE_TEXTURE:

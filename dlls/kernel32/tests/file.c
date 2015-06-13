@@ -38,6 +38,10 @@
 #include "winnls.h"
 #include "fileapi.h"
 
+#ifdef WINE_NO_UNICODE_MACROS
+#undef DeleteFile  /* needed for FILE_DISPOSITION_INFO */
+#endif
+
 static HANDLE (WINAPI *pFindFirstFileExA)(LPCSTR,FINDEX_INFO_LEVELS,LPVOID,FINDEX_SEARCH_OPS,LPVOID,DWORD);
 static BOOL (WINAPI *pReplaceFileA)(LPCSTR, LPCSTR, LPCSTR, DWORD, LPVOID, LPVOID);
 static BOOL (WINAPI *pReplaceFileW)(LPCWSTR, LPCWSTR, LPCWSTR, DWORD, LPVOID, LPVOID);
@@ -55,6 +59,7 @@ static NTSTATUS (WINAPI *pNtCreateFile)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES
                                         PLARGE_INTEGER, ULONG, ULONG, ULONG, ULONG, PVOID, ULONG);
 static BOOL (WINAPI *pRtlDosPathNameToNtPathName_U)(LPCWSTR, PUNICODE_STRING, PWSTR*, CURDIR*);
 static NTSTATUS (WINAPI *pRtlAnsiStringToUnicodeString)(PUNICODE_STRING, PCANSI_STRING, BOOLEAN);
+static BOOL (WINAPI *pSetFileInformationByHandle)(HANDLE, FILE_INFO_BY_HANDLE_CLASS, void*, DWORD);
 
 static const char filename[] = "testfile.xxx";
 static const char sillytext[] =
@@ -99,6 +104,7 @@ static void InitFunctionPointers(void)
     pCreateFile2 = (void *) GetProcAddress(hkernel32, "CreateFile2");
     pGetFinalPathNameByHandleA = (void *) GetProcAddress(hkernel32, "GetFinalPathNameByHandleA");
     pGetFinalPathNameByHandleW = (void *) GetProcAddress(hkernel32, "GetFinalPathNameByHandleW");
+    pSetFileInformationByHandle = (void *) GetProcAddress(hkernel32, "SetFileInformationByHandle");
 }
 
 static void test__hread( void )
@@ -3830,6 +3836,12 @@ static void test_GetFileInformationByHandleEx(void)
     FILE_STANDARD_INFO *standardInfo;
     FILE_NAME_INFO *nameInfo;
     LARGE_INTEGER prevWrite;
+    FILE_IO_PRIORITY_HINT_INFO priohintinfo;
+    FILE_ALLOCATION_INFO allocinfo;
+    FILE_DISPOSITION_INFO dispinfo;
+    FILE_END_OF_FILE_INFO eofinfo;
+    FILE_RENAME_INFO renameinfo;
+
     struct {
         FILE_INFO_BY_HANDLE_CLASS handleClass;
         void *ptr;
@@ -3952,8 +3964,29 @@ static void test_GetFileInformationByHandleEx(void)
     for (i = 0; i < nameInfo->FileNameLength/2; i++)
         ok(strPtr[i] == nameInfo->FileName[i], "Incorrect filename char %d: %c vs %c\n",
             i, strPtr[i], nameInfo->FileName[i]);
-    CloseHandle(file);
 
+    /* invalid classes */
+    SetLastError(0xdeadbeef);
+    ret = pGetFileInformationByHandleEx(file, FileEndOfFileInfo, &eofinfo, sizeof(eofinfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %d, error %d\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetFileInformationByHandleEx(file, FileIoPriorityHintInfo, &priohintinfo, sizeof(priohintinfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %d, error %d\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetFileInformationByHandleEx(file, FileAllocationInfo, &allocinfo, sizeof(allocinfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %d, error %d\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetFileInformationByHandleEx(file, FileDispositionInfo, &dispinfo, sizeof(dispinfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %d, error %d\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetFileInformationByHandleEx(file, FileRenameInfo, &renameinfo, sizeof(renameinfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %d, error %d\n", ret, GetLastError());
+
+    CloseHandle(file);
     DeleteFileA(tempFileName);
 }
 
@@ -4554,6 +4587,70 @@ static void test_GetFinalPathNameByHandleW(void)
     CloseHandle(file);
 }
 
+static void test_SetFileInformationByHandle(void)
+{
+    FILE_ATTRIBUTE_TAG_INFO fileattrinfo = { 0 };
+    FILE_REMOTE_PROTOCOL_INFO protinfo = { 0 };
+    FILE_STANDARD_INFO stdinfo = { };
+    FILE_COMPRESSION_INFO compressinfo;
+    FILE_DISPOSITION_INFO dispinfo;
+    char tempFileName[MAX_PATH];
+    char tempPath[MAX_PATH];
+    HANDLE file;
+    BOOL ret;
+
+    if (!pSetFileInformationByHandle)
+    {
+        win_skip("SetFileInformationByHandle is not supported\n");
+        return;
+    }
+
+    ret = GetTempPathA(sizeof(tempPath), tempPath);
+    ok(ret, "GetTempPathA failed, got error %u.\n", GetLastError());
+
+    /* ensure the existence of a file in the temp folder */
+    ret = GetTempFileNameA(tempPath, "abc", 0, tempFileName);
+    ok(ret, "GetTempFileNameA failed, got error %u.\n", GetLastError());
+
+    file = CreateFileA(tempFileName, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING, FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "failed to open the temp file, error %u.\n", GetLastError());
+
+    /* invalid classes */
+    SetLastError(0xdeadbeef);
+    ret = pSetFileInformationByHandle(file, FileStandardInfo, &stdinfo, sizeof(stdinfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %d, error %d\n", ret, GetLastError());
+
+    memset(&compressinfo, 0, sizeof(compressinfo));
+    SetLastError(0xdeadbeef);
+    ret = pSetFileInformationByHandle(file, FileCompressionInfo, &compressinfo, sizeof(compressinfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %d, error %d\n", ret, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pSetFileInformationByHandle(file, FileAttributeTagInfo, &fileattrinfo, sizeof(fileattrinfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %d, error %d\n", ret, GetLastError());
+
+    memset(&protinfo, 0, sizeof(protinfo));
+    protinfo.StructureVersion = 1;
+    protinfo.StructureSize = sizeof(protinfo);
+    SetLastError(0xdeadbeef);
+    ret = pSetFileInformationByHandle(file, FileRemoteProtocolInfo, &protinfo, sizeof(protinfo));
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER, "got %d, error %d\n", ret, GetLastError());
+
+    /* test FileDispositionInfo, additional details already covered by ntdll tests */
+    SetLastError(0xdeadbeef);
+    ret = pSetFileInformationByHandle(file, FileDispositionInfo, &dispinfo, 0);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_BAD_LENGTH, "got %d, error %d\n", ret, GetLastError());
+
+    dispinfo.DeleteFile = TRUE;
+    ret = pSetFileInformationByHandle(file, FileDispositionInfo, &dispinfo, sizeof(dispinfo));
+todo_wine
+    ok(ret, "setting FileDispositionInfo failed, error %d\n", GetLastError());
+
+    CloseHandle(file);
+}
+
 START_TEST(file)
 {
     InitFunctionPointers();
@@ -4609,4 +4706,5 @@ START_TEST(file)
     test_file_access();
     test_GetFinalPathNameByHandleA();
     test_GetFinalPathNameByHandleW();
+    test_SetFileInformationByHandle();
 }

@@ -22,11 +22,11 @@
 #define __QMGR_H__
 
 #include "windef.h"
-
 #define COBJMACROS
-#include "objbase.h"
-
+#include "bits.h"
 #include "bits1_5.h"
+#include "bits2_0.h"
+#include "bits2_5.h"
 #include "bits3_0.h"
 
 #include <string.h>
@@ -36,7 +36,7 @@
 /* Background copy job vtbl and related data */
 typedef struct
 {
-    IBackgroundCopyJob2 IBackgroundCopyJob2_iface;
+    IBackgroundCopyJob3 IBackgroundCopyJob3_iface;
     LONG ref;
     LPWSTR displayName;
     LPWSTR description;
@@ -51,12 +51,18 @@ typedef struct
     /* Protects file list, and progress */
     CRITICAL_SECTION cs;
     struct list entryFromQmgr;
+    struct
+    {
+        BG_ERROR_CONTEXT      context;
+        HRESULT               code;
+        IBackgroundCopyFile2 *file;
+    } error;
 } BackgroundCopyJobImpl;
 
 /* Background copy file vtbl and related data */
 typedef struct
 {
-    IBackgroundCopyFile IBackgroundCopyFile_iface;
+    IBackgroundCopyFile2 IBackgroundCopyFile2_iface;
     LONG ref;
     BG_FILE_INFO info;
     BG_FILE_PROGRESS fileProgress;

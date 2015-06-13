@@ -2247,7 +2247,7 @@ unsigned char * __RPC_USER SNB_UserUnmarshal(ULONG *pFlags, unsigned char *pBuff
         WCHAR **ptrW;
         ULONG i;
 
-        ptrW = *pSnb = umcb->pStubMsg->pfnAllocate((wire->strcnt+1)*sizeof(WCHAR*) + wire->datalen);
+        ptrW = *pSnb = umcb->pStubMsg->pfnAllocate((wire->strcnt+1)*sizeof(WCHAR*) + wire->datalen*sizeof(WCHAR));
         dest = (WCHAR*)(*pSnb + wire->strcnt + 1);
 
         for (i = 0; i < wire->strcnt; i++)
@@ -3011,15 +3011,15 @@ HRESULT CALLBACK IOleInPlaceActiveObject_TranslateAccelerator_Proxy(
     IOleInPlaceActiveObject* This,
     LPMSG lpmsg)
 {
-    FIXME(":stub\n");
-    return E_NOTIMPL;
+    TRACE("(%p %p)\n", This, lpmsg);
+    return IOleInPlaceActiveObject_RemoteTranslateAccelerator_Proxy(This);
 }
 
 HRESULT __RPC_STUB IOleInPlaceActiveObject_TranslateAccelerator_Stub(
     IOleInPlaceActiveObject* This)
 {
-    FIXME(":stub\n");
-    return E_NOTIMPL;
+    TRACE("(%p)\n", This);
+    return S_FALSE;
 }
 
 HRESULT CALLBACK IOleInPlaceActiveObject_ResizeBorder_Proxy(
@@ -3049,8 +3049,8 @@ HRESULT CALLBACK IOleCache2_UpdateCache_Proxy(
     DWORD grfUpdf,
     LPVOID pReserved)
 {
-    FIXME(":stub\n");
-    return E_NOTIMPL;
+    TRACE("(%p, %p, 0x%08x, %p)\n", This, pDataObject, grfUpdf, pReserved);
+    return IOleCache2_RemoteUpdateCache_Proxy(This, pDataObject, grfUpdf, (LONG_PTR)pReserved);
 }
 
 HRESULT __RPC_STUB IOleCache2_UpdateCache_Stub(
@@ -3059,8 +3059,8 @@ HRESULT __RPC_STUB IOleCache2_UpdateCache_Stub(
     DWORD grfUpdf,
     LONG_PTR pReserved)
 {
-    FIXME(":stub\n");
-    return E_NOTIMPL;
+    TRACE("(%p, %p, 0x%08x, %li)\n", This, pDataObject, grfUpdf, pReserved);
+    return IOleCache2_UpdateCache(This, pDataObject, grfUpdf, (void*)pReserved);
 }
 
 HRESULT CALLBACK IEnumOLEVERB_Next_Proxy(
