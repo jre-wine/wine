@@ -1,3 +1,17 @@
+wine-development (1.7.45-1) unstable; urgency=medium
+
+  * New upstream release 1.7.45, released Jun 12, 2015.
+    - Some more progress on DirectWrite implementation.
+    - A number of RichEdit control fixes.
+    - Beginning implementation of the old MSVCIRT C++ runtime.
+    - Various bug fixes.
+  * Add missing breaks (closes: #788600).
+  * Quote tests in launcher script (closes: #787856).
+  * Add missing stdint.h include for kfreebsd architectures.
+  * Use DEB_BUILD_ARCH_BITS to determine whether to build wine64.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 13 Jun 2015 19:16:15 +0000
+
 wine-development (1.7.44-2) unstable; urgency=medium
 
   * Fix wine32 symlink (closes: #787302).

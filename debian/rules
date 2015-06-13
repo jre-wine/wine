@@ -1,7 +1,6 @@
 #!/usr/bin/make -f
 
 DEB_BUILD_ARCH_OS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_OS)
-DEB_BUILD_ARCH_CPU=$(shell dpkg-architecture -qDEB_BUILD_ARCH_CPU)
 DEB_BUILD_ARCH_BITS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS)
 
 VERSION=$(shell dpkg-parsechangelog -S Source | sed s/wine//g)
@@ -41,8 +40,8 @@ CONFLAGS=--with-gnutls \
          --datarootdir=/$(DATDIR) \
          $(shell dpkg-buildflags --export=configure) \
 
-# enable wine64 on amd64
-ifeq ($(DEB_BUILD_ARCH_CPU), amd64)
+# enable wine64 on 64-bit architectures
+ifeq ($(DEB_BUILD_ARCH_BITS), 64)
 CONFLAGS+=--enable-win64
 endif
 

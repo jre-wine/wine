@@ -76,7 +76,7 @@ Description: Windows API implementation - standard suite
  This package provides convenience tools for the standard Wine components.
 
 Package: wine32VERSION
-Architecture: any-i386 any-powerpc armhf arm64
+Architecture: any-i386 any-powerpc armhf
 Multi-Arch: foreign
 Depends:
  ${misc:Depends},
@@ -100,7 +100,7 @@ Description: Windows API implementation - 32-bit binary loader
  This package provides the binary loader for 32-bit Windows applications.
 
 Package: wine64VERSION
-Architecture: amd64
+Architecture: amd64 arm64
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
@@ -121,7 +121,7 @@ Description: Windows API implementation - 64-bit binary loader
  This package provides the binary loader for 64-bit Windows applications.
 
 Package: wine32VERSION-preloader
-Architecture: i386 powerpc armhf arm64
+Architecture: i386 powerpc armhf
 Depends:
  ${misc:Depends},
  wine32VERSION,
@@ -132,7 +132,7 @@ Description: Windows API implementation - prelinked 32-bit binary loader
  This package provides the prelinked loader for 32-bit Windows applications.
 
 Package: wine64VERSION-preloader
-Architecture: amd64
+Architecture: amd64 arm64
 Depends:
  ${misc:Depends},
  wine64VERSION,
@@ -143,7 +143,7 @@ Description: Windows API implementation - prelinked 64-bit binary loader
  This package provides the prelinked loader for 64-bit Windows applications.
 
 Package: wine32VERSION-tools
-Architecture: any-i386 any-powerpc armhf arm64
+Architecture: any-i386 any-powerpc armhf
 Section: libdevel
 Multi-Arch: foreign
 Depends:
@@ -159,7 +159,7 @@ Description: Windows API implementation - 32-bit developer tools
  This package provides wine's 32-bit developer tools.
 
 Package: wine64VERSION-tools
-Architecture: amd64
+Architecture: amd64 arm64
 Section: libdevel
 Depends:
  gcc [amd64],
@@ -180,6 +180,8 @@ Multi-Arch: foreign
 Depends:
  ${misc:Depends},
 Replaces:
+ libwineVERSION (<< 1.7.41-2),
+Breaks:
  libwineVERSION (<< 1.7.41-2),
 Description: Windows API implementation - fonts
  Wine is a free MS-Windows API implementation.

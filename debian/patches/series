@@ -17,4 +17,5 @@ glu32-link.patch
 
 debian-gnutls.patch
 opengl.patch
-pointer-cast.patch
+
+kfreebsd-include.patch

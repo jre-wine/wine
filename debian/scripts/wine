@@ -20,7 +20,7 @@ else
     exit 1
 fi
 
-if test -z $WINEPREFIX; then
+if test -z "$WINEPREFIX"; then
     if test "$wine" = "$wine64"; then
         wineprefix=$HOME/.wine64
     else
@@ -30,19 +30,19 @@ else
     wineprefix=$WINEPREFIX
 fi
 
-if test -z $WINELOADER; then
+if test -z "$WINELOADER"; then
     wineloader=$wine
 else
     wineloader=$WINELOADER
 fi
 
-if test -z $WINEDEBUG; then
+if test -z "$WINEDEBUG"; then
     winedebug=-all
 else
     winedebug=$WINEDEBUG
 fi
 
-if test -z $PULSE_LATENCY_MSEC; then
+if test -z "$PULSE_LATENCY_MSEC"; then
     latency=60
 else
     latency=$PULSE_LATENCY_MSEC
