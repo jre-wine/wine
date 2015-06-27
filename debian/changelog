@@ -1,3 +1,16 @@
+wine-development (1.7.46-1) unstable; urgency=medium
+
+  * New upstream release 1.7.46, released Jun 26, 2015.
+    - Improvements in the BITS file transfer service.
+    - Still more progress on DirectWrite implementation.
+    - Support for shared user data on 64-bit.
+    - Various C++ runtime improvements.
+    - Some more support for the 64-bit ARM platform.
+    - Various bug fixes.
+  * Avoid division by zero (closes: #788809).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 27 Jun 2015 00:39:52 +0000
+
 wine-development (1.7.45-1) unstable; urgency=medium
 
   * New upstream release 1.7.45, released Jun 12, 2015.

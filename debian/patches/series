@@ -19,3 +19,4 @@ debian-gnutls.patch
 opengl.patch
 
 kfreebsd-include.patch
+font-divbyzero.patch
