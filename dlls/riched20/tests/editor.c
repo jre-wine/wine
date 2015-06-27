@@ -4425,33 +4425,36 @@ struct exsetsel_s {
   LRESULT expected_retval;
   int expected_getsel_start;
   int expected_getsel_end;
-  int _getsel_todo_wine;
+  BOOL todo;
 };
 
-const struct exsetsel_s exsetsel_tests[] = {
+static const struct exsetsel_s exsetsel_tests[] = {
   /* sanity tests */
-  {5, 10, 10, 5, 10, 0},
-  {15, 17, 17, 15, 17, 0},
+  {5, 10, 10, 5, 10 },
+  {15, 17, 17, 15, 17 },
   /* test cpMax > strlen() */
-  {0, 100, 18, 0, 18, 0},
+  {0, 100, 18, 0, 18 },
   /* test cpMin < 0 && cpMax >= 0 after cpMax > strlen() */
-  {-1, 1, 17, 17, 17, 0},
+  {-1, 1, 17, 17, 17 },
   /* test cpMin == cpMax */
-  {5, 5, 5, 5, 5, 0},
+  {5, 5, 5, 5, 5 },
   /* test cpMin < 0 && cpMax >= 0 (bug 4462) */
-  {-1, 0, 5, 5, 5, 0},
-  {-1, 17, 5, 5, 5, 0},
-  {-1, 18, 5, 5, 5, 0},
+  {-1, 0, 5, 5, 5 },
+  {-1, 17, 5, 5, 5 },
+  {-1, 18, 5, 5, 5 },
   /* test cpMin < 0 && cpMax < 0 */
-  {-1, -1, 17, 17, 17, 0},
-  {-4, -5, 17, 17, 17, 0},
+  {-1, -1, 17, 17, 17 },
+  {-4, -5, 17, 17, 17 },
   /* test cpMin >=0 && cpMax < 0 (bug 6814) */
-  {0, -1, 18, 0, 18, 0},
-  {17, -5, 18, 17, 18, 0},
-  {18, -3, 17, 17, 17, 0},
+  {0, -1, 18, 0, 18 },
+  {17, -5, 18, 17, 18 },
+  {18, -3, 17, 17, 17 },
   /* test if cpMin > cpMax */
-  {15, 19, 18, 15, 18, 0},
-  {19, 15, 18, 15, 18, 0},
+  {15, 19, 18, 15, 18 },
+  {19, 15, 18, 15, 18 },
+  /* cpMin == strlen() && cpMax > cpMin */
+  {17, 18, 18, 17, 18 },
+  {17, 50, 18, 17, 18 },
 };
 
 static void check_EM_EXSETSEL(HWND hwnd, const struct exsetsel_s *setsel, int id) {
@@ -4467,7 +4470,7 @@ static void check_EM_EXSETSEL(HWND hwnd, const struct exsetsel_s *setsel, int id
 
     SendMessageA(hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end);
 
-    if (setsel->_getsel_todo_wine) {
+    if (setsel->todo) {
         todo_wine {
             ok(start == setsel->expected_getsel_start && end == setsel->expected_getsel_end, "EM_EXSETSEL(%d): expected (%d,%d) actual:(%d,%d)\n", id, setsel->expected_getsel_start, setsel->expected_getsel_end, start, end);
         }
@@ -4504,7 +4507,7 @@ static void check_EM_SETSEL(HWND hwnd, const struct exsetsel_s *setsel, int id) 
 
     SendMessageA(hwnd, EM_GETSEL, (WPARAM)&start, (LPARAM)&end);
 
-    if (setsel->_getsel_todo_wine) {
+    if (setsel->todo) {
         todo_wine {
             ok(start == setsel->expected_getsel_start && end == setsel->expected_getsel_end, "EM_SETSEL(%d): expected (%d,%d) actual:(%d,%d)\n", id, setsel->expected_getsel_start, setsel->expected_getsel_end, start, end);
         }
@@ -4515,6 +4518,7 @@ static void check_EM_SETSEL(HWND hwnd, const struct exsetsel_s *setsel, int id) 
 
 static void test_EM_SETSEL(void)
 {
+    char buffA[32];
     HWND hwndRichEdit = new_richedit(NULL);
     int i;
     const int num_tests = sizeof(exsetsel_tests)/sizeof(struct exsetsel_s);
@@ -4527,6 +4531,11 @@ static void test_EM_SETSEL(void)
     for (i = 0; i < num_tests; i++) {
         check_EM_SETSEL(hwndRichEdit, &exsetsel_tests[i], i);
     }
+
+    SendMessageA(hwndRichEdit, EM_SETSEL, 17, 18);
+    buffA[0] = 123;
+    SendMessageA(hwndRichEdit, EM_GETSELTEXT, 0, (LPARAM)buffA);
+    ok(buffA[0] == 0, "selection text %s\n", buffA);
 
     DestroyWindow(hwndRichEdit);
 }
@@ -6044,26 +6053,153 @@ static void test_WM_NOTIFY(void)
     DestroyWindow(parent);
 }
 
-static int cpMin_EN_LINK = -1;
-static int cpMax_EN_LINK = -1;
+static ENLINK enlink;
+#define CURSOR_CLIENT_X 5
+#define CURSOR_CLIENT_Y 5
+#define WP_PARENT 1
+#define WP_CHILD 2
 
 static LRESULT WINAPI EN_LINK_ParentMsgCheckProcA(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    ENLINK* enlink = (ENLINK*)lParam;
-    if(message == WM_NOTIFY && enlink->nmhdr.code == EN_LINK)
+    if(message == WM_NOTIFY && ((NMHDR*)lParam)->code == EN_LINK)
     {
-        cpMin_EN_LINK = enlink->chrg.cpMin;
-        cpMax_EN_LINK = enlink->chrg.cpMax;
+        enlink = *(ENLINK*)lParam;
     }
     return DefWindowProcA(hwnd, message, wParam, lParam);
 }
 
+static void link_notify_test(const char *desc, int i, HWND hwnd, HWND parent,
+                             UINT msg, WPARAM wParam, LPARAM lParam, BOOL notifies)
+{
+    ENLINK junk_enlink;
+
+    switch (msg)
+    {
+    case WM_LBUTTONDBLCLK:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_MOUSEHOVER:
+    case WM_MOUSEMOVE:
+    case WM_MOUSEWHEEL:
+    case WM_RBUTTONDBLCLK:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+        lParam = MAKELPARAM(CURSOR_CLIENT_X, CURSOR_CLIENT_Y);
+        break;
+    case WM_SETCURSOR:
+        if (wParam == WP_PARENT)
+            wParam = (WPARAM)parent;
+        else if (wParam == WP_CHILD)
+            wParam = (WPARAM)hwnd;
+        break;
+    }
+
+    memset(&junk_enlink, 0x23, sizeof(junk_enlink));
+    enlink = junk_enlink;
+
+    SendMessageA(hwnd, msg, wParam, lParam);
+
+    if (notifies)
+    {
+        ok(enlink.nmhdr.hwndFrom == hwnd,
+           "%s test %i: Expected hwnd %p got %p\n", desc, i, hwnd, enlink.nmhdr.hwndFrom);
+        ok(enlink.nmhdr.idFrom == 0,
+           "%s test %i: Expected idFrom 0 got 0x%lx\n", desc, i, enlink.nmhdr.idFrom);
+        ok(enlink.msg == msg,
+           "%s test %i: Expected msg 0x%x got 0x%x\n", desc, i, msg, enlink.msg);
+        if (msg == WM_SETCURSOR)
+        {
+            ok(enlink.wParam == 0,
+               "%s test %i: Expected wParam 0 got 0x%lx\n", desc, i, enlink.wParam);
+        }
+        else
+        {
+            ok(enlink.wParam == wParam,
+               "%s test %i: Expected wParam 0x%lx got 0x%lx\n", desc, i, wParam, enlink.wParam);
+        }
+        ok(enlink.lParam == MAKELPARAM(CURSOR_CLIENT_X, CURSOR_CLIENT_Y),
+           "%s test %i: Expected lParam 0x%lx got 0x%lx\n",
+           desc, i, MAKELPARAM(CURSOR_CLIENT_X, CURSOR_CLIENT_Y), enlink.lParam);
+        ok(enlink.chrg.cpMin == 0 && enlink.chrg.cpMax == 31,
+           "%s test %i: Expected link range [0,31) got [%i,%i)\n", desc, i, enlink.chrg.cpMin, enlink.chrg.cpMax);
+    }
+    else
+    {
+        ok(memcmp(&enlink, &junk_enlink, sizeof(enlink)) == 0,
+           "%s test %i: Expected enlink to remain unmodified\n", desc, i);
+    }
+}
+
 static void test_EN_LINK(void)
 {
-    HWND parent;
+    HWND hwnd, parent;
     WNDCLASSA cls;
-    HWND hwndRichedit_EN_LINK;
     CHARFORMAT2A cf2;
+    POINT orig_cursor_pos;
+    POINT cursor_screen_pos = {CURSOR_CLIENT_X, CURSOR_CLIENT_Y};
+    int i;
+
+    static const struct
+    {
+        UINT msg;
+        WPARAM wParam;
+        LPARAM lParam;
+        BOOL notifies;
+    }
+    link_notify_tests[] =
+    {
+        /* hold down the left button and try some messages */
+        { WM_LBUTTONDOWN,    0,          0,  TRUE  }, /* 0 */
+        { EM_LINESCROLL,     0,          1,  FALSE },
+        { EM_SCROLL,         SB_BOTTOM,  0,  FALSE },
+        { WM_LBUTTONDBLCLK,  0,          0,  TRUE  },
+        { WM_MOUSEHOVER,     0,          0,  FALSE },
+        { WM_MOUSEMOVE,      0,          0,  FALSE },
+        { WM_MOUSEWHEEL,     0,          0,  FALSE },
+        { WM_RBUTTONDBLCLK,  0,          0,  TRUE  },
+        { WM_RBUTTONDOWN,    0,          0,  TRUE  },
+        { WM_RBUTTONUP,      0,          0,  TRUE  },
+        { WM_SETCURSOR,      0,          0,  FALSE },
+        { WM_SETCURSOR,      WP_PARENT,  0,  FALSE },
+        { WM_SETCURSOR,      WP_CHILD,   0,  TRUE  },
+        { WM_SETCURSOR,      WP_CHILD,   1,  TRUE  },
+        { WM_VSCROLL,        SB_BOTTOM,  0,  FALSE },
+        { WM_LBUTTONUP,      0,          0,  TRUE  },
+        /* hold down the right button and try some messages */
+        { WM_RBUTTONDOWN,    0,          0,  TRUE  }, /* 16 */
+        { EM_LINESCROLL,     0,          1,  FALSE },
+        { EM_SCROLL,         SB_BOTTOM,  0,  FALSE },
+        { WM_LBUTTONDBLCLK,  0,          0,  TRUE  },
+        { WM_LBUTTONDOWN,    0,          0,  TRUE  },
+        { WM_LBUTTONUP,      0,          0,  TRUE  },
+        { WM_MOUSEHOVER,     0,          0,  FALSE },
+        { WM_MOUSEMOVE,      0,          0,  TRUE  },
+        { WM_MOUSEWHEEL,     0,          0,  FALSE },
+        { WM_RBUTTONDBLCLK,  0,          0,  TRUE  },
+        { WM_SETCURSOR,      0,          0,  FALSE },
+        { WM_SETCURSOR,      WP_PARENT,  0,  FALSE },
+        { WM_SETCURSOR,      WP_CHILD,   0,  TRUE  },
+        { WM_SETCURSOR,      WP_CHILD,   1,  TRUE  },
+        { WM_VSCROLL,        SB_BOTTOM,  0,  FALSE },
+        { WM_RBUTTONUP,      0,          0,  TRUE  },
+        /* try the messages with both buttons released */
+        { EM_LINESCROLL,     0,          1,  FALSE }, /* 32 */
+        { EM_SCROLL,         SB_BOTTOM,  0,  FALSE },
+        { WM_LBUTTONDBLCLK,  0,          0,  TRUE  },
+        { WM_LBUTTONDOWN,    0,          0,  TRUE  },
+        { WM_LBUTTONUP,      0,          0,  TRUE  },
+        { WM_MOUSEHOVER,     0,          0,  FALSE },
+        { WM_MOUSEMOVE,      0,          0,  TRUE  },
+        { WM_MOUSEWHEEL,     0,          0,  FALSE },
+        { WM_RBUTTONDBLCLK,  0,          0,  TRUE  },
+        { WM_RBUTTONDOWN,    0,          0,  TRUE  },
+        { WM_RBUTTONUP,      0,          0,  TRUE  },
+        { WM_SETCURSOR,      0,          0,  FALSE },
+        { WM_SETCURSOR,      WP_CHILD,   0,  TRUE  },
+        { WM_SETCURSOR,      WP_CHILD,   1,  TRUE  },
+        { WM_SETCURSOR,      WP_PARENT,  0,  FALSE },
+        { WM_VSCROLL,        SB_BOTTOM,  0,  FALSE }
+    };
 
     /* register class to capture WM_NOTIFY */
     cls.style = 0;
@@ -6082,21 +6218,40 @@ static void test_EN_LINK(void)
                            0, 0, 200, 60, NULL, NULL, NULL, NULL);
     ok(parent != 0, "Failed to create parent window\n");
 
-    hwndRichedit_EN_LINK = new_richedit(parent);
-    ok(hwndRichedit_EN_LINK != 0, "Failed to create edit window\n");
+    hwnd = new_richedit(parent);
+    ok(hwnd != 0, "Failed to create edit window\n");
 
-    SendMessageA(hwndRichedit_EN_LINK, EM_SETEVENTMASK, 0, ENM_LINK);
+    SendMessageA(hwnd, EM_SETEVENTMASK, 0, ENM_LINK);
 
     cf2.cbSize = sizeof(CHARFORMAT2A);
     cf2.dwMask = CFM_LINK;
     cf2.dwEffects = CFE_LINK;
-    SendMessageA(hwndRichedit_EN_LINK, EM_SETCHARFORMAT, 0, (LPARAM)&cf2);
+    SendMessageA(hwnd, EM_SETCHARFORMAT, 0, (LPARAM)&cf2);
     /* mixing letters and numbers causes runs to be split */
-    SendMessageA(hwndRichedit_EN_LINK, WM_SETTEXT, 0, (LPARAM)"link text with at least 2 runs");
-    SendMessageA(hwndRichedit_EN_LINK, WM_LBUTTONDOWN, 0, MAKELPARAM(5, 5));
-    ok(cpMin_EN_LINK == 0 && cpMax_EN_LINK == 31, "Expected link range [0,31) got [%i,%i)\n", cpMin_EN_LINK, cpMax_EN_LINK);
+    SendMessageA(hwnd, WM_SETTEXT, 0, (LPARAM)"link text with at least 2 runs");
 
-    DestroyWindow(hwndRichedit_EN_LINK);
+    GetCursorPos(&orig_cursor_pos);
+    SetCursorPos(0, 0);
+
+    for (i = 0; i < sizeof(link_notify_tests)/sizeof(link_notify_tests[0]); i++)
+    {
+        link_notify_test("cursor position simulated", i, hwnd, parent,
+                         link_notify_tests[i].msg, link_notify_tests[i].wParam, link_notify_tests[i].lParam,
+                         link_notify_tests[i].msg == WM_SETCURSOR ? FALSE : link_notify_tests[i].notifies);
+    }
+
+    ClientToScreen(hwnd, &cursor_screen_pos);
+    SetCursorPos(cursor_screen_pos.x, cursor_screen_pos.y);
+
+    for (i = 0; i < sizeof(link_notify_tests)/sizeof(link_notify_tests[0]); i++)
+    {
+        link_notify_test("cursor position set", i, hwnd, parent,
+                         link_notify_tests[i].msg, link_notify_tests[i].wParam, link_notify_tests[i].lParam,
+                         link_notify_tests[i].notifies);
+    }
+
+    SetCursorPos(orig_cursor_pos.x, orig_cursor_pos.y);
+    DestroyWindow(hwnd);
     DestroyWindow(parent);
 }
 

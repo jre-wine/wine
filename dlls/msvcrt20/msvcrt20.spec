@@ -623,8 +623,8 @@
 @ stub -arch=win64 ?read@istream@@QEAAAEAV1@PEADH@Z
 @ stub -arch=win32 ?read@istream@@QAEAAV1@PAEH@Z
 @ stub -arch=win64 ?read@istream@@QEAAAEAV1@PEAEH@Z
-@ stub -arch=win32 ?sbumpc@streambuf@@QAEHXZ
-@ stub -arch=win64 ?sbumpc@streambuf@@QEAAHXZ
+@ thiscall -arch=win32 ?sbumpc@streambuf@@QAEHXZ(ptr) msvcirt.?sbumpc@streambuf@@QAEHXZ
+@ cdecl -arch=win64 ?sbumpc@streambuf@@QEAAHXZ(ptr) msvcirt.?sbumpc@streambuf@@QEAAHXZ
 @ stub -arch=win32 ?seekg@istream@@QAEAAV1@J@Z
 @ stub -arch=win64 ?seekg@istream@@QEAAAEAV1@J@Z
 @ stub -arch=win32 ?seekg@istream@@QAEAAV1@JW4seek_dir@ios@@@Z
@@ -681,25 +681,25 @@
 @ cdecl -arch=win64 ?setp@streambuf@@IEAAXPEAD0@Z(ptr ptr ptr) msvcirt.?setp@streambuf@@IEAAXPEAD0@Z
 @ stub -arch=win32 ?setrwbuf@stdiobuf@@QAEHHH@Z
 @ stub -arch=win64 ?setrwbuf@stdiobuf@@QEAAHHH@Z
-@ stub -arch=win32 ?sgetc@streambuf@@QAEHXZ
-@ stub -arch=win64 ?sgetc@streambuf@@QEAAHXZ
-@ stub -arch=win32 ?sgetn@streambuf@@QAEHPADH@Z
-@ stub -arch=win64 ?sgetn@streambuf@@QEAAHPEADH@Z
+@ thiscall -arch=win32 ?sgetc@streambuf@@QAEHXZ(ptr) msvcirt.?sgetc@streambuf@@QAEHXZ
+@ cdecl -arch=win64 ?sgetc@streambuf@@QEAAHXZ(ptr) msvcirt.?sgetc@streambuf@@QEAAHXZ
+@ thiscall -arch=win32 ?sgetn@streambuf@@QAEHPADH@Z(ptr ptr long) msvcirt.?sgetn@streambuf@@QAEHPADH@Z
+@ cdecl -arch=win64 ?sgetn@streambuf@@QEAAHPEADH@Z(ptr ptr long) msvcirt.?sgetn@streambuf@@QEAAHPEADH@Z
 # @ extern ?sh_none@filebuf@@2HB
 # @ extern ?sh_read@filebuf@@2HB
 # @ extern ?sh_write@filebuf@@2HB
-@ stub -arch=win32 ?snextc@streambuf@@QAEHXZ
-@ stub -arch=win64 ?snextc@streambuf@@QEAAHXZ
+@ thiscall -arch=win32 ?snextc@streambuf@@QAEHXZ(ptr) msvcirt.?snextc@streambuf@@QAEHXZ
+@ cdecl -arch=win64 ?snextc@streambuf@@QEAAHXZ(ptr) msvcirt.?snextc@streambuf@@QEAAHXZ
 @ stub -arch=win32 ?sputbackc@streambuf@@QAEHD@Z
 @ stub -arch=win64 ?sputbackc@streambuf@@QEAAHD@Z
-@ stub -arch=win32 ?sputc@streambuf@@QAEHH@Z
-@ stub -arch=win64 ?sputc@streambuf@@QEAAHH@Z
-@ stub -arch=win32 ?sputn@streambuf@@QAEHPBDH@Z
-@ stub -arch=win64 ?sputn@streambuf@@QEAAHPEBDH@Z
+@ thiscall -arch=win32 ?sputc@streambuf@@QAEHH@Z(ptr long) msvcirt.?sputc@streambuf@@QAEHH@Z
+@ cdecl -arch=win64 ?sputc@streambuf@@QEAAHH@Z(ptr long) msvcirt.?sputc@streambuf@@QEAAHH@Z
+@ thiscall -arch=win32 ?sputn@streambuf@@QAEHPBDH@Z(ptr str long) msvcirt.?sputn@streambuf@@QAEHPBDH@Z
+@ cdecl -arch=win64 ?sputn@streambuf@@QEAAHPEBDH@Z(ptr str long) msvcirt.?sputn@streambuf@@QEAAHPEBDH@Z
 @ stub -arch=win32 ?stdiofile@stdiobuf@@QAEPAU_iobuf@@XZ
 @ stub -arch=win64 ?stdiofile@stdiobuf@@QEAAPEAU_iobuf@@XZ
-@ stub -arch=win32 ?stossc@streambuf@@QAEXXZ
-@ stub -arch=win64 ?stossc@streambuf@@QEAAXXZ
+@ thiscall -arch=win32 ?stossc@streambuf@@QAEXXZ(ptr) msvcirt.?stossc@streambuf@@QAEXXZ
+@ cdecl -arch=win64 ?stossc@streambuf@@QEAAXXZ(ptr) msvcirt.?stossc@streambuf@@QEAAXXZ
 @ stub -arch=win32 ?str@istrstream@@QAEPADXZ
 @ stub -arch=win64 ?str@istrstream@@QEAAPEADXZ
 @ stub -arch=win32 ?str@ostrstream@@QAEPADXZ

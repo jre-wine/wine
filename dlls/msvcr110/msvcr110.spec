@@ -893,7 +893,7 @@
 @ stub __TypeMatch
 @ cdecl ___lc_codepage_func()
 @ cdecl ___lc_collate_cp_func()
-@ stub ___lc_locale_name_func
+@ cdecl ___lc_locale_name_func()
 @ cdecl ___mb_cur_max_func() MSVCRT____mb_cur_max_func
 @ cdecl ___mb_cur_max_l_func(ptr)
 @ cdecl ___setlc_active_func() MSVCRT____setlc_active_func
@@ -917,7 +917,7 @@
 @ stub -arch=i386,win64 __crtFlsGetValue
 @ stub -arch=i386,win64 __crtFlsSetValue
 @ stub -arch=i386,win64 __crtGetDateFormatEx
-@ stub -arch=i386,win64 __crtGetLocaleInfoEx
+@ cdecl -arch=i386,win64 __crtGetLocaleInfoEx(wstr long ptr long)
 @ cdecl __crtGetShowWindowMode() MSVCR110__crtGetShowWindowMode
 @ stub -arch=i386,win64 __crtGetTimeFormatEx
 @ stub -arch=i386,win64 __crtGetUserDefaultLocaleName
@@ -1254,10 +1254,10 @@
 @ stub _getsystime(ptr)
 @ cdecl _getw(ptr) MSVCRT__getw
 @ cdecl _getwc_nolock(ptr) MSVCRT__fgetwc_nolock
-@ stub _getwch
-@ stub _getwch_nolock
-@ stub _getwche
-@ stub _getwche_nolock
+@ cdecl _getwch()
+@ cdecl _getwch_nolock()
+@ cdecl _getwche()
+@ cdecl _getwche_nolock()
 @ cdecl _getws(ptr) MSVCRT__getws
 @ stub _getws_s
 @ cdecl -arch=i386 _global_unwind2(ptr)
@@ -1597,8 +1597,8 @@
 @ cdecl _putenv_s(str str)
 @ cdecl _putw(long ptr) MSVCRT__putw
 @ cdecl _putwc_nolock(long ptr) MSVCRT__fputwc_nolock
-@ cdecl _putwch(long) MSVCRT__putwch
-@ stub _putwch_nolock
+@ cdecl _putwch(long)
+@ cdecl _putwch_nolock(long)
 @ cdecl _putws(wstr) MSVCRT__putws
 # extern _pwctype
 @ cdecl _read(long ptr long) MSVCRT__read
@@ -1770,8 +1770,8 @@
 @ cdecl _ungetch(long)
 @ cdecl _ungetch_nolock(long)
 @ cdecl _ungetwc_nolock(long ptr) MSVCRT__ungetwc_nolock
-@ stub _ungetwch
-@ stub _ungetwch_nolock
+@ cdecl _ungetwch(long)
+@ cdecl _ungetwch_nolock(long)
 @ cdecl _unlink(str) MSVCRT__unlink
 @ cdecl _unloaddll(long)
 @ cdecl _unlock(long)

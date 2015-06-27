@@ -36,7 +36,7 @@ typedef struct {
     const vtable_ptr *vtable;
     int allocated;
     int unbuffered;
-    int unknown;
+    int stored_char;
     char *base;
     char *ebuf;
     char *pbase;
@@ -98,7 +98,7 @@ streambuf* __thiscall streambuf_reserve_ctor(streambuf *this, char *buffer, int 
     TRACE("(%p %p %d)\n", this, buffer, length);
     this->vtable = &MSVCP_streambuf_vtable;
     this->allocated = 0;
-    this->unknown = -1;
+    this->stored_char = EOF;
     this->do_lock = -1;
     this->base = NULL;
     streambuf_setbuf(this, buffer, length);
@@ -355,8 +355,10 @@ int __thiscall streambuf_out_waiting(const streambuf *this)
 
 /* Unexported */
 DEFINE_THISCALL_WRAPPER(streambuf_overflow, 8)
+#define call_streambuf_overflow(this, c) CALL_VTBL_FUNC(this, 28, int, (streambuf*, int), (this, c))
 int __thiscall streambuf_overflow(streambuf *this, int c)
 {
+    ERR("overflow is not implemented in streambuf\n");
     return EOF;
 }
 
@@ -480,8 +482,10 @@ int __thiscall streambuf_unbuffered_get(const streambuf *this)
 
 /* Unexported */
 DEFINE_THISCALL_WRAPPER(streambuf_underflow, 4)
+#define call_streambuf_underflow(this) CALL_VTBL_FUNC(this, 32, int, (streambuf*), (this))
 int __thiscall streambuf_underflow(streambuf *this)
 {
+    ERR("underflow is not implemented in streambuf\n");
     return EOF;
 }
 
@@ -498,19 +502,157 @@ void __thiscall streambuf_unlock(streambuf *this)
 /* ?xsgetn@streambuf@@UAEHPADH@Z */
 /* ?xsgetn@streambuf@@UEAAHPEADH@Z */
 DEFINE_THISCALL_WRAPPER(streambuf_xsgetn, 12)
+#define call_streambuf_xsgetn(this, buffer, count) CALL_VTBL_FUNC(this, 24, int, (streambuf*, char*, int), (this, buffer, count))
 int __thiscall streambuf_xsgetn(streambuf *this, char *buffer, int count)
 {
-    FIXME("(%p %p %d): stub\n", this, buffer, count);
-    return 0;
+    int copied = 0, chunk;
+
+    TRACE("(%p %p %d)\n", this, buffer, count);
+
+    if (this->unbuffered) {
+        if (this->stored_char == EOF)
+            this->stored_char = call_streambuf_underflow(this);
+        while (copied < count && this->stored_char != EOF) {
+            buffer[copied++] = this->stored_char;
+            this->stored_char = call_streambuf_underflow(this);
+        }
+    } else {
+        while (copied < count) {
+            if (call_streambuf_underflow(this) == EOF)
+                break;
+            chunk = this->egptr - this->gptr;
+            if (chunk > count - copied)
+                chunk = count - copied;
+            memcpy(buffer+copied, this->gptr, chunk);
+            this->gptr += chunk;
+            copied += chunk;
+        }
+    }
+    return copied;
 }
 
 /* ?xsputn@streambuf@@UAEHPBDH@Z */
 /* ?xsputn@streambuf@@UEAAHPEBDH@Z */
 DEFINE_THISCALL_WRAPPER(streambuf_xsputn, 12)
+#define call_streambuf_xsputn(this, data, length) CALL_VTBL_FUNC(this, 20, int, (streambuf*, const char*, int), (this, data, length))
 int __thiscall streambuf_xsputn(streambuf *this, const char *data, int length)
 {
-    FIXME("(%p %p %d): stub\n", this, data, length);
-    return 0;
+    int copied = 0, chunk;
+
+    TRACE("(%p %p %d)\n", this, data, length);
+
+    while (copied < length) {
+        if (this->unbuffered || this->pptr == this->epptr) {
+            if (call_streambuf_overflow(this, data[copied]) == EOF)
+                break;
+            copied++;
+        } else {
+            chunk = this->epptr - this->pptr;
+            if (chunk > length - copied)
+                chunk = length - copied;
+            memcpy(this->pptr, data+copied, chunk);
+            this->pptr += chunk;
+            copied += chunk;
+        }
+    }
+    return copied;
+}
+
+/* ?sgetc@streambuf@@QAEHXZ */
+/* ?sgetc@streambuf@@QEAAHXZ */
+DEFINE_THISCALL_WRAPPER(streambuf_sgetc, 4)
+int __thiscall streambuf_sgetc(streambuf *this)
+{
+    TRACE("(%p)\n", this);
+    if (this->unbuffered) {
+        if (this->stored_char == EOF)
+            this->stored_char = call_streambuf_underflow(this);
+        return this->stored_char;
+    } else
+        return call_streambuf_underflow(this);
+}
+
+/* ?sputc@streambuf@@QAEHH@Z */
+/* ?sputc@streambuf@@QEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(streambuf_sputc, 8)
+int __thiscall streambuf_sputc(streambuf *this, int ch)
+{
+    TRACE("(%p %d)\n", this, ch);
+    return (this->pptr < this->epptr) ? *this->pptr++ = ch : call_streambuf_overflow(this, ch);
+}
+
+/* ?sgetn@streambuf@@QAEHPADH@Z */
+/* ?sgetn@streambuf@@QEAAHPEADH@Z */
+DEFINE_THISCALL_WRAPPER(streambuf_sgetn, 12)
+int __thiscall streambuf_sgetn(streambuf *this, char *buffer, int count)
+{
+    return call_streambuf_xsgetn(this, buffer, count);
+}
+
+/* ?sputn@streambuf@@QAEHPBDH@Z */
+/* ?sputn@streambuf@@QEAAHPEBDH@Z */
+DEFINE_THISCALL_WRAPPER(streambuf_sputn, 12)
+int __thiscall streambuf_sputn(streambuf *this, const char *data, int length)
+{
+    return call_streambuf_xsputn(this, data, length);
+}
+
+/* ?snextc@streambuf@@QAEHXZ */
+/* ?snextc@streambuf@@QEAAHXZ */
+DEFINE_THISCALL_WRAPPER(streambuf_snextc, 4)
+int __thiscall streambuf_snextc(streambuf *this)
+{
+    TRACE("(%p)\n", this);
+    if (this->unbuffered) {
+        if (this->stored_char == EOF)
+            call_streambuf_underflow(this);
+        return this->stored_char = call_streambuf_underflow(this);
+    } else {
+        if (this->gptr >= this->egptr)
+            call_streambuf_underflow(this);
+        this->gptr++;
+        return (this->gptr < this->egptr) ? *this->gptr : call_streambuf_underflow(this);
+    }
+}
+
+/* ?sbumpc@streambuf@@QAEHXZ */
+/* ?sbumpc@streambuf@@QEAAHXZ */
+DEFINE_THISCALL_WRAPPER(streambuf_sbumpc, 4)
+int __thiscall streambuf_sbumpc(streambuf *this)
+{
+    int ret;
+
+    TRACE("(%p)\n", this);
+
+    if (this->unbuffered) {
+        ret = this->stored_char;
+        this->stored_char = EOF;
+        if (ret == EOF)
+            ret = call_streambuf_underflow(this);
+    } else {
+        ret = (this->gptr < this->egptr) ? *this->gptr : call_streambuf_underflow(this);
+        this->gptr++;
+    }
+    return ret;
+}
+
+/* ?stossc@streambuf@@QAEXXZ */
+/* ?stossc@streambuf@@QEAAXXZ */
+DEFINE_THISCALL_WRAPPER(streambuf_stossc, 4)
+void __thiscall streambuf_stossc(streambuf *this)
+{
+    TRACE("(%p)\n", this);
+    if (this->unbuffered) {
+        if (this->stored_char == EOF)
+            call_streambuf_underflow(this);
+        else
+            this->stored_char = EOF;
+    } else {
+        if (this->gptr >= this->egptr)
+            call_streambuf_underflow(this);
+        if (this->gptr < this->egptr)
+            this->gptr++;
+    }
 }
 
 /******************************************************************

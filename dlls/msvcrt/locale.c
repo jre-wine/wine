@@ -217,9 +217,16 @@ extern int atoi(const char *);
 /* Internal: Find the LCID for a locale specification */
 LCID MSVCRT_locale_to_LCID(const char *locale, unsigned short *codepage)
 {
+    thread_data_t *data = msvcrt_get_thread_data();
     LCID lcid;
     locale_search_t search;
     const char *cp, *region;
+
+    if (!strcmp(locale, data->cached_locale)) {
+        if (codepage)
+            *codepage = data->cached_cp;
+        return data->cached_lcid;
+    }
 
     memset(&search, 0, sizeof(locale_search_t));
 
@@ -291,6 +298,12 @@ LCID MSVCRT_locale_to_LCID(const char *locale, unsigned short *codepage)
     }
     if (codepage)
         *codepage = atoi(search.found_codepage);
+
+    if (strlen(locale) < sizeof(data->cached_locale)) {
+        strcpy(data->cached_locale, locale);
+        data->cached_lcid = lcid;
+        data->cached_cp = codepage ? *codepage : atoi(search.found_codepage);
+    }
 
     return lcid;
 }
@@ -628,6 +641,15 @@ int CDECL __crtGetLocaleInfoW( LCID lcid, LCTYPE type, MSVCRT_wchar_t *buffer, i
 }
 
 /*********************************************************************
+ *		__crtGetLocaleInfoEx (MSVC110.@)
+ */
+int CDECL __crtGetLocaleInfoEx( const WCHAR *locale, LCTYPE type, MSVCRT_wchar_t *buffer, int len )
+{
+    TRACE("(%s, %x, %p, %d)\n", debugstr_w(locale), type, buffer, len);
+    return GetLocaleInfoEx(locale, type, buffer, len);
+}
+
+/*********************************************************************
  *              btowc(MSVCRT.@)
  */
 MSVCRT_wint_t CDECL MSVCRT_btowc(int c)
@@ -684,6 +706,16 @@ LCID* CDECL ___lc_handle_func(void)
 }
 
 /*********************************************************************
+ *      ___lc_locale_name_func (MSVCR110.@)
+ */
+#if _MSVCR_VER >= 110
+MSVCRT_wchar_t** CDECL ___lc_locale_name_func(void)
+{
+    return get_locinfo()->lc_name;
+}
+#endif
+
+/*********************************************************************
  *      ___lc_codepage_func (MSVCRT.@)
  */
 unsigned int CDECL ___lc_codepage_func(void)
@@ -713,6 +745,9 @@ void free_locinfo(MSVCRT_pthreadlocinfo locinfo)
     for(i=MSVCRT_LC_MIN+1; i<=MSVCRT_LC_MAX; i++) {
         MSVCRT_free(locinfo->lc_category[i].locale);
         MSVCRT_free(locinfo->lc_category[i].refcount);
+#if _MSVCR_VER >= 110
+        MSVCRT_free(locinfo->lc_name[i]);
+#endif
     }
 
     if(locinfo->lconv) {
@@ -793,6 +828,33 @@ void CDECL MSVCRT__free_locale(MSVCRT__locale_t locale)
     free_mbcinfo(locale->mbcinfo);
     MSVCRT_free(locale);
 }
+
+#if _MSVCR_VER >= 110
+static inline BOOL set_lc_locale_name(MSVCRT__locale_t loc, int cat)
+{
+    LCID lcid = loc->locinfo->lc_handle[cat];
+    WCHAR buf[100];
+    int len;
+
+    len = GetLocaleInfoW(lcid, LOCALE_SISO639LANGNAME
+            |LOCALE_NOUSEROVERRIDE, buf, 100);
+    if(!len) return FALSE;
+
+    if(LocaleNameToLCID(buf, 0) != lcid)
+        len = LCIDToLocaleName(lcid, buf, 100, 0);
+
+    if(!len || !(loc->locinfo->lc_name[cat] = MSVCRT_malloc(len*sizeof(MSVCRT_wchar_t))))
+        return FALSE;
+
+    memcpy(loc->locinfo->lc_name[cat], buf, len*sizeof(MSVCRT_wchar_t));
+    return TRUE;
+}
+#else
+static inline BOOL set_lc_locale_name(MSVCRT__locale_t loc, int cat)
+{
+    return TRUE;
+}
+#endif
 
 /*********************************************************************
  *      _create_locale (MSVCRT.@)
@@ -950,6 +1012,11 @@ MSVCRT__locale_t CDECL MSVCRT__create_locale(int category, const char *locale)
         }
 
         loc->locinfo->lc_collate_cp = loc->locinfo->lc_id[MSVCRT_LC_COLLATE].wCodePage;
+
+        if(!set_lc_locale_name(loc, MSVCRT_LC_COLLATE)) {
+            MSVCRT__free_locale(loc);
+            return NULL;
+        }
     } else
         loc->locinfo->lc_category[MSVCRT_LC_COLLATE].locale = MSVCRT__strdup("C");
 
@@ -995,6 +1062,11 @@ MSVCRT__locale_t CDECL MSVCRT__create_locale(int category, const char *locale)
         for(i=0; cp_info.LeadByte[i+1]!=0; i+=2)
             for(j=cp_info.LeadByte[i]; j<=cp_info.LeadByte[i+1]; j++)
                 loc->locinfo->ctype1[j+1] |= MSVCRT__LEADBYTE;
+
+        if(!set_lc_locale_name(loc, MSVCRT_LC_CTYPE)) {
+            MSVCRT__free_locale(loc);
+            return NULL;
+        }
     } else {
         loc->locinfo->lc_clike = 1;
         loc->locinfo->mb_cur_max = 1;
@@ -1229,6 +1301,10 @@ MSVCRT__locale_t CDECL MSVCRT__create_locale(int category, const char *locale)
         }
 #endif
 
+        if(!set_lc_locale_name(loc, MSVCRT_LC_MONETARY)) {
+            MSVCRT__free_locale(loc);
+            return NULL;
+        }
     } else {
         loc->locinfo->lconv->int_curr_symbol = MSVCRT_malloc(sizeof(char));
         loc->locinfo->lconv->currency_symbol = MSVCRT_malloc(sizeof(char));
@@ -1358,6 +1434,10 @@ MSVCRT__locale_t CDECL MSVCRT__create_locale(int category, const char *locale)
         }
 #endif
 
+        if(!set_lc_locale_name(loc, MSVCRT_LC_NUMERIC)) {
+            MSVCRT__free_locale(loc);
+            return NULL;
+        }
     } else {
         loc->locinfo->lconv->decimal_point = MSVCRT_malloc(sizeof(char[2]));
         loc->locinfo->lconv->thousands_sep = MSVCRT_malloc(sizeof(char));
@@ -1392,6 +1472,11 @@ MSVCRT__locale_t CDECL MSVCRT__create_locale(int category, const char *locale)
 
     if(lcid[MSVCRT_LC_TIME] && (category==MSVCRT_LC_ALL || category==MSVCRT_LC_TIME)) {
         if(update_threadlocinfo_category(lcid[MSVCRT_LC_TIME], cp[MSVCRT_LC_TIME], loc, MSVCRT_LC_TIME)) {
+            MSVCRT__free_locale(loc);
+            return NULL;
+        }
+
+        if(!set_lc_locale_name(loc, MSVCRT_LC_TIME)) {
             MSVCRT__free_locale(loc);
             return NULL;
         }
@@ -1505,6 +1590,11 @@ char* CDECL MSVCRT_setlocale(int category, const char* locale)
             swap_pointers((void**)&locinfo->lc_category[MSVCRT_LC_COLLATE].refcount,
                     (void**)&loc->locinfo->lc_category[MSVCRT_LC_COLLATE].refcount);
 
+#if _MSVCR_VER >= 110
+            swap_pointers((void**)&locinfo->lc_name[MSVCRT_LC_COLLATE],
+                    (void**)&loc->locinfo->lc_name[MSVCRT_LC_COLLATE]);
+#endif
+
             if(category != MSVCRT_LC_ALL)
                 break;
             /* fall through */
@@ -1526,6 +1616,11 @@ char* CDECL MSVCRT_setlocale(int category, const char* locale)
             swap_pointers((void**)&locinfo->pctype, (void**)&loc->locinfo->pctype);
             swap_pointers((void**)&locinfo->pclmap, (void**)&loc->locinfo->pclmap);
             swap_pointers((void**)&locinfo->pcumap, (void**)&loc->locinfo->pcumap);
+
+#if _MSVCR_VER >= 110
+            swap_pointers((void**)&locinfo->lc_name[MSVCRT_LC_CTYPE],
+                    (void**)&loc->locinfo->lc_name[MSVCRT_LC_CTYPE]);
+#endif
 
             if(category != MSVCRT_LC_ALL)
                 break;
@@ -1577,6 +1672,11 @@ char* CDECL MSVCRT_setlocale(int category, const char* locale)
             locinfo->lconv->p_sign_posn = loc->locinfo->lconv->p_sign_posn;
             locinfo->lconv->n_sign_posn = loc->locinfo->lconv->n_sign_posn;
 
+#if _MSVCR_VER >= 110
+            swap_pointers((void**)&locinfo->lc_name[MSVCRT_LC_MONETARY],
+                    (void**)&loc->locinfo->lc_name[MSVCRT_LC_MONETARY]);
+#endif
+
             if(category != MSVCRT_LC_ALL)
                 break;
             /* fall through */
@@ -1602,6 +1702,11 @@ char* CDECL MSVCRT_setlocale(int category, const char* locale)
                     (void**)&loc->locinfo->lconv->_W_thousands_sep);
 #endif
 
+#if _MSVCR_VER >= 110
+            swap_pointers((void**)&locinfo->lc_name[MSVCRT_LC_NUMERIC],
+                    (void**)&loc->locinfo->lc_name[MSVCRT_LC_NUMERIC]);
+#endif
+
             if(category != MSVCRT_LC_ALL)
                 break;
             /* fall through */
@@ -1614,6 +1719,11 @@ char* CDECL MSVCRT_setlocale(int category, const char* locale)
                     (void**)&loc->locinfo->lc_category[MSVCRT_LC_TIME].refcount);
             swap_pointers((void**)&locinfo->lc_time_curr,
                     (void**)&loc->locinfo->lc_time_curr);
+
+#if _MSVCR_VER >= 110
+            swap_pointers((void**)&locinfo->lc_name[MSVCRT_LC_TIME],
+                    (void**)&loc->locinfo->lc_name[MSVCRT_LC_TIME]);
+#endif
 
             if(category != MSVCRT_LC_ALL)
                 break;

@@ -250,9 +250,10 @@ static inline void restore_fpu( CONTEXT *context, const ucontext_t *sigcontext )
 /**************************************************************************
  *		__chkstk (NTDLL.@)
  *
- * Should check if we can decrement SP by the value provided in r4, but we shouldn't need that.
+ * Incoming r4 contains words to allocate, converting to bytes then return
  */
-__ASM_GLOBAL_FUNC( __chkstk, "bx lr" )
+__ASM_GLOBAL_FUNC( __chkstk, "lsl r4, r4, #2\n\t"
+                             "bx lr" )
 
 /***********************************************************************
  *		RtlCaptureContext (NTDLL.@)
@@ -261,7 +262,7 @@ __ASM_GLOBAL_FUNC( __chkstk, "bx lr" )
 __ASM_STDCALL_FUNC( RtlCaptureContext, 4,
                     ".arm\n\t"
                     "stmfd SP!, {r1}\n\t"
-                    "mov r1, #0x40\n\t"     /* CONTEXT_ARM */
+                    "mov r1, #0x0200000\n\t"/* CONTEXT_ARM */
                     "add r1, r1, #0x3\n\t"  /* CONTEXT_FULL */
                     "str r1, [r0]\n\t"      /* context->ContextFlags */
                     "ldmfd SP!, {r1}\n\t"
@@ -911,21 +912,6 @@ void signal_free_thread( TEB *teb )
     NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
 }
 
-/**********************************************************************
- *      set_tpidrurw
- *
- * Win32/ARM applications expect the TEB pointer to be in the TPIDRURW register.
- */
-#ifdef __ARM_ARCH_7A__
-extern void set_tpidrurw( TEB *teb );
-__ASM_GLOBAL_FUNC( set_tpidrurw,
-                   "mcr p15, 0, r0, c13, c0, 2\n\t" /* TEB -> TPIDRURW */
-                   "bx lr" )
-#else
-void set_tpidrurw( TEB *teb )
-{
-}
-#endif
 
 /**********************************************************************
  *		signal_init_thread
@@ -939,7 +925,12 @@ void signal_init_thread( TEB *teb )
         pthread_key_create( &teb_key, NULL );
         init_done = TRUE;
     }
-    set_tpidrurw( teb );
+
+#ifdef __ARM_ARCH_7A__
+    /* Win32/ARM applications expect the TEB pointer to be in the TPIDRURW register. */
+    __asm__ __volatile__( "mcr p15, 0, %0, c13, c0, 2" : : "r" (teb) );
+#endif
+
     pthread_setspecific( teb_key, teb );
 }
 

@@ -41,6 +41,9 @@
 WINE_DEFAULT_DEBUG_CHANNEL(secur32);
 WINE_DECLARE_DEBUG_CHANNEL(winediag);
 
+/* Not present in gnutls version < 2.9.10. */
+extern int gnutls_cipher_get_block_size(gnutls_cipher_algorithm_t algorithm);
+
 static void *libgnutls_handle;
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 MAKE_FUNCPTR(gnutls_alert_get);
@@ -49,6 +52,7 @@ MAKE_FUNCPTR(gnutls_certificate_allocate_credentials);
 MAKE_FUNCPTR(gnutls_certificate_free_credentials);
 MAKE_FUNCPTR(gnutls_certificate_get_peers);
 MAKE_FUNCPTR(gnutls_cipher_get);
+MAKE_FUNCPTR(gnutls_cipher_get_block_size);
 MAKE_FUNCPTR(gnutls_cipher_get_key_size);
 MAKE_FUNCPTR(gnutls_credentials_set);
 MAKE_FUNCPTR(gnutls_deinit);
@@ -75,7 +79,34 @@ MAKE_FUNCPTR(gnutls_transport_set_pull_function);
 MAKE_FUNCPTR(gnutls_transport_set_push_function);
 #undef MAKE_FUNCPTR
 
+#if GNUTLS_VERSION_MAJOR < 3
+#define GNUTLS_CIPHER_AES_192_CBC 92
+#define GNUTLS_CIPHER_AES_128_GCM 93
+#define GNUTLS_CIPHER_AES_256_GCM 94
+#endif
 
+static int compat_cipher_get_block_size(gnutls_cipher_algorithm_t cipher)
+{
+    switch(cipher) {
+    case GNUTLS_CIPHER_3DES_CBC:
+        return 8;
+    case GNUTLS_CIPHER_AES_128_CBC:
+    case GNUTLS_CIPHER_AES_256_CBC:
+        return 16;
+    case GNUTLS_CIPHER_ARCFOUR_128:
+    case GNUTLS_CIPHER_ARCFOUR_40:
+        return 1;
+    case GNUTLS_CIPHER_DES_CBC:
+        return 8;
+    case GNUTLS_CIPHER_NULL:
+        return 1;
+    case GNUTLS_CIPHER_RC2_40_CBC:
+        return 8;
+    default:
+        FIXME("Unknown cipher %#x, returning 1\n", cipher);
+        return 1;
+    }
+}
 
 static ssize_t schan_pull_adapter(gnutls_transport_ptr_t transport,
                                       void *buff, size_t buff_len)
@@ -239,37 +270,6 @@ SECURITY_STATUS schan_imp_handshake(schan_imp_session session)
     return SEC_E_OK;
 }
 
-static unsigned int schannel_get_cipher_block_size(gnutls_cipher_algorithm_t cipher)
-{
-    const struct
-    {
-        gnutls_cipher_algorithm_t cipher;
-        unsigned int block_size;
-    }
-    algorithms[] =
-    {
-        {GNUTLS_CIPHER_3DES_CBC, 8},
-        {GNUTLS_CIPHER_AES_128_CBC, 16},
-        {GNUTLS_CIPHER_AES_256_CBC, 16},
-        {GNUTLS_CIPHER_ARCFOUR_128, 1},
-        {GNUTLS_CIPHER_ARCFOUR_40, 1},
-        {GNUTLS_CIPHER_DES_CBC, 8},
-        {GNUTLS_CIPHER_NULL, 1},
-        {GNUTLS_CIPHER_RC2_40_CBC, 8},
-    };
-    unsigned int i;
-
-    for (i = 0; i < sizeof(algorithms) / sizeof(*algorithms); ++i)
-    {
-        if (algorithms[i].cipher == cipher)
-            return algorithms[i].block_size;
-    }
-
-    FIXME("Unknown cipher %#x, returning 1\n", cipher);
-
-    return 1;
-}
-
 static DWORD schannel_get_protocol(gnutls_protocol_t proto)
 {
     /* FIXME: currently schannel only implements client connections, but
@@ -288,7 +288,7 @@ static DWORD schannel_get_protocol(gnutls_protocol_t proto)
     }
 }
 
-static ALG_ID schannel_get_cipher_algid(gnutls_cipher_algorithm_t cipher)
+static ALG_ID schannel_get_cipher_algid(int cipher)
 {
     switch (cipher)
     {
@@ -299,7 +299,10 @@ static ALG_ID schannel_get_cipher_algid(gnutls_cipher_algorithm_t cipher)
     case GNUTLS_CIPHER_DES_CBC:
     case GNUTLS_CIPHER_3DES_CBC: return CALG_DES;
     case GNUTLS_CIPHER_AES_128_CBC:
-    case GNUTLS_CIPHER_AES_256_CBC: return CALG_AES;
+    case GNUTLS_CIPHER_AES_128_GCM: return CALG_AES_128;
+    case GNUTLS_CIPHER_AES_192_CBC: return CALG_AES_192;
+    case GNUTLS_CIPHER_AES_256_GCM:
+    case GNUTLS_CIPHER_AES_256_CBC: return CALG_AES_256;
     case GNUTLS_CIPHER_RC2_40_CBC: return CALG_RC2;
     default:
         FIXME("unknown algorithm %d\n", cipher);
@@ -340,8 +343,7 @@ static ALG_ID schannel_get_kx_algid(gnutls_kx_algorithm_t kx)
 unsigned int schan_imp_get_session_cipher_block_size(schan_imp_session session)
 {
     gnutls_session_t s = (gnutls_session_t)session;
-    gnutls_cipher_algorithm_t cipher = pgnutls_cipher_get(s);
-    return schannel_get_cipher_block_size(cipher);
+    return pgnutls_cipher_get_block_size(pgnutls_cipher_get(s));
 }
 
 unsigned int schan_imp_get_max_message_size(schan_imp_session session)
@@ -524,6 +526,12 @@ BOOL schan_imp_init(void)
     LOAD_FUNCPTR(gnutls_transport_set_pull_function)
     LOAD_FUNCPTR(gnutls_transport_set_push_function)
 #undef LOAD_FUNCPTR
+
+    if (!(pgnutls_cipher_get_block_size = wine_dlsym(libgnutls_handle, "gnutls_cipher_get_block_size", NULL, 0)))
+    {
+        WARN("gnutls_cipher_get_block_size not found\n");
+        pgnutls_cipher_get_block_size = compat_cipher_get_block_size;
+    }
 
     ret = pgnutls_global_init();
     if (ret != GNUTLS_E_SUCCESS)

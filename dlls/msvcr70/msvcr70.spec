@@ -343,8 +343,8 @@
 @ cdecl _getpid() _getpid
 @ stub _getsystime(ptr)
 @ cdecl _getw(ptr) MSVCRT__getw
-@ stub _getwch
-@ stub _getwche
+@ cdecl _getwch()
+@ cdecl _getwche()
 @ cdecl _getws(ptr) MSVCRT__getws
 @ cdecl -arch=i386 _global_unwind2(ptr)
 @ cdecl _gmtime64(ptr) MSVCRT__gmtime64
@@ -495,7 +495,7 @@
 @ cdecl _putch(long)
 @ cdecl _putenv(str)
 @ cdecl _putw(long ptr) MSVCRT__putw
-@ cdecl _putwch(long) MSVCRT__putwch
+@ cdecl _putwch(long)
 @ cdecl _putws(wstr) MSVCRT__putws
 # extern _pwctype
 @ cdecl _read(long ptr long) MSVCRT__read
@@ -578,7 +578,7 @@
 @ cdecl _ultow(long ptr long) ntdll._ultow
 @ cdecl _umask(long) MSVCRT__umask
 @ cdecl _ungetch(long)
-@ stub _ungetwch
+@ cdecl _ungetwch(long)
 @ cdecl _unlink(str) MSVCRT__unlink
 @ cdecl _unloaddll(long)
 @ cdecl _unlock(long)
