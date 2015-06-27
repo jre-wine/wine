@@ -523,6 +523,9 @@ static HRESULT WINAPI dwritefontface_GetGlyphRunOutline(IDWriteFontFace2 *iface,
     if (is_sideways)
         FIXME("sideways mode is not supported.\n");
 
+    if (count)
+        ID2D1SimplifiedGeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
+
     for (g = 0; g < count; g++) {
         FLOAT xoffset = 0.0, yoffset = 0.0;
         struct glyph_outline *outline;
@@ -703,9 +706,11 @@ static HRESULT WINAPI dwritefontface1_GetRecommendedRenderingMode(IDWriteFontFac
     DWRITE_OUTLINE_THRESHOLD threshold, DWRITE_MEASURING_MODE measuring_mode, DWRITE_RENDERING_MODE *rendering_mode)
 {
     struct dwrite_fontface *This = impl_from_IDWriteFontFace2(iface);
-    FIXME("(%p)->(%f %f %f %p %d %d %d %p): stub\n", This, font_emsize, dpiX, dpiY, transform, is_sideways,
+    DWRITE_GRID_FIT_MODE gridfitmode;
+    TRACE("(%p)->(%.2f %.2f %.2f %p %d %d %d %p)\n", This, font_emsize, dpiX, dpiY, transform, is_sideways,
         threshold, measuring_mode, rendering_mode);
-    return E_NOTIMPL;
+    return IDWriteFontFace2_GetRecommendedRenderingMode(iface, font_emsize, dpiX, dpiY, transform, is_sideways,
+        threshold, measuring_mode, NULL, rendering_mode, &gridfitmode);
 }
 
 static HRESULT WINAPI dwritefontface1_GetVerticalGlyphVariants(IDWriteFontFace2 *iface, UINT32 glyph_count,
@@ -1435,10 +1440,10 @@ static UINT32 collection_find_family(struct dwrite_fontcollection *collection, c
 
     for (i = 0; i < collection->family_count; i++) {
         IDWriteLocalizedStrings *family_name = collection->family_data[i]->familyname;
+        UINT32 j, count = IDWriteLocalizedStrings_GetCount(family_name);
         HRESULT hr;
-        int j;
 
-        for (j = 0; j < IDWriteLocalizedStrings_GetCount(family_name); j++) {
+        for (j = 0; j < count; j++) {
             WCHAR buffer[255];
             hr = IDWriteLocalizedStrings_GetString(family_name, j, buffer, 255);
             if (SUCCEEDED(hr) && !strcmpiW(buffer, name))

@@ -424,7 +424,6 @@ AC_CHECK_HEADERS(\
 	lber.h \
 	ldap.h \
 	libproc.h \
-	libunwind.h \
 	link.h \
 	linux/cdrom.h \
 	linux/compiler.h \
@@ -751,6 +750,7 @@ uninstall::
     ;;
 
   darwin*|macosx*)
+    AC_CHECK_HEADERS(libunwind.h)
     LIBEXT="dylib"
     DLLFLAGS="$DLLFLAGS -fPIC"
     LIBWINE_LDFLAGS="-multiply_defined suppress"
@@ -2856,6 +2856,8 @@ WINE_CONFIG_DLL(d3dcompiler_41)
 WINE_CONFIG_DLL(d3dcompiler_42)
 WINE_CONFIG_DLL(d3dcompiler_43,,[implib],[d3dcompiler])
 WINE_CONFIG_TEST(dlls/d3dcompiler_43/tests)
+WINE_CONFIG_DLL(d3dcompiler_46)
+WINE_CONFIG_DLL(d3dcompiler_47)
 WINE_CONFIG_DLL(d3dim,,[implib])
 WINE_CONFIG_DLL(d3drm,,[implib])
 WINE_CONFIG_TEST(dlls/d3drm/tests)
@@ -3099,6 +3101,7 @@ WINE_CONFIG_DLL(msnet32)
 WINE_CONFIG_DLL(mspatcha,,[implib])
 WINE_CONFIG_DLL(msrle32,,[po])
 WINE_CONFIG_TEST(dlls/msrle32/tests)
+WINE_CONFIG_DLL(msscript.ocx,,[clean])
 WINE_CONFIG_DLL(mssign32)
 WINE_CONFIG_DLL(mssip32)
 WINE_CONFIG_DLL(mstask,,[clean])

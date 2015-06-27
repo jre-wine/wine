@@ -71,14 +71,340 @@ HRESULT WINAPI DllUnregisterServer(void)
 }
 
 typedef struct {
-    IClassFactory IClassFactory_iface;
-    HRESULT (*pfnCreateInstance)(IUnknown *pUnkOuter, IUnknown **ppObj);
-} IClassFactoryImpl;
+    IXAudio27 IXAudio27_iface;
+    IXAudio2 IXAudio2_iface;
+    LONG ref;
 
-static inline IClassFactoryImpl *impl_from_IClassFactory(IClassFactory *iface)
+    DWORD version;
+} IXAudio2Impl;
+
+static inline IXAudio2Impl *impl_from_IXAudio2(IXAudio2 *iface)
 {
-    return CONTAINING_RECORD(iface, IClassFactoryImpl, IClassFactory_iface);
+    return CONTAINING_RECORD(iface, IXAudio2Impl, IXAudio2_iface);
 }
+
+static inline IXAudio2Impl *impl_from_IXAudio27(IXAudio27 *iface)
+{
+    return CONTAINING_RECORD(iface, IXAudio2Impl, IXAudio27_iface);
+}
+
+static HRESULT WINAPI IXAudio2Impl_QueryInterface(IXAudio2 *iface, REFIID riid,
+        void **ppvObject)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppvObject);
+
+    if(IsEqualGUID(riid, &IID_IUnknown) ||
+            IsEqualGUID(riid, &IID_IXAudio2))
+        *ppvObject = &This->IXAudio2_iface;
+    else if(IsEqualGUID(riid, &IID_IXAudio27))
+        *ppvObject = &This->IXAudio27_iface;
+    else
+        *ppvObject = NULL;
+
+    if(*ppvObject){
+        IUnknown_AddRef((IUnknown*)*ppvObject);
+        return S_OK;
+    }
+
+    FIXME("(%p)->(%s,%p), not found\n", This,debugstr_guid(riid), ppvObject);
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI IXAudio2Impl_AddRef(IXAudio2 *iface)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+    ULONG ref = InterlockedIncrement(&This->ref);
+    TRACE("(%p)->(): Refcount now %u\n", This, ref);
+    return ref;
+}
+
+static ULONG WINAPI IXAudio2Impl_Release(IXAudio2 *iface)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p)->(): Refcount now %u\n", This, ref);
+
+    if (!ref)
+        HeapFree(GetProcessHeap(), 0, This);
+
+    return ref;
+}
+
+static HRESULT WINAPI IXAudio2Impl_RegisterForCallbacks(IXAudio2 *iface,
+        IXAudio2EngineCallback *pCallback)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(%p): stub!\n", This, pCallback);
+
+    return E_NOTIMPL;
+}
+
+static void WINAPI IXAudio2Impl_UnregisterForCallbacks(IXAudio2 *iface,
+        IXAudio2EngineCallback *pCallback)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(%p): stub!\n", This, pCallback);
+}
+
+static HRESULT WINAPI IXAudio2Impl_CreateSourceVoice(IXAudio2 *iface,
+        IXAudio2SourceVoice **ppSourceVoice, const WAVEFORMATEX *pSourceFormat,
+        UINT32 flags, float maxFrequencyRatio,
+        IXAudio2VoiceCallback *pCallback, const XAUDIO2_VOICE_SENDS *pSendList,
+        const XAUDIO2_EFFECT_CHAIN *pEffectChain)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(%p, %p, 0x%x, %f, %p, %p, %p): stub!\n", This, ppSourceVoice,
+            pSourceFormat, flags, maxFrequencyRatio, pCallback, pSendList,
+            pEffectChain);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IXAudio2Impl_CreateSubmixVoice(IXAudio2 *iface,
+        IXAudio2SubmixVoice **ppSubmixVoice, UINT32 inputChannels,
+        UINT32 inputSampleRate, UINT32 flags, UINT32 processingStage,
+        const XAUDIO2_VOICE_SENDS *pSendList,
+        const XAUDIO2_EFFECT_CHAIN *pEffectChain)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(%p, %u, %u, 0x%x, %u, %p, %p): stub!\n", This, ppSubmixVoice,
+            inputChannels, inputSampleRate, flags, processingStage, pSendList,
+            pEffectChain);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IXAudio2Impl_CreateMasteringVoice(IXAudio2 *iface,
+        IXAudio2MasteringVoice **ppMasteringVoice, UINT32 inputChannels,
+        UINT32 inputSampleRate, UINT32 flags, const WCHAR *deviceId,
+        const XAUDIO2_EFFECT_CHAIN *pEffectChain,
+        AUDIO_STREAM_CATEGORY streamCategory)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(%p, %u, %u, 0x%x, %s, %p, 0x%x): stub!\n", This,
+            ppMasteringVoice, inputChannels, inputSampleRate, flags,
+            wine_dbgstr_w(deviceId), pEffectChain, streamCategory);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IXAudio2Impl_StartEngine(IXAudio2 *iface)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(): stub!\n", This);
+
+    return E_NOTIMPL;
+}
+
+static void WINAPI IXAudio2Impl_StopEngine(IXAudio2 *iface)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(): stub!\n", This);
+}
+
+static HRESULT WINAPI IXAudio2Impl_CommitChanges(IXAudio2 *iface,
+        UINT32 operationSet)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(0x%x): stub!\n", This, operationSet);
+
+    return E_NOTIMPL;
+}
+
+static void WINAPI IXAudio2Impl_GetPerformanceData(IXAudio2 *iface,
+        XAUDIO2_PERFORMANCE_DATA *pPerfData)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(%p): stub!\n", This, pPerfData);
+}
+
+static void WINAPI IXAudio2Impl_SetDebugConfiguration(IXAudio2 *iface,
+        const XAUDIO2_DEBUG_CONFIGURATION *pDebugConfiguration,
+        void *pReserved)
+{
+    IXAudio2Impl *This = impl_from_IXAudio2(iface);
+
+    FIXME("(%p)->(%p, %p): stub!\n", This, pDebugConfiguration, pReserved);
+}
+
+/* XAudio2 2.8 */
+static const IXAudio2Vtbl XAudio2_Vtbl =
+{
+    IXAudio2Impl_QueryInterface,
+    IXAudio2Impl_AddRef,
+    IXAudio2Impl_Release,
+    IXAudio2Impl_RegisterForCallbacks,
+    IXAudio2Impl_UnregisterForCallbacks,
+    IXAudio2Impl_CreateSourceVoice,
+    IXAudio2Impl_CreateSubmixVoice,
+    IXAudio2Impl_CreateMasteringVoice,
+    IXAudio2Impl_StartEngine,
+    IXAudio2Impl_StopEngine,
+    IXAudio2Impl_CommitChanges,
+    IXAudio2Impl_GetPerformanceData,
+    IXAudio2Impl_SetDebugConfiguration
+};
+
+static HRESULT WINAPI XA27_QueryInterface(IXAudio27 *iface, REFIID riid,
+        void **ppvObject)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_QueryInterface(&This->IXAudio2_iface, riid, ppvObject);
+}
+
+static ULONG WINAPI XA27_AddRef(IXAudio27 *iface)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_AddRef(&This->IXAudio2_iface);
+}
+
+static ULONG WINAPI XA27_Release(IXAudio27 *iface)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_Release(&This->IXAudio2_iface);
+}
+
+static HRESULT WINAPI XA27_GetDeviceCount(IXAudio27 *iface, UINT32 *pCount)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    TRACE("(%p)->(%p)\n", This, pCount);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI XA27_GetDeviceDetails(IXAudio27 *iface, UINT32 index,
+        XAUDIO2_DEVICE_DETAILS *pDeviceDetails)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    TRACE("(%p)->(%u, %p)\n", This, index, pDeviceDetails);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI XA27_Initialize(IXAudio27 *iface, UINT32 flags,
+        XAUDIO2_PROCESSOR processor)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    TRACE("(%p)->(0x%x, 0x%x)\n", This, flags, processor);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI XA27_RegisterForCallbacks(IXAudio27 *iface,
+        IXAudio2EngineCallback *pCallback)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_RegisterForCallbacks(&This->IXAudio2_iface, pCallback);
+}
+
+static void WINAPI XA27_UnregisterForCallbacks(IXAudio27 *iface,
+        IXAudio2EngineCallback *pCallback)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    IXAudio2Impl_UnregisterForCallbacks(&This->IXAudio2_iface, pCallback);
+}
+
+static HRESULT WINAPI XA27_CreateSourceVoice(IXAudio27 *iface,
+        IXAudio2SourceVoice **ppSourceVoice, const WAVEFORMATEX *pSourceFormat,
+        UINT32 flags, float maxFrequencyRatio,
+        IXAudio2VoiceCallback *pCallback, const XAUDIO2_VOICE_SENDS *pSendList,
+        const XAUDIO2_EFFECT_CHAIN *pEffectChain)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_CreateSourceVoice(&This->IXAudio2_iface, ppSourceVoice,
+            pSourceFormat, flags, maxFrequencyRatio, pCallback, pSendList,
+            pEffectChain);
+}
+
+static HRESULT WINAPI XA27_CreateSubmixVoice(IXAudio27 *iface,
+        IXAudio2SubmixVoice **ppSubmixVoice, UINT32 inputChannels,
+        UINT32 inputSampleRate, UINT32 flags, UINT32 processingStage,
+        const XAUDIO2_VOICE_SENDS *pSendList,
+        const XAUDIO2_EFFECT_CHAIN *pEffectChain)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_CreateSubmixVoice(&This->IXAudio2_iface, ppSubmixVoice,
+            inputChannels, inputSampleRate, flags, processingStage, pSendList,
+            pEffectChain);
+}
+
+static HRESULT WINAPI XA27_CreateMasteringVoice(IXAudio27 *iface,
+        IXAudio2MasteringVoice **ppMasteringVoice, UINT32 inputChannels,
+        UINT32 inputSampleRate, UINT32 flags, UINT32 deviceIndex,
+        const XAUDIO2_EFFECT_CHAIN *pEffectChain)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    TRACE("(%p)->(%p, %u, %u, 0x%x, %u, %p)\n", This, ppMasteringVoice,
+            inputChannels, inputSampleRate, flags, deviceIndex,
+            pEffectChain);
+    /* TODO: Convert DeviceIndex to DeviceId */
+    return IXAudio2Impl_CreateMasteringVoice(&This->IXAudio2_iface,
+            ppMasteringVoice, inputChannels, inputSampleRate, flags, 0,
+            pEffectChain, AudioCategory_GameEffects);
+}
+
+static HRESULT WINAPI XA27_StartEngine(IXAudio27 *iface)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_StartEngine(&This->IXAudio2_iface);
+}
+
+static void WINAPI XA27_StopEngine(IXAudio27 *iface)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_StopEngine(&This->IXAudio2_iface);
+}
+
+static HRESULT WINAPI XA27_CommitChanges(IXAudio27 *iface, UINT32 operationSet)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_CommitChanges(&This->IXAudio2_iface, operationSet);
+}
+
+static void WINAPI XA27_GetPerformanceData(IXAudio27 *iface,
+        XAUDIO2_PERFORMANCE_DATA *pPerfData)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_GetPerformanceData(&This->IXAudio2_iface, pPerfData);
+}
+
+static void WINAPI XA27_SetDebugConfiguration(IXAudio27 *iface,
+        const XAUDIO2_DEBUG_CONFIGURATION *pDebugConfiguration,
+        void *pReserved)
+{
+    IXAudio2Impl *This = impl_from_IXAudio27(iface);
+    return IXAudio2Impl_SetDebugConfiguration(&This->IXAudio2_iface,
+            pDebugConfiguration, pReserved);
+}
+
+static const IXAudio27Vtbl XAudio27_Vtbl = {
+    XA27_QueryInterface,
+    XA27_AddRef,
+    XA27_Release,
+    XA27_GetDeviceCount,
+    XA27_GetDeviceDetails,
+    XA27_Initialize,
+    XA27_RegisterForCallbacks,
+    XA27_UnregisterForCallbacks,
+    XA27_CreateSourceVoice,
+    XA27_CreateSubmixVoice,
+    XA27_CreateMasteringVoice,
+    XA27_StartEngine,
+    XA27_StopEngine,
+    XA27_CommitChanges,
+    XA27_GetPerformanceData,
+    XA27_SetDebugConfiguration
+};
 
 static HRESULT WINAPI XAudio2CF_QueryInterface(IClassFactory *iface, REFIID riid, void **ppobj)
 {
@@ -108,26 +434,37 @@ static ULONG WINAPI XAudio2CF_Release(IClassFactory *iface)
 static HRESULT WINAPI XAudio2CF_CreateInstance(IClassFactory *iface, IUnknown *pOuter,
                                                REFIID riid, void **ppobj)
 {
-    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
     HRESULT hr;
-    IUnknown *punk;
+    IXAudio2Impl *object;
 
-    TRACE("(%p)->(%p,%s,%p)\n", This, pOuter, debugstr_guid(riid), ppobj);
+    TRACE("(static)->(%p,%s,%p)\n", pOuter, debugstr_guid(riid), ppobj);
 
     *ppobj = NULL;
-    hr = This->pfnCreateInstance(pOuter, &punk);
-    if (FAILED(hr))
-        return hr;
 
-    hr = IUnknown_QueryInterface(punk, riid, ppobj);
-    IUnknown_Release(punk);
+    if(pOuter)
+        return CLASS_E_NOAGGREGATION;
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if(!object)
+        return E_OUTOFMEMORY;
+
+    object->IXAudio27_iface.lpVtbl = &XAudio27_Vtbl;
+    object->IXAudio2_iface.lpVtbl = &XAudio2_Vtbl;
+
+    if(IsEqualGUID(riid, &IID_IXAudio27))
+        object->version = 27;
+    else
+        object->version = 28;
+
+    hr = IXAudio2_QueryInterface(&object->IXAudio2_iface, riid, ppobj);
+    if(FAILED(hr))
+        HeapFree(GetProcessHeap(), 0, object);
     return hr;
 }
 
 static HRESULT WINAPI XAudio2CF_LockServer(IClassFactory *iface, BOOL dolock)
 {
-    IClassFactoryImpl *This = impl_from_IClassFactory(iface);
-    FIXME("(%p)->(%d): stub!\n", This, dolock);
+    FIXME("(static)->(%d): stub!\n", dolock);
     return S_OK;
 }
 
@@ -140,35 +477,7 @@ static const IClassFactoryVtbl XAudio2CF_Vtbl =
     XAudio2CF_LockServer
 };
 
-typedef struct {
-    IXAudio2 IXAudio2Impl_iface;
-    LONG ref;
-} IXAudio2Impl;
-
-static const struct IXAudio2Vtbl XAudio2_Vtbl;
-
-HRESULT XAudio2_create(IUnknown *pUnkOuter, IUnknown **ppObj)
-{
-    IXAudio2Impl *object;
-
-    TRACE("(%p, %p)\n", pUnkOuter, ppObj);
-
-    if(pUnkOuter)
-        return CLASS_E_NOAGGREGATION;
-
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IXAudio2Impl));
-    if(!object)
-        return E_OUTOFMEMORY;
-
-    object->IXAudio2Impl_iface.lpVtbl = &XAudio2_Vtbl;
-    object->ref = 1;
-
-    *ppObj = (IUnknown *)&object->IXAudio2Impl_iface;
-
-    return S_OK;
-}
-
-static IClassFactoryImpl xaudio2_cf = { { &XAudio2CF_Vtbl }, XAudio2_create };
+static IClassFactory xaudio2_cf = { &XAudio2CF_Vtbl };
 
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
 {
@@ -177,188 +486,9 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
     TRACE("(%s, %s, %p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
 
     if(IsEqualGUID(rclsid, &CLSID_XAudio2)) {
-        factory = &xaudio2_cf.IClassFactory_iface;
+        factory = &xaudio2_cf;
     }
     if(!factory) return CLASS_E_CLASSNOTAVAILABLE;
 
     return IClassFactory_QueryInterface(factory, riid, ppv);
 }
-
-/*** IUnknown methods ***/
-static inline IXAudio2Impl *impl_from_IXAudio2(IXAudio2 *iface)
-{
-    return CONTAINING_RECORD(iface, IXAudio2Impl, IXAudio2Impl_iface);
-}
-
-static HRESULT WINAPI IXAudio2Impl_QueryInterface(IXAudio2 *iface, REFIID riid, void **ppvObject)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppvObject);
-
-    *ppvObject = NULL;
-
-    if(IsEqualGUID(riid, &IID_IUnknown) ||
-       IsEqualGUID(riid, &IID_IXAudio2))
-    {
-        IXAudio2_AddRef(iface);
-        *ppvObject = iface;
-        return S_OK;
-    }
-
-    FIXME("(%p)->(%s,%p), not found\n", This,debugstr_guid(riid), ppvObject);
-
-    return E_NOINTERFACE;
-}
-
-static ULONG WINAPI IXAudio2Impl_AddRef(IXAudio2 *iface)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    TRACE("(%p)->()\n", This);
-
-    return InterlockedIncrement(&This->ref);
-}
-
-static ULONG WINAPI IXAudio2Impl_Release(IXAudio2 *iface)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
-
-    TRACE("(%p)->()\n", This);
-
-    if (!ref)
-        HeapFree(GetProcessHeap(), 0, This);
-
-    return ref;
-}
-
-/*** IXAudio2 methods ***/
-static HRESULT WINAPI IXAudio2Impl_GetDeviceCount(IXAudio2 *iface, UINT32 *pCount)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%p): stub!\n", This, pCount);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IXAudio2Impl_GetDeviceDetails(IXAudio2 *iface, UINT32 index, XAUDIO2_DEVICE_DETAILS *pDeviceDetails)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%u, %p): stub!\n", This, index, pDeviceDetails);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IXAudio2Impl_Initialize(IXAudio2 *iface, UINT32 flags, XAUDIO2_PROCESSOR processor)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%u, %u): stub!\n", This, flags, processor);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI IXAudio2Impl_RegisterForCallbacks(IXAudio2 *iface, IXAudio2EngineCallback *pCallback)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%p): stub!\n", This, pCallback);
-
-    return E_NOTIMPL;
-}
-
-static void WINAPI IXAudio2Impl_UnregisterForCallbacks(IXAudio2 *iface, IXAudio2EngineCallback *pCallback)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%p): stub!\n", This, pCallback);
-}
-
-static HRESULT WINAPI IXAudio2Impl_CreateSourceVoice(IXAudio2 *iface, IXAudio2SourceVoice **ppSourceVoice, const WAVEFORMATEX *pSourceFormat, UINT32 flags, float maxFrequencyRatio, IXAudio2VoiceCallback *pCallback, const XAUDIO2_VOICE_SENDS *pSendList, const XAUDIO2_EFFECT_CHAIN *pEffectChain)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%p, %p, %u, %f, %p, %p, %p): stub!\n", This, ppSourceVoice, pSourceFormat, flags, maxFrequencyRatio, pCallback, pSendList, pEffectChain);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IXAudio2Impl_CreateSubmixVoice(IXAudio2 *iface, IXAudio2SubmixVoice **ppSubmixVoice, UINT32 inputChannels, UINT32 inputSampleRate, UINT32 flags, UINT32 processingStage, const XAUDIO2_VOICE_SENDS *pSendList, const XAUDIO2_EFFECT_CHAIN *pEffectChain)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%p, %u, %u, %u, %u, %p, %p): stub!\n", This, ppSubmixVoice, inputChannels, inputSampleRate, flags, processingStage, pSendList, pEffectChain);
-
-    return E_NOTIMPL;
-}
-
-static HRESULT WINAPI IXAudio2Impl_CreateMasteringVoice(IXAudio2 *iface, IXAudio2MasteringVoice **ppMasteringVoice, UINT32 inputChannels, UINT32 inputSampleRate, UINT32 flags, UINT32 deviceIndex, const XAUDIO2_EFFECT_CHAIN *pEffectChain)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%p, %u, %u, %u, %u, %p): stub!\n", This, ppMasteringVoice, inputChannels, inputSampleRate, flags, deviceIndex, pEffectChain);
-
-    return S_OK;
-}
-
-static HRESULT WINAPI IXAudio2Impl_StartEngine(IXAudio2 *iface)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(): stub!\n", This);
-
-    return E_NOTIMPL;
-}
-
-static void WINAPI IXAudio2Impl_StopEngine(IXAudio2 *iface)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(): stub!\n", This);
-}
-
-static HRESULT WINAPI IXAudio2Impl_CommitChanges(IXAudio2 *iface, UINT32 operationSet)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%u): stub!\n", This, operationSet);
-
-    return E_NOTIMPL;
-}
-
-static void WINAPI IXAudio2Impl_GetPerformanceData(IXAudio2 *iface, XAUDIO2_PERFORMANCE_DATA *pPerfData)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%p): stub!\n", This, pPerfData);
-}
-
-static void WINAPI IXAudio2Impl_SetDebugConfiguration(IXAudio2 *iface, const XAUDIO2_DEBUG_CONFIGURATION *pDebugConfiguration, void *pReserved)
-{
-    IXAudio2Impl *This = impl_from_IXAudio2(iface);
-
-    FIXME("(%p)->(%p, %p): stub!\n", This, pDebugConfiguration, pReserved);
-}
-
-static const IXAudio2Vtbl XAudio2_Vtbl =
-{
-    IXAudio2Impl_QueryInterface,
-    IXAudio2Impl_AddRef,
-    IXAudio2Impl_Release,
-    IXAudio2Impl_GetDeviceCount,
-    IXAudio2Impl_GetDeviceDetails,
-    IXAudio2Impl_Initialize,
-    IXAudio2Impl_RegisterForCallbacks,
-    IXAudio2Impl_UnregisterForCallbacks,
-    IXAudio2Impl_CreateSourceVoice,
-    IXAudio2Impl_CreateSubmixVoice,
-    IXAudio2Impl_CreateMasteringVoice,
-    IXAudio2Impl_StartEngine,
-    IXAudio2Impl_StopEngine,
-    IXAudio2Impl_CommitChanges,
-    IXAudio2Impl_GetPerformanceData,
-    IXAudio2Impl_SetDebugConfiguration
-};

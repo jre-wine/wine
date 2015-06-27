@@ -633,8 +633,16 @@ static HRESULT WINAPI textstream_SkipLine(ITextStream *iface)
 static HRESULT WINAPI textstream_Close(ITextStream *iface)
 {
     struct textstream *This = impl_from_ITextStream(iface);
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    HRESULT hr = S_OK;
+
+    TRACE("(%p)\n", This);
+
+    if(!CloseHandle(This->file))
+        hr = S_FALSE;
+
+    This->file = NULL;
+
+    return hr;
 }
 
 static const ITextStreamVtbl textstreamvtbl = {
@@ -2645,8 +2653,10 @@ static HRESULT WINAPI file_get_Attributes(IFile *iface, FileAttribute *pfa)
 static HRESULT WINAPI file_put_Attributes(IFile *iface, FileAttribute pfa)
 {
     struct file *This = impl_from_IFile(iface);
-    FIXME("(%p)->(%x)\n", This, pfa);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%x)\n", This, pfa);
+
+    return SetFileAttributesW(This->path, pfa) ? S_OK : create_error(GetLastError());
 }
 
 static HRESULT WINAPI file_get_DateCreated(IFile *iface, DATE *pdate)

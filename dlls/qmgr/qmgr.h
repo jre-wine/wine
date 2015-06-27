@@ -37,6 +37,7 @@
 typedef struct
 {
     IBackgroundCopyJob3 IBackgroundCopyJob3_iface;
+    IBackgroundCopyJobHttpOptions IBackgroundCopyJobHttpOptions_iface;
     LONG ref;
     LPWSTR displayName;
     LPWSTR description;
@@ -53,10 +54,19 @@ typedef struct
     struct list entryFromQmgr;
     struct
     {
+        WCHAR              *headers;
+        ULONG               flags;
+        BG_AUTH_CREDENTIALS creds[BG_AUTH_TARGET_PROXY][BG_AUTH_SCHEME_PASSPORT];
+    } http_options;
+    struct
+    {
         BG_ERROR_CONTEXT      context;
         HRESULT               code;
         IBackgroundCopyFile2 *file;
     } error;
+    HANDLE wait;
+    HANDLE cancel;
+    HANDLE done;
 } BackgroundCopyJobImpl;
 
 /* Background copy file vtbl and related data */
@@ -69,6 +79,7 @@ typedef struct
     WCHAR tempFileName[MAX_PATH];
     struct list entryFromJob;
     BackgroundCopyJobImpl *owner;
+    DWORD read_size;
 } BackgroundCopyFileImpl;
 
 /* Background copy manager vtbl and related data */
@@ -102,14 +113,21 @@ HRESULT EnumBackgroundCopyFilesConstructor(BackgroundCopyJobImpl*, IEnumBackgrou
 DWORD WINAPI fileTransfer(void *param) DECLSPEC_HIDDEN;
 void processJob(BackgroundCopyJobImpl *job) DECLSPEC_HIDDEN;
 BOOL processFile(BackgroundCopyFileImpl *file, BackgroundCopyJobImpl *job) DECLSPEC_HIDDEN;
+BOOL transitionJobState(BackgroundCopyJobImpl *job, BG_JOB_STATE from, BG_JOB_STATE to) DECLSPEC_HIDDEN;
 
 /* Little helper functions */
-static inline char *
-qmgr_strdup(const char *s)
+static inline WCHAR *strdupW(const WCHAR *src)
 {
-    size_t n = strlen(s) + 1;
-    char *d = HeapAlloc(GetProcessHeap(), 0, n);
-    return d ? memcpy(d, s, n) : NULL;
+    WCHAR *dst = HeapAlloc(GetProcessHeap(), 0, (strlenW(src) + 1) * sizeof(WCHAR));
+    if (dst) strcpyW(dst, src);
+    return dst;
+}
+
+static inline WCHAR *co_strdupW(const WCHAR *src)
+{
+    WCHAR *dst = CoTaskMemAlloc((strlenW(src) + 1) * sizeof(WCHAR));
+    if (dst) strcpyW(dst, src);
+    return dst;
 }
 
 static inline HRESULT return_strval(const WCHAR *str, WCHAR **ret)
@@ -123,21 +141,6 @@ static inline HRESULT return_strval(const WCHAR *str, WCHAR **ret)
     if (!*ret) return E_OUTOFMEMORY;
     strcpyW(*ret, str);
     return S_OK;
-}
-
-static inline BOOL
-transitionJobState(BackgroundCopyJobImpl *job, BG_JOB_STATE fromState,
-                   BG_JOB_STATE toState)
-{
-    BOOL rv = FALSE;
-    EnterCriticalSection(&globalMgr.cs);
-    if (job->state == fromState)
-    {
-        job->state = toState;
-        rv = TRUE;
-    }
-    LeaveCriticalSection(&globalMgr.cs);
-    return rv;
 }
 
 #endif /* __QMGR_H__ */

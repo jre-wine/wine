@@ -26,13 +26,13 @@
 #include "wingdi.h"
 
 #include "amstream_private.h"
-#include "amstream.h"
 
 #include "ddstream.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(amstream);
 
-static HRESULT ddrawstreamsample_create(IDirectDrawMediaStream *parent, IDirectDrawStreamSample **ddraw_stream_sample);
+static HRESULT ddrawstreamsample_create(IDirectDrawMediaStream *parent, IDirectDrawSurface *surface,
+    const RECT *rect, IDirectDrawStreamSample **ddraw_stream_sample);
 static HRESULT audiostreamsample_create(IAudioMediaStream *parent, IAudioData *audio_data, IAudioStreamSample **audio_stream_sample);
 
 typedef struct {
@@ -42,6 +42,7 @@ typedef struct {
     IMultiMediaStream* parent;
     MSPID purpose_id;
     STREAM_TYPE stream_type;
+    IDirectDraw7 *ddraw;
 } DirectDrawMediaStreamImpl;
 
 static inline DirectDrawMediaStreamImpl *impl_from_DirectDrawMediaStream_IAMMediaStream(IAMMediaStream *iface)
@@ -94,7 +95,11 @@ static ULONG WINAPI DirectDrawMediaStreamImpl_IAMMediaStream_Release(IAMMediaStr
     TRACE("(%p/%p)->(): new ref = %u\n", iface, This, ref);
 
     if (!ref)
+    {
+        if (This->ddraw)
+            IDirectDraw7_Release(This->ddraw);
         HeapFree(GetProcessHeap(), 0, This);
+    }
 
     return ref;
 }
@@ -242,48 +247,22 @@ static HRESULT WINAPI DirectDrawMediaStreamImpl_IDirectDrawMediaStream_QueryInte
         REFIID riid, void **ret_iface)
 {
     DirectDrawMediaStreamImpl *This = impl_from_IDirectDrawMediaStream(iface);
-
     TRACE("(%p/%p)->(%s,%p)\n", iface, This, debugstr_guid(riid), ret_iface);
-
-    if (IsEqualGUID(riid, &IID_IUnknown) ||
-        IsEqualGUID(riid, &IID_IMediaStream) ||
-        IsEqualGUID(riid, &IID_IDirectDrawMediaStream))
-    {
-        IDirectDrawMediaStream_AddRef(iface);
-        *ret_iface = iface;
-        return S_OK;
-    }
-    else if (IsEqualGUID(riid, &IID_IAMMediaStream))
-    {
-        IDirectDrawMediaStream_AddRef(iface);
-        *ret_iface = &This->IAMMediaStream_iface;
-        return S_OK;
-    }
-
-    ERR("(%p)->(%s,%p),not found\n", This, debugstr_guid(riid), ret_iface);
-    return E_NOINTERFACE;
+    return IAMMediaStream_QueryInterface(&This->IAMMediaStream_iface, riid, ret_iface);
 }
 
 static ULONG WINAPI DirectDrawMediaStreamImpl_IDirectDrawMediaStream_AddRef(IDirectDrawMediaStream *iface)
 {
     DirectDrawMediaStreamImpl *This = impl_from_IDirectDrawMediaStream(iface);
-
     TRACE("(%p/%p)\n", iface, This);
-
-    return InterlockedIncrement(&This->ref);
+    return IAMMediaStream_AddRef(&This->IAMMediaStream_iface);
 }
 
 static ULONG WINAPI DirectDrawMediaStreamImpl_IDirectDrawMediaStream_Release(IDirectDrawMediaStream *iface)
 {
     DirectDrawMediaStreamImpl *This = impl_from_IDirectDrawMediaStream(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
-
     TRACE("(%p/%p)\n", iface, This);
-
-    if (!ref)
-        HeapFree(GetProcessHeap(), 0, This);
-
-    return ref;
+    return IAMMediaStream_Release(&This->IAMMediaStream_iface);
 }
 
 /*** IMediaStream methods ***/
@@ -373,11 +352,22 @@ static HRESULT WINAPI DirectDrawMediaStreamImpl_IDirectDrawMediaStream_SetFormat
 }
 
 static HRESULT WINAPI DirectDrawMediaStreamImpl_IDirectDrawMediaStream_GetDirectDraw(IDirectDrawMediaStream *iface,
-        IDirectDraw **ppDirectDraw)
+        IDirectDraw **ddraw)
 {
-    FIXME("(%p)->(%p) stub!\n", iface, ppDirectDraw);
+    DirectDrawMediaStreamImpl *This = impl_from_IDirectDrawMediaStream(iface);
 
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p)\n", iface, ddraw);
+
+    *ddraw = NULL;
+    if (!This->ddraw)
+    {
+        HRESULT hr = DirectDrawCreateEx(NULL, (void**)&This->ddraw, &IID_IDirectDraw7, NULL);
+        if (FAILED(hr))
+            return hr;
+        IDirectDraw7_SetCooperativeLevel(This->ddraw, NULL, DDSCL_NORMAL);
+    }
+
+    return IDirectDraw7_QueryInterface(This->ddraw, &IID_IDirectDraw, (void**)ddraw);
 }
 
 static HRESULT WINAPI DirectDrawMediaStreamImpl_IDirectDrawMediaStream_SetDirectDraw(IDirectDrawMediaStream *iface,
@@ -389,12 +379,12 @@ static HRESULT WINAPI DirectDrawMediaStreamImpl_IDirectDrawMediaStream_SetDirect
 }
 
 static HRESULT WINAPI DirectDrawMediaStreamImpl_IDirectDrawMediaStream_CreateSample(IDirectDrawMediaStream *iface,
-        IDirectDrawSurface *pSurface, const RECT *pRect, DWORD dwFlags,
+        IDirectDrawSurface *surface, const RECT *rect, DWORD dwFlags,
         IDirectDrawStreamSample **ppSample)
 {
-    TRACE("(%p)->(%p,%p,%x,%p)\n", iface, pSurface, pRect, dwFlags, ppSample);
+    TRACE("(%p)->(%p,%s,%x,%p)\n", iface, surface, wine_dbgstr_rect(rect), dwFlags, ppSample);
 
-    return ddrawstreamsample_create(iface, ppSample);
+    return ddrawstreamsample_create(iface, surface, rect, ppSample);
 }
 
 static HRESULT WINAPI DirectDrawMediaStreamImpl_IDirectDrawMediaStream_GetTimePerFrame(IDirectDrawMediaStream *iface,
@@ -428,7 +418,7 @@ static const struct IDirectDrawMediaStreamVtbl DirectDrawMediaStreamImpl_IDirect
 };
 
 HRESULT ddrawmediastream_create(IMultiMediaStream *parent, const MSPID *purpose_id,
-        STREAM_TYPE stream_type, IMediaStream **media_stream)
+        STREAM_TYPE stream_type, IAMMediaStream **media_stream)
 {
     DirectDrawMediaStreamImpl *object;
 
@@ -446,7 +436,7 @@ HRESULT ddrawmediastream_create(IMultiMediaStream *parent, const MSPID *purpose_
     object->purpose_id = *purpose_id;
     object->stream_type = stream_type;
 
-    *media_stream = (IMediaStream*)&object->IAMMediaStream_iface;
+    *media_stream = &object->IAMMediaStream_iface;
 
     return S_OK;
 }
@@ -658,52 +648,22 @@ static HRESULT WINAPI AudioMediaStreamImpl_IAudioMediaStream_QueryInterface(IAud
         REFIID riid, void **ret_iface)
 {
     AudioMediaStreamImpl *This = impl_from_IAudioMediaStream(iface);
-
     TRACE("(%p/%p)->(%s,%p)\n", iface, This, debugstr_guid(riid), ret_iface);
-
-    if (IsEqualGUID(riid, &IID_IUnknown) ||
-        IsEqualGUID(riid, &IID_IMediaStream) ||
-        IsEqualGUID(riid, &IID_IAudioMediaStream))
-    {
-        IAudioMediaStream_AddRef(iface);
-        *ret_iface = iface;
-        return S_OK;
-    }
-    else if (IsEqualGUID(riid, &IID_IAMMediaStream))
-    {
-        IAudioMediaStream_AddRef(iface);
-        *ret_iface = &This->IAMMediaStream_iface;
-        return S_OK;
-    }
-
-
-    *ret_iface = NULL;
-
-    ERR("(%p/%p)->(%s,%p),not found\n", iface, This, debugstr_guid(riid), ret_iface);
-    return E_NOINTERFACE;
+    return IAMMediaStream_QueryInterface(&This->IAMMediaStream_iface, riid, ret_iface);
 }
 
 static ULONG WINAPI AudioMediaStreamImpl_IAudioMediaStream_AddRef(IAudioMediaStream *iface)
 {
     AudioMediaStreamImpl *This = impl_from_IAudioMediaStream(iface);
-    ULONG ref = InterlockedIncrement(&This->ref);
-
-    TRACE("(%p/%p): new ref = %u\n", iface, This, ref);
-
-    return ref;
+    TRACE("(%p/%p)\n", iface, This);
+    return IAMMediaStream_AddRef(&This->IAMMediaStream_iface);
 }
 
 static ULONG WINAPI AudioMediaStreamImpl_IAudioMediaStream_Release(IAudioMediaStream *iface)
 {
     AudioMediaStreamImpl *This = impl_from_IAudioMediaStream(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
-
-    TRACE("(%p/%p): new ref = %u\n", iface, This, ref);
-
-    if (!ref)
-        HeapFree(GetProcessHeap(), 0, This);
-
-    return ref;
+    TRACE("(%p/%p)\n", iface, This);
+    return IAMMediaStream_Release(&This->IAMMediaStream_iface);
 }
 
 /*** IMediaStream methods ***/
@@ -828,7 +788,7 @@ static const struct IAudioMediaStreamVtbl AudioMediaStreamImpl_IAudioMediaStream
 };
 
 HRESULT audiomediastream_create(IMultiMediaStream *parent, const MSPID *purpose_id,
-        STREAM_TYPE stream_type, IMediaStream **media_stream)
+        STREAM_TYPE stream_type, IAMMediaStream **media_stream)
 {
     AudioMediaStreamImpl *object;
 
@@ -846,7 +806,7 @@ HRESULT audiomediastream_create(IMultiMediaStream *parent, const MSPID *purpose_
     object->purpose_id = *purpose_id;
     object->stream_type = stream_type;
 
-    *media_stream = (IMediaStream*)&object->IAMMediaStream_iface;
+    *media_stream = &object->IAMMediaStream_iface;
 
     return S_OK;
 }
@@ -855,6 +815,8 @@ typedef struct {
     IDirectDrawStreamSample IDirectDrawStreamSample_iface;
     LONG ref;
     IMediaStream *parent;
+    IDirectDrawSurface *surface;
+    RECT rect;
 } IDirectDrawStreamSampleImpl;
 
 static inline IDirectDrawStreamSampleImpl *impl_from_IDirectDrawStreamSample(IDirectDrawStreamSample *iface)
@@ -901,7 +863,12 @@ static ULONG WINAPI IDirectDrawStreamSampleImpl_Release(IDirectDrawStreamSample 
     TRACE("(%p)->(): new ref = %u\n", iface, ref);
 
     if (!ref)
+    {
+        if (This->surface)
+            IDirectDrawSurface_Release(This->surface);
+        IMediaStream_Release(This->parent);
         HeapFree(GetProcessHeap(), 0, This);
+    }
 
     return ref;
 }
@@ -949,9 +916,21 @@ static HRESULT WINAPI IDirectDrawStreamSampleImpl_CompletionStatus(IDirectDrawSt
 static HRESULT WINAPI IDirectDrawStreamSampleImpl_GetSurface(IDirectDrawStreamSample *iface, IDirectDrawSurface **ddraw_surface,
                                                              RECT *rect)
 {
-    FIXME("(%p)->(%p,%p): stub\n", iface, ddraw_surface, rect);
+    IDirectDrawStreamSampleImpl *This = impl_from_IDirectDrawStreamSample(iface);
 
-    return E_NOTIMPL;
+    TRACE("(%p)->(%p,%p)\n", iface, ddraw_surface, rect);
+
+    if (ddraw_surface)
+    {
+        *ddraw_surface = This->surface;
+        if (*ddraw_surface)
+            IDirectDrawSurface_AddRef(*ddraw_surface);
+    }
+
+    if (rect)
+        *rect = This->rect;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IDirectDrawStreamSampleImpl_SetRect(IDirectDrawStreamSample *iface, const RECT *rect)
@@ -978,21 +957,78 @@ static const struct IDirectDrawStreamSampleVtbl DirectDrawStreamSample_Vtbl =
     IDirectDrawStreamSampleImpl_SetRect
 };
 
-static HRESULT ddrawstreamsample_create(IDirectDrawMediaStream *parent, IDirectDrawStreamSample **ddraw_stream_sample)
+static HRESULT ddrawstreamsample_create(IDirectDrawMediaStream *parent, IDirectDrawSurface *surface,
+    const RECT *rect, IDirectDrawStreamSample **ddraw_stream_sample)
 {
     IDirectDrawStreamSampleImpl *object;
+    HRESULT hr;
 
     TRACE("(%p)\n", ddraw_stream_sample);
 
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectDrawStreamSampleImpl));
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
     if (!object)
         return E_OUTOFMEMORY;
 
     object->IDirectDrawStreamSample_iface.lpVtbl = &DirectDrawStreamSample_Vtbl;
     object->ref = 1;
     object->parent = (IMediaStream*)parent;
+    IMediaStream_AddRef(object->parent);
 
-    *ddraw_stream_sample = (IDirectDrawStreamSample*)&object->IDirectDrawStreamSample_iface;
+    if (surface)
+    {
+        object->surface = surface;
+        IDirectDrawSurface_AddRef(surface);
+    }
+    else
+    {
+        DDSURFACEDESC desc;
+        IDirectDraw *ddraw;
+
+        hr = IDirectDrawMediaStream_GetDirectDraw(parent, &ddraw);
+        if (FAILED(hr))
+        {
+            IDirectDrawStreamSample_Release(&object->IDirectDrawStreamSample_iface);
+            return hr;
+        }
+
+        desc.dwSize = sizeof(desc);
+        desc.dwFlags = DDSD_CAPS|DDSD_HEIGHT|DDSD_WIDTH|DDSD_PIXELFORMAT;
+        desc.dwHeight = 100;
+        desc.dwWidth = 100;
+        desc.ddpfPixelFormat.dwSize = sizeof(desc.ddpfPixelFormat);
+        desc.ddpfPixelFormat.dwFlags = DDPF_RGB;
+        desc.ddpfPixelFormat.dwRGBBitCount = 32;
+        desc.ddpfPixelFormat.dwRBitMask = 0xff0000;
+        desc.ddpfPixelFormat.dwGBitMask = 0x00ff00;
+        desc.ddpfPixelFormat.dwBBitMask = 0x0000ff;
+        desc.ddpfPixelFormat.dwRGBAlphaBitMask = 0;
+        desc.ddsCaps.dwCaps = DDSCAPS_SYSTEMMEMORY|DDSCAPS_OFFSCREENPLAIN;
+
+        hr = IDirectDraw_CreateSurface(ddraw, &desc, &object->surface, NULL);
+        IDirectDraw_Release(ddraw);
+        if (FAILED(hr))
+        {
+            ERR("failed to create surface, 0x%08x\n", hr);
+            IDirectDrawStreamSample_Release(&object->IDirectDrawStreamSample_iface);
+            return hr;
+        }
+    }
+
+    if (rect)
+        object->rect = *rect;
+    else if (object->surface)
+    {
+        DDSURFACEDESC desc = { sizeof(desc) };
+        hr = IDirectDrawSurface_GetSurfaceDesc(object->surface, &desc);
+        if (hr == S_OK)
+        {
+            object->rect.left = object->rect.top = 0;
+            object->rect.right = desc.dwWidth;
+            object->rect.bottom = desc.dwHeight;
+        }
+    }
+
+    *ddraw_stream_sample = &object->IDirectDrawStreamSample_iface;
 
     return S_OK;
 }

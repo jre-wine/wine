@@ -159,7 +159,7 @@ typedef struct MSVCRT_threadlocaleinfostruct {
     MSVCRT_LC_ID lc_id[6];
     struct {
         char *locale;
-        wchar_t *wlocale;
+        MSVCRT_wchar_t *wlocale;
         int *refcount;
         int *wrefcount;
     } lc_category[6];
@@ -175,6 +175,9 @@ typedef struct MSVCRT_threadlocaleinfostruct {
     unsigned char *pclmap;
     unsigned char *pcumap;
     MSVCRT___lc_time_data *lc_time_curr;
+#if _MSVCR_VER >= 110
+    MSVCRT_wchar_t *lc_name[6];
+#endif
 } MSVCRT_threadlocinfo;
 
 typedef struct MSVCRT_threadmbcinfostruct {
@@ -234,7 +237,12 @@ struct __thread_data {
     void                           *unk6[3];
     int                             unk7;
     EXCEPTION_RECORD               *exc_record;
-    void                           *unk8[100];
+    void                           *unk8[7];
+    LCID                            cached_lcid;
+    int                             unk9[3];
+    DWORD                           cached_cp;
+    char                            cached_locale[131];
+    void                           *unk10[100];
 };
 
 typedef struct __thread_data thread_data_t;

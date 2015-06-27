@@ -14190,6 +14190,100 @@ basic_ostream_char* __cdecl basic_ostream_char_print_complex_ldouble(basic_ostre
     return ostr;
 }
 
+/* ?_File_size@sys@tr2@std@@YA_KPBD@Z  */
+/* ?_File_size@sys@tr2@std@@YA_KPEBD@Z */
+ULONGLONG __cdecl tr2_sys__File_size(const char* path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+
+    TRACE("(%p)\n", path);
+    if(!GetFileAttributesExA(path, GetFileExInfoStandard, &fad))
+        return 0;
+    if(fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        return 0;
+
+    return ((ULONGLONG)(fad.nFileSizeHigh) << 32) + fad.nFileSizeLow;
+}
+
+/* ?_Equivalent@sys@tr2@std@@YAHPBD0@Z  */
+/* ?_Equivalent@sys@tr2@std@@YAHPEBD0@Z */
+int __cdecl tr2_sys__Equivalent(char const* path1, char const* path2)
+{
+    HANDLE h1, h2;
+    int ret;
+    BY_HANDLE_FILE_INFORMATION info1, info2;
+    TRACE("(%p %p)\n", path1, path2);
+
+    h1 = CreateFileA(path1, 0, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NULL, OPEN_EXISTING, 0, 0);
+    h2 = CreateFileA(path2, 0, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NULL, OPEN_EXISTING, 0, 0);
+    if(h1 == INVALID_HANDLE_VALUE) {
+        if(h2 == INVALID_HANDLE_VALUE) {
+            return -1;
+        }else {
+            CloseHandle(h2);
+            return 0;
+        }
+    }else if(h2 == INVALID_HANDLE_VALUE) {
+        CloseHandle(h1);
+        return 0;
+    }
+
+    ret = GetFileInformationByHandle(h1, &info1) && GetFileInformationByHandle(h2, &info2);
+    CloseHandle(h1);
+    CloseHandle(h2);
+    if(!ret)
+        return -1;
+    return (info1.dwVolumeSerialNumber == info2.dwVolumeSerialNumber
+            && info1.nFileIndexHigh == info2.nFileIndexHigh
+            && info1.nFileIndexLow == info2.nFileIndexLow
+            );
+}
+
+/* ?_Current_get@sys@tr2@std@@YAPADAAY0BAE@D@Z */
+/* ?_Current_get@sys@tr2@std@@YAPEADAEAY0BAE@D@Z */
+char* __cdecl tr2_sys__Current_get(char *current_path)
+{
+    TRACE("(%p)\n", current_path);
+
+    if(!GetCurrentDirectoryA(MAX_PATH, current_path))
+        return NULL;
+    return current_path;
+}
+
+/* ?_Current_set@sys@tr2@std@@YA_NPBD@Z */
+/* ?_Current_set@sys@tr2@std@@YA_NPEBD@Z */
+MSVCP_bool __cdecl tr2_sys__Current_set(char const* path)
+{
+    TRACE("(%p)\n", path);
+    return SetCurrentDirectoryA(path) != 0;
+}
+
+/* ?_Make_dir@sys@tr2@std@@YAHPBD@Z */
+/* ?_Make_dir@sys@tr2@std@@YAHPEBD@Z */
+int __cdecl tr2_sys__Make_dir(char const* path)
+{
+    TRACE("(%p)\n", path);
+
+    if(!CreateDirectoryA(path, NULL)) {
+        if(GetLastError() == ERROR_ALREADY_EXISTS)
+            return 0;
+        else
+            return -1;
+    }
+
+    return 1;
+}
+
+/* ?_Remove_dir@sys@tr2@std@@YA_NPBD@Z */
+/* ?_Remove_dir@sys@tr2@std@@YA_NPEBD@Z */
+MSVCP_bool __cdecl tr2_sys__Remove_dir(char const* path)
+{
+    TRACE("(%p)\n", path);
+    return RemoveDirectoryA(path) != 0;
+}
+
 /* ??0strstream@std@@QAE@PADHH@Z */
 /* ??0strstream@std@@QEAA@PEAD_JH@Z */
 #if STREAMSIZE_BITS == 64

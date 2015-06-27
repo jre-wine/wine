@@ -802,6 +802,7 @@ void free_declaration(struct hlsl_ir_var *decl)
 {
     d3dcompiler_free((void *)decl->name);
     d3dcompiler_free((void *)decl->semantic);
+    d3dcompiler_free((void *)decl->reg_reservation);
     d3dcompiler_free(decl);
 }
 
@@ -1584,8 +1585,31 @@ struct hlsl_ir_node *make_assignment(struct hlsl_ir_node *left, enum parse_assig
         type = left->data_type;
     else
     {
-        FIXME("Assignments with writemasks not supported yet.\n");
-        type = NULL;
+        unsigned int dimx = 0;
+        DWORD bitmask;
+        enum hlsl_type_class type_class;
+
+        if (left->data_type->type > HLSL_CLASS_LAST_NUMERIC)
+        {
+            hlsl_report_message(left->loc.file, left->loc.line, left->loc.col, HLSL_LEVEL_ERROR,
+                    "writemask on a non scalar/vector/matrix type");
+            d3dcompiler_free(assign);
+            return NULL;
+        }
+        bitmask = writemask & ((1 << left->data_type->dimx) - 1);
+        while (bitmask)
+        {
+            if (bitmask & 1)
+                dimx++;
+            bitmask >>= 1;
+        }
+        if (left->data_type->type == HLSL_CLASS_MATRIX)
+            FIXME("Assignments with writemasks and matrices on lhs are not supported yet.\n");
+        if (dimx == 1)
+            type_class = HLSL_CLASS_SCALAR;
+        else
+            type_class = left->data_type->type;
+        type = new_hlsl_type(NULL, type_class, left->data_type->base_type, dimx, 1);
     }
     assign->node.type = HLSL_IR_ASSIGNMENT;
     assign->node.loc = left->loc;
@@ -2479,6 +2503,22 @@ void add_function_decl(struct wine_rb_tree *funcs, char *name, struct hlsl_ir_fu
     if (func_entry)
     {
         func = WINE_RB_ENTRY_VALUE(func_entry, struct hlsl_ir_function, entry);
+        if (intrinsic != func->intrinsic)
+        {
+            if (intrinsic)
+            {
+                ERR("Redeclaring a user defined function as an intrinsic.\n");
+                return;
+            }
+            TRACE("Function %s redeclared as a user defined function.\n", debugstr_a(name));
+            func->intrinsic = intrinsic;
+            wine_rb_destroy(&func->overloads, free_function_decl_rb, NULL);
+            if (wine_rb_init(&func->overloads, &hlsl_ir_function_decl_rb_funcs) == -1)
+            {
+                ERR("Failed to initialize function rbtree.\n");
+                return;
+            }
+        }
         decl->func = func;
         if ((old_entry = wine_rb_get(&func->overloads, decl->parameters)))
         {

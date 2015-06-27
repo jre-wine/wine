@@ -61,15 +61,7 @@ MSVCP_size_t __cdecl _Strftime(char*, MSVCP_size_t, const char*,
 const locale* __cdecl locale_classic(void);
 
 #if _MSVCP_VER >= 110
-static LCID* ___lc_handle_func(void)
-{
-    LCID *ret;
-
-    _locale_t loc = _get_current_locale();
-    ret = loc->locinfo->lc_handle;
-    _free_locale(loc);
-    return ret;
-}
+wchar_t ** __cdecl ___lc_locale_name_func(void);
 #else
 LCID* __cdecl ___lc_handle_func(void);
 #endif
@@ -128,8 +120,13 @@ typedef struct {
 } _Locinfo;
 
 typedef struct {
+#if _MSVCP_VER < 110
     LCID handle;
+#endif
     unsigned page;
+#if _MSVCP_VER >= 110
+    wchar_t *lc_name;
+#endif
 } _Collvec;
 
 typedef struct {
@@ -663,7 +660,11 @@ ULONGLONG __cdecl _Getcoll(void)
     TRACE("\n");
 
     ret.collvec.page = ___lc_collate_cp_func();
+#if _MSVCP_VER < 110
     ret.collvec.handle = ___lc_handle_func()[LC_COLLATE];
+#else
+    ret.collvec.lc_name = ___lc_locale_name_func()[LC_COLLATE];
+#endif
     return ret.ull;
 }
 
@@ -688,8 +689,7 @@ _Ctypevec* __cdecl _Getctype(_Ctypevec *ret)
 #if _MSVCP_VER < 110
     ret->handle = ___lc_handle_func()[LC_COLLATE];
 #else
-    /* FIXME: use ___lc_locale_name_func() */
-    ret->name = NULL;
+    ret->name = ___lc_locale_name_func()[LC_COLLATE];
 #endif
     ret->delfl = TRUE;
     table = malloc(sizeof(short[256]));
@@ -761,9 +761,15 @@ int __cdecl _Getdateorder(void)
 {
     WCHAR date_fmt[2];
 
+#if _MSVCP_VER < 110
     if(!GetLocaleInfoW(___lc_handle_func()[LC_TIME], LOCALE_ILDATE,
                 date_fmt, sizeof(date_fmt)/sizeof(*date_fmt)))
         return DATEORDER_no_order;
+#else
+    if(!GetLocaleInfoEx(___lc_locale_name_func()[LC_TIME], LOCALE_ILDATE,
+                date_fmt, sizeof(date_fmt)/sizeof(*date_fmt)))
+        return DATEORDER_no_order;
+#endif
 
     if(*date_fmt == '0') return DATEORDER_mdy;
     if(*date_fmt == '1') return DATEORDER_dmy;
@@ -1085,10 +1091,11 @@ int __cdecl _Strcoll(const char *first1, const char *last1, const char *first2,
 
     TRACE("(%s %s)\n", debugstr_an(first1, last1-first1), debugstr_an(first2, last2-first2));
 
-    if(coll)
-        lcid = coll->handle;
-    else
-        lcid = ___lc_handle_func()[LC_COLLATE];
+#if _MSVCP_VER < 110
+    lcid = (coll ? coll->handle : ___lc_handle_func()[LC_COLLATE]);
+#else
+    lcid = LocaleNameToLCID(coll ? coll->lc_name : ___lc_locale_name_func()[LC_COLLATE], 0);
+#endif
     return CompareStringA(lcid, 0, first1, last1-first1, first2, last2-first2)-CSTR_EQUAL;
 }
 
@@ -1419,15 +1426,15 @@ static collate* collate_short_use_facet(const locale *loc)
 int __cdecl _Wcscoll(const wchar_t *first1, const wchar_t *last1, const wchar_t *first2,
         const wchar_t *last2, const _Collvec *coll)
 {
-    LCID lcid;
-
     TRACE("(%s %s)\n", debugstr_wn(first1, last1-first1), debugstr_wn(first2, last2-first2));
 
-    if(coll)
-        lcid = coll->handle;
-    else
-        lcid = ___lc_handle_func()[LC_COLLATE];
-    return CompareStringW(lcid, 0, first1, last1-first1, first2, last2-first2)-CSTR_EQUAL;
+#if _MSVCP_VER < 110
+    return CompareStringW(coll ? coll->handle : ___lc_handle_func()[LC_COLLATE],
+            0, first1, last1-first1, first2, last2-first2)-CSTR_EQUAL;
+#else
+    return CompareStringEx(coll ? coll->lc_name : ___lc_locale_name_func()[LC_COLLATE],
+            0, first1, last1-first1, first2, last2-first2, NULL, NULL, 0)-CSTR_EQUAL;
+#endif
 }
 
 /* ?do_compare@?$collate@_W@std@@MBEHPB_W000@Z */
@@ -9959,6 +9966,9 @@ istreambuf_iterator_char* __thiscall time_get_char_get_year(const time_get_char 
     return call_time_get_char_do_get_year(this, ret, s, e, base, err, t);
 }
 
+/* ??_7_Locimp@locale@std@@6B@ */
+extern const vtable_ptr MSVCP_locale__Locimp_vtable;
+
 /* ??0_Locimp@locale@std@@AAE@_N@Z */
 /* ??0_Locimp@locale@std@@AEAA@_N@Z */
 DEFINE_THISCALL_WRAPPER(locale__Locimp_ctor_transparent, 8)
@@ -9968,6 +9978,7 @@ locale__Locimp* __thiscall locale__Locimp_ctor_transparent(locale__Locimp *this,
 
     memset(this, 0, sizeof(locale__Locimp));
     locale_facet_ctor_refs(&this->facet, 1);
+    this->facet.vtable = &MSVCP_locale__Locimp_vtable;
     this->transparent = transparent;
     locale_string_char_ctor_cstr(&this->name, "*");
     return this;
@@ -9994,6 +10005,7 @@ locale__Locimp* __thiscall locale__Locimp_copy_ctor(locale__Locimp *this, const 
     _Lockit_ctor_locktype(&lock, _LOCK_LOCALE);
     memcpy(this, copy, sizeof(locale__Locimp));
     locale_facet_ctor_refs(&this->facet, 1);
+    this->facet.vtable = &MSVCP_locale__Locimp_vtable;
     if(copy->facetvec) {
         this->facetvec = MSVCRT_operator_new(copy->facet_cnt*sizeof(locale_facet*));
         if(!this->facetvec) {
@@ -10553,11 +10565,6 @@ locale__Locimp* __cdecl locale__Locimp__Makeloc(const _Locinfo *locinfo, categor
     return locimp;
 }
 
-/* ??_7_Locimp@locale@std@@6B@ */
-const vtable_ptr MSVCP_locale__Locimp_vtable[] = {
-    (vtable_ptr)THISCALL_NAME(locale__Locimp_vector_dtor)
-};
-
 /* ??0locale@std@@AAE@PAV_Locimp@01@@Z */
 /* ??0locale@std@@AEAA@PEAV_Locimp@01@@Z */
 DEFINE_THISCALL_WRAPPER(locale_ctor_locimp, 8)
@@ -11059,6 +11066,7 @@ size_t __cdecl wcsrtombs(char *dst, const wchar_t **pstr, size_t n, mbstate_t *s
 
 
 DEFINE_RTTI_DATA0(locale_facet, 0, ".?AVfacet@locale@std@@")
+DEFINE_RTTI_DATA1(locale__Locimp, 0, &locale_facet_rtti_base_descriptor, ".?AV_Locimp@locale@std@@")
 DEFINE_RTTI_DATA1(collate_char, 0, &locale_facet_rtti_base_descriptor, ".?AV?$collate@D@std@@")
 DEFINE_RTTI_DATA1(collate_wchar, 0, &locale_facet_rtti_base_descriptor, ".?AV?$collate@_W@std@@")
 DEFINE_RTTI_DATA1(collate_short, 0, &locale_facet_rtti_base_descriptor, ".?AV?$collate@G@std@@")
@@ -11090,6 +11098,13 @@ void __asm_dummy_vtables(void) {
 #endif
     __ASM_VTABLE(locale_facet,
             VTABLE_ADD_FUNC(locale_facet_vector_dtor)
+#if _MSVCP_VER >= 110
+            VTABLE_ADD_FUNC(locale_facet__Incref)
+            VTABLE_ADD_FUNC(locale_facet__Decref)
+#endif
+            );
+    __ASM_VTABLE(locale__Locimp,
+            VTABLE_ADD_FUNC(locale__Locimp_vector_dtor)
 #if _MSVCP_VER >= 110
             VTABLE_ADD_FUNC(locale_facet__Incref)
             VTABLE_ADD_FUNC(locale_facet__Decref)
@@ -11418,6 +11433,7 @@ void init_locale(void *base)
 {
 #ifdef __x86_64__
     init_locale_facet_rtti(base);
+    init_locale__Locimp_rtti(base);
     init_collate_char_rtti(base);
     init_collate_wchar_rtti(base);
     init_collate_short_rtti(base);

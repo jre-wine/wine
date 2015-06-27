@@ -129,6 +129,7 @@ static NTSTATUS (WINAPI *pNtSetSecurityObject)(HANDLE,SECURITY_INFORMATION,PSECU
 static NTSTATUS (WINAPI *pNtCreateFile)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,PVOID,ULONG);
 static BOOL     (WINAPI *pRtlDosPathNameToNtPathName_U)(LPCWSTR,PUNICODE_STRING,PWSTR*,CURDIR*);
 static NTSTATUS (WINAPI *pRtlAnsiStringToUnicodeString)(PUNICODE_STRING,PCANSI_STRING,BOOLEAN);
+static BOOL     (WINAPI *pGetWindowsAccountDomainSid)(PSID,PSID,DWORD*);
 
 static HMODULE hmod;
 static int     myARGC;
@@ -190,6 +191,7 @@ static void init(void)
     pConvertStringSidToSidA = (void *)GetProcAddress(hmod, "ConvertStringSidToSidA");
     pGetAclInformation = (void *)GetProcAddress(hmod, "GetAclInformation");
     pGetAce = (void *)GetProcAddress(hmod, "GetAce");
+    pGetWindowsAccountDomainSid = (void *)GetProcAddress(hmod, "GetWindowsAccountDomainSid");
 
     myARGC = winetest_get_mainargs( &myARGV );
 }
@@ -4290,7 +4292,8 @@ static void test_GetSecurityInfo(void)
         win_skip("Failed to get current user token\n");
         return;
     }
-    GetTokenInformation(token, TokenUser, b, l, &l);
+    bret = GetTokenInformation(token, TokenUser, b, l, &l);
+    ok(bret, "GetTokenInformation(TokenUser) failed with error %d\n", GetLastError());
     CloseHandle( token );
     user_sid = ((TOKEN_USER *)b)->User.Sid;
 
@@ -5835,6 +5838,171 @@ static void test_AddAce(void)
     ok(GetLastError() == ERROR_INVALID_PARAMETER, "GetLastError() = %d\n", GetLastError());
 }
 
+static void test_system_security_access(void)
+{
+    static const WCHAR testkeyW[] =
+        {'S','O','F','T','W','A','R','E','\\','W','i','n','e','\\','S','A','C','L','t','e','s','t',0};
+    LONG res;
+    HKEY hkey;
+    PSECURITY_DESCRIPTOR sd;
+    ACL *sacl;
+    DWORD err, len = 128;
+    TOKEN_PRIVILEGES priv, *priv_prev;
+    HANDLE token;
+    LUID luid;
+    BOOL ret;
+
+    if (!OpenProcessToken( GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES|TOKEN_QUERY, &token )) return;
+    if (!LookupPrivilegeValueA( NULL, SE_SECURITY_NAME, &luid ))
+    {
+        CloseHandle( token );
+        return;
+    }
+
+    /* ACCESS_SYSTEM_SECURITY requires special privilege */
+    res = RegCreateKeyExW( HKEY_LOCAL_MACHINE, testkeyW, 0, NULL, 0, KEY_READ|ACCESS_SYSTEM_SECURITY, NULL, &hkey, NULL );
+    todo_wine ok( res == ERROR_PRIVILEGE_NOT_HELD, "got %d\n", res );
+
+    priv.PrivilegeCount = 1;
+    priv.Privileges[0].Luid = luid;
+    priv.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+    priv_prev = HeapAlloc( GetProcessHeap(), 0, len );
+    ret = AdjustTokenPrivileges( token, FALSE, &priv, len, priv_prev, &len );
+    ok( ret, "got %u\n", GetLastError());
+
+    res = RegCreateKeyExW( HKEY_LOCAL_MACHINE, testkeyW, 0, NULL, 0, KEY_READ|ACCESS_SYSTEM_SECURITY, NULL, &hkey, NULL );
+    ok( !res, "got %d\n", res );
+
+    /* restore privileges */
+    ret = AdjustTokenPrivileges( token, FALSE, priv_prev, 0, NULL, NULL );
+    ok( ret, "got %u\n", GetLastError() );
+    HeapFree( GetProcessHeap(), 0, priv_prev );
+
+    /* privilege is checked on access */
+    err = GetSecurityInfo( hkey, SE_REGISTRY_KEY, SACL_SECURITY_INFORMATION, NULL, NULL, NULL, &sacl, &sd );
+    todo_wine ok( err == ERROR_PRIVILEGE_NOT_HELD, "got %u\n", err );
+
+    priv.PrivilegeCount = 1;
+    priv.Privileges[0].Luid = luid;
+    priv.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+
+    priv_prev = HeapAlloc( GetProcessHeap(), 0, len );
+    ret = AdjustTokenPrivileges( token, FALSE, &priv, len, priv_prev, &len );
+    ok( ret, "got %u\n", GetLastError());
+
+    err = GetSecurityInfo( hkey, SE_REGISTRY_KEY, SACL_SECURITY_INFORMATION, NULL, NULL, NULL, &sacl, &sd );
+    ok( err == ERROR_SUCCESS, "got %u\n", err );
+    RegCloseKey( hkey );
+    LocalFree( sd );
+
+    /* handle created without ACCESS_SYSTEM_SECURITY, privilege held */
+    res = RegCreateKeyExW( HKEY_LOCAL_MACHINE, testkeyW, 0, NULL, 0, KEY_READ, NULL, &hkey, NULL );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
+
+    sd = NULL;
+    err = GetSecurityInfo( hkey, SE_REGISTRY_KEY, SACL_SECURITY_INFORMATION, NULL, NULL, NULL, &sacl, &sd );
+    todo_wine ok( err == ERROR_SUCCESS, "got %u\n", err );
+    RegCloseKey( hkey );
+    LocalFree( sd );
+
+    /* restore privileges */
+    ret = AdjustTokenPrivileges( token, FALSE, priv_prev, 0, NULL, NULL );
+    ok( ret, "got %u\n", GetLastError() );
+    HeapFree( GetProcessHeap(), 0, priv_prev );
+
+    /* handle created without ACCESS_SYSTEM_SECURITY, privilege not held */
+    res = RegCreateKeyExW( HKEY_LOCAL_MACHINE, testkeyW, 0, NULL, 0, KEY_READ, NULL, &hkey, NULL );
+    ok( res == ERROR_SUCCESS, "got %d\n", res );
+
+    err = GetSecurityInfo( hkey, SE_REGISTRY_KEY, SACL_SECURITY_INFORMATION, NULL, NULL, NULL, &sacl, &sd );
+    todo_wine ok( err == ERROR_PRIVILEGE_NOT_HELD, "got %u\n", err );
+    RegCloseKey( hkey );
+
+    res = RegDeleteKeyW( HKEY_LOCAL_MACHINE, testkeyW );
+    ok( !res, "got %d\n", res );
+    CloseHandle( token );
+}
+
+static void test_GetWindowsAccountDomainSid(void)
+{
+    char *user, buffer1[SECURITY_MAX_SID_SIZE], buffer2[SECURITY_MAX_SID_SIZE];
+    SID_IDENTIFIER_AUTHORITY domain_ident = { SECURITY_NT_AUTHORITY };
+    PSID domain_sid = (PSID *)&buffer1;
+    PSID domain_sid2 = (PSID *)&buffer2;
+    DWORD sid_size;
+    PSID user_sid;
+    HANDLE token;
+    BOOL bret = TRUE;
+    int i;
+
+    if (!pGetWindowsAccountDomainSid)
+    {
+        win_skip("GetWindowsAccountDomainSid not available\n");
+        return;
+    }
+
+    if (!OpenThreadToken(GetCurrentThread(), TOKEN_READ, TRUE, &token))
+    {
+        if (GetLastError() != ERROR_NO_TOKEN) bret = FALSE;
+        else if (!OpenProcessToken(GetCurrentProcess(), TOKEN_READ, &token)) bret = FALSE;
+    }
+    if (!bret)
+    {
+        win_skip("Failed to get current user token\n");
+        return;
+    }
+
+    bret = GetTokenInformation(token, TokenUser, NULL, 0, &sid_size);
+    ok(!bret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+       "GetTokenInformation(TokenUser) failed with error %d\n", GetLastError());
+    user = HeapAlloc(GetProcessHeap(), 0, sid_size);
+    bret = GetTokenInformation(token, TokenUser, user, sid_size, &sid_size);
+    ok(bret, "GetTokenInformation(TokenUser) failed with error %d\n", GetLastError());
+    CloseHandle(token);
+    user_sid = ((TOKEN_USER *)user)->User.Sid;
+
+    SetLastError(0xdeadbeef);
+    bret = pGetWindowsAccountDomainSid(0, 0, 0);
+    ok(!bret, "GetWindowsAccountDomainSid succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_SID, "expected ERROR_INVALID_SID, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    bret = pGetWindowsAccountDomainSid(user_sid, 0, 0);
+    ok(!bret, "GetWindowsAccountDomainSid succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+
+    sid_size = SECURITY_MAX_SID_SIZE;
+    SetLastError(0xdeadbeef);
+    bret = pGetWindowsAccountDomainSid(user_sid, 0, &sid_size);
+    ok(!bret, "GetWindowsAccountDomainSid succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    ok(sid_size == GetSidLengthRequired(4), "expected size %d, got %d\n", GetSidLengthRequired(4), sid_size);
+
+    SetLastError(0xdeadbeef);
+    bret = pGetWindowsAccountDomainSid(user_sid, domain_sid, 0);
+    ok(!bret, "GetWindowsAccountDomainSid succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+
+    sid_size = 1;
+    SetLastError(0xdeadbeef);
+    bret = pGetWindowsAccountDomainSid(user_sid, domain_sid, &sid_size);
+    ok(!bret, "GetWindowsAccountDomainSid succeeded\n");
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(sid_size == GetSidLengthRequired(4), "expected size %d, got %d\n", GetSidLengthRequired(4), sid_size);
+
+    sid_size = SECURITY_MAX_SID_SIZE;
+    bret = pGetWindowsAccountDomainSid(user_sid, domain_sid, &sid_size);
+    ok(bret, "GetWindowsAccountDomainSid failed with error %d\n", GetLastError());
+    ok(sid_size == GetSidLengthRequired(4), "expected size %d, got %d\n", GetSidLengthRequired(4), sid_size);
+    InitializeSid(domain_sid2, &domain_ident, 4);
+    for (i = 0; i < 4; i++)
+        *GetSidSubAuthority(domain_sid2, i) = *GetSidSubAuthority(user_sid, i);
+    ok(EqualSid(domain_sid, domain_sid2), "unexpected domain sid\n");
+
+    HeapFree(GetProcessHeap(), 0, user);
+}
+
 START_TEST(security)
 {
     init();
@@ -5866,6 +6034,7 @@ START_TEST(security)
     test_ConvertSecurityDescriptorToString();
     test_PrivateObjectSecurity();
     test_acls();
+    test_GetWindowsAccountDomainSid();
     test_GetSecurityInfo();
     test_GetSidSubAuthority();
     test_CheckTokenMembership();
@@ -5877,4 +6046,5 @@ START_TEST(security)
     test_default_dacl_owner_sid();
     test_AdjustTokenPrivileges();
     test_AddAce();
+    test_system_security_access();
 }

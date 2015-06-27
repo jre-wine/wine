@@ -637,8 +637,8 @@
 @ stub -arch=win64 ?read@istream@@QEAAAEAV1@PEADH@Z
 @ stub -arch=win32 ?read@istream@@QAEAAV1@PAEH@Z  # class istream & __thiscall istream::read(unsigned char *,int)
 @ stub -arch=win64 ?read@istream@@QEAAAEAV1@PEAEH@Z
-@ stub -arch=win32 ?sbumpc@streambuf@@QAEHXZ  # int __thiscall streambuf::sbumpc(void)
-@ stub -arch=win64 ?sbumpc@streambuf@@QEAAHXZ
+@ thiscall -arch=win32 ?sbumpc@streambuf@@QAEHXZ(ptr) streambuf_sbumpc
+@ cdecl -arch=win64 ?sbumpc@streambuf@@QEAAHXZ(ptr) streambuf_sbumpc
 @ stub -arch=win32 ?seekg@istream@@QAEAAV1@J@Z  # class istream & __thiscall istream::seekg(long)
 @ stub -arch=win64 ?seekg@istream@@QEAAAEAV1@J@Z
 @ stub -arch=win32 ?seekg@istream@@QAEAAV1@JW4seek_dir@ios@@@Z  # class istream & __thiscall istream::seekg(long,enum ios::seek_dir)
@@ -693,25 +693,25 @@
 @ cdecl -arch=win64 ?setp@streambuf@@IEAAXPEAD0@Z(ptr ptr ptr) streambuf_setp
 @ stub -arch=win32 ?setrwbuf@stdiobuf@@QAEHHH@Z  # int __thiscall stdiobuf::setrwbuf(int,int)
 @ stub -arch=win64 ?setrwbuf@stdiobuf@@QEAAHHH@Z
-@ stub -arch=win32 ?sgetc@streambuf@@QAEHXZ  # int __thiscall streambuf::sgetc(void)
-@ stub -arch=win64 ?sgetc@streambuf@@QEAAHXZ
-@ stub -arch=win32 ?sgetn@streambuf@@QAEHPADH@Z  # int __thiscall streambuf::sgetn(char *,int)
-@ stub -arch=win64 ?sgetn@streambuf@@QEAAHPEADH@Z
+@ thiscall -arch=win32 ?sgetc@streambuf@@QAEHXZ(ptr) streambuf_sgetc
+@ cdecl -arch=win64 ?sgetc@streambuf@@QEAAHXZ(ptr) streambuf_sgetc
+@ thiscall -arch=win32 ?sgetn@streambuf@@QAEHPADH@Z(ptr ptr long) streambuf_sgetn
+@ cdecl -arch=win64 ?sgetn@streambuf@@QEAAHPEADH@Z(ptr ptr long) streambuf_sgetn
 # @ extern ?sh_none@filebuf@@2HB  # static int const filebuf::sh_none
 # @ extern ?sh_read@filebuf@@2HB  # static int const filebuf::sh_read
 # @ extern ?sh_write@filebuf@@2HB  # static int const filebuf::sh_write
-@ stub -arch=win32 ?snextc@streambuf@@QAEHXZ  # int __thiscall streambuf::snextc(void)
-@ stub -arch=win64 ?snextc@streambuf@@QEAAHXZ
+@ thiscall -arch=win32 ?snextc@streambuf@@QAEHXZ(ptr) streambuf_snextc
+@ cdecl -arch=win64 ?snextc@streambuf@@QEAAHXZ(ptr) streambuf_snextc
 @ stub -arch=win32 ?sputbackc@streambuf@@QAEHD@Z  # int __thiscall streambuf::sputbackc(char)
 @ stub -arch=win64 ?sputbackc@streambuf@@QEAAHD@Z
-@ stub -arch=win32 ?sputc@streambuf@@QAEHH@Z  # int __thiscall streambuf::sputc(int)
-@ stub -arch=win64 ?sputc@streambuf@@QEAAHH@Z
-@ stub -arch=win32 ?sputn@streambuf@@QAEHPBDH@Z  # int __thiscall streambuf::sputn(char const *,int)
-@ stub -arch=win64 ?sputn@streambuf@@QEAAHPEBDH@Z
+@ thiscall -arch=win32 ?sputc@streambuf@@QAEHH@Z(ptr long) streambuf_sputc
+@ cdecl -arch=win64 ?sputc@streambuf@@QEAAHH@Z(ptr long) streambuf_sputc
+@ thiscall -arch=win32 ?sputn@streambuf@@QAEHPBDH@Z(ptr str long) streambuf_sputn
+@ cdecl -arch=win64 ?sputn@streambuf@@QEAAHPEBDH@Z(ptr str long) streambuf_sputn
 @ stub -arch=win32 ?stdiofile@stdiobuf@@QAEPAU_iobuf@@XZ  # struct _iobuf * __thiscall stdiobuf::stdiofile(void)
 @ stub -arch=win64 ?stdiofile@stdiobuf@@QEAAPEAU_iobuf@@XZ
-@ stub -arch=win32 ?stossc@streambuf@@QAEXXZ  # void __thiscall streambuf::stossc(void)
-@ stub -arch=win64 ?stossc@streambuf@@QEAAXXZ
+@ thiscall -arch=win32 ?stossc@streambuf@@QAEXXZ(ptr) streambuf_stossc
+@ cdecl -arch=win64 ?stossc@streambuf@@QEAAXXZ(ptr) streambuf_stossc
 @ stub -arch=win32 ?str@istrstream@@QAEPADXZ  # char * __thiscall istrstream::str(void)
 @ stub -arch=win64 ?str@istrstream@@QEAAPEADXZ
 @ stub -arch=win32 ?str@ostrstream@@QAEPADXZ  # char * __thiscall ostrstream::str(void)

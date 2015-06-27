@@ -27,6 +27,20 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qmgr);
 
+BOOL transitionJobState(BackgroundCopyJobImpl *job, BG_JOB_STATE from, BG_JOB_STATE to)
+{
+    BOOL ret = FALSE;
+
+    EnterCriticalSection(&globalMgr.cs);
+    if (job->state == from)
+    {
+        job->state = to;
+        ret = TRUE;
+    }
+    LeaveCriticalSection(&globalMgr.cs);
+    return ret;
+}
+
 struct copy_error
 {
     IBackgroundCopyError  IBackgroundCopyError_iface;
@@ -212,6 +226,10 @@ static HRESULT WINAPI BackgroundCopyJob_QueryInterface(
     {
         *obj = &This->IBackgroundCopyJob3_iface;
     }
+    else if (IsEqualGUID(riid, &IID_IBackgroundCopyJobHttpOptions))
+    {
+        *obj = &This->IBackgroundCopyJobHttpOptions_iface;
+    }
     else
     {
         *obj = NULL;
@@ -233,7 +251,7 @@ static ULONG WINAPI BackgroundCopyJob_AddRef(IBackgroundCopyJob3 *iface)
 static ULONG WINAPI BackgroundCopyJob_Release(IBackgroundCopyJob3 *iface)
 {
     BackgroundCopyJobImpl *This = impl_from_IBackgroundCopyJob3(iface);
-    ULONG ref = InterlockedDecrement(&This->ref);
+    ULONG i, j, ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p)->(%d)\n", This, ref);
 
@@ -245,6 +263,19 @@ static ULONG WINAPI BackgroundCopyJob_Release(IBackgroundCopyJob3 *iface)
             IBackgroundCopyCallback2_Release(This->callback);
         HeapFree(GetProcessHeap(), 0, This->displayName);
         HeapFree(GetProcessHeap(), 0, This->description);
+        HeapFree(GetProcessHeap(), 0, This->http_options.headers);
+        for (i = 0; i < BG_AUTH_TARGET_PROXY; i++)
+        {
+            for (j = 0; j < BG_AUTH_SCHEME_PASSPORT; j++)
+            {
+                BG_AUTH_CREDENTIALS *cred = &This->http_options.creds[i][j];
+                HeapFree(GetProcessHeap(), 0, cred->Credentials.Basic.UserName);
+                HeapFree(GetProcessHeap(), 0, cred->Credentials.Basic.Password);
+            }
+        }
+        CloseHandle(This->wait);
+        CloseHandle(This->cancel);
+        CloseHandle(This->done);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -351,8 +382,48 @@ static HRESULT WINAPI BackgroundCopyJob_Cancel(
     IBackgroundCopyJob3 *iface)
 {
     BackgroundCopyJobImpl *This = impl_from_IBackgroundCopyJob3(iface);
-    FIXME("(%p): stub\n", This);
-    return E_NOTIMPL;
+    HRESULT rv = S_OK;
+
+    TRACE("(%p)\n", This);
+
+    EnterCriticalSection(&This->cs);
+
+    if (is_job_done(This))
+    {
+        rv = BG_E_INVALID_STATE;
+    }
+    else
+    {
+        BackgroundCopyFileImpl *file;
+
+        if (This->state == BG_JOB_STATE_CONNECTING || This->state == BG_JOB_STATE_TRANSFERRING)
+        {
+            This->state = BG_JOB_STATE_CANCELLED;
+            SetEvent(This->cancel);
+
+            LeaveCriticalSection(&This->cs);
+            WaitForSingleObject(This->done, INFINITE);
+            EnterCriticalSection(&This->cs);
+        }
+
+        LIST_FOR_EACH_ENTRY(file, &This->files, BackgroundCopyFileImpl, entryFromJob)
+        {
+            if (file->tempFileName[0] && !DeleteFileW(file->tempFileName))
+            {
+                WARN("Couldn't delete %s (%u)\n", debugstr_w(file->tempFileName), GetLastError());
+                rv = BG_S_UNABLE_TO_DELETE_FILES;
+            }
+            if (file->info.LocalName && !DeleteFileW(file->info.LocalName))
+            {
+                WARN("Couldn't delete %s (%u)\n", debugstr_w(file->info.LocalName), GetLastError());
+                rv = BG_S_UNABLE_TO_DELETE_FILES;
+            }
+        }
+        This->state = BG_JOB_STATE_CANCELLED;
+    }
+
+    LeaveCriticalSection(&This->cs);
+    return rv;
 }
 
 static HRESULT WINAPI BackgroundCopyJob_Complete(
@@ -435,10 +506,7 @@ static HRESULT WINAPI BackgroundCopyJob_GetProgress(
         return E_INVALIDARG;
 
     EnterCriticalSection(&This->cs);
-    pVal->BytesTotal = This->jobProgress.BytesTotal;
-    pVal->BytesTransferred = This->jobProgress.BytesTransferred;
-    pVal->FilesTotal = This->jobProgress.FilesTotal;
-    pVal->FilesTransferred = This->jobProgress.FilesTransferred;
+    *pVal = This->jobProgress;
     LeaveCriticalSection(&This->cs);
 
     return S_OK;
@@ -790,12 +858,49 @@ static HRESULT WINAPI BackgroundCopyJob_GetReplyFileName(
     return E_NOTIMPL;
 }
 
+static int index_from_target(BG_AUTH_TARGET target)
+{
+    if (!target || target > BG_AUTH_TARGET_PROXY) return -1;
+    return target - 1;
+}
+
+static int index_from_scheme(BG_AUTH_SCHEME scheme)
+{
+    if (!scheme || scheme > BG_AUTH_SCHEME_PASSPORT) return -1;
+    return scheme - 1;
+}
+
 static HRESULT WINAPI BackgroundCopyJob_SetCredentials(
     IBackgroundCopyJob3 *iface,
     BG_AUTH_CREDENTIALS *cred)
 {
-    BackgroundCopyJobImpl *This = impl_from_IBackgroundCopyJob3(iface);
-    FIXME("(%p)->(%p): stub\n", This, cred);
+    BackgroundCopyJobImpl *job = impl_from_IBackgroundCopyJob3(iface);
+    BG_AUTH_CREDENTIALS *new_cred;
+    int idx_target, idx_scheme;
+
+    TRACE("(%p)->(%p)\n", job, cred);
+
+    if ((idx_target = index_from_target(cred->Target)) < 0) return BG_E_INVALID_AUTH_TARGET;
+    if ((idx_scheme = index_from_scheme(cred->Scheme)) < 0) return BG_E_INVALID_AUTH_SCHEME;
+    new_cred = &job->http_options.creds[idx_target][idx_scheme];
+
+    EnterCriticalSection(&job->cs);
+
+    new_cred->Target = cred->Target;
+    new_cred->Scheme = cred->Scheme;
+
+    if (cred->Credentials.Basic.UserName)
+    {
+        HeapFree(GetProcessHeap(), 0, new_cred->Credentials.Basic.UserName);
+        new_cred->Credentials.Basic.UserName = strdupW(cred->Credentials.Basic.UserName);
+    }
+    if (cred->Credentials.Basic.Password)
+    {
+        HeapFree(GetProcessHeap(), 0, new_cred->Credentials.Basic.Password);
+        new_cred->Credentials.Basic.Password = strdupW(cred->Credentials.Basic.Password);
+    }
+
+    LeaveCriticalSection(&job->cs);
     return S_OK;
 }
 
@@ -804,8 +909,25 @@ static HRESULT WINAPI BackgroundCopyJob_RemoveCredentials(
     BG_AUTH_TARGET target,
     BG_AUTH_SCHEME scheme)
 {
-    BackgroundCopyJobImpl *This = impl_from_IBackgroundCopyJob3(iface);
-    FIXME("(%p)->(%d %d): stub\n", This, target, scheme);
+    BackgroundCopyJobImpl *job = impl_from_IBackgroundCopyJob3(iface);
+    BG_AUTH_CREDENTIALS *new_cred;
+    int idx_target, idx_scheme;
+
+    TRACE("(%p)->(%u %u)\n", job, target, scheme);
+
+    if ((idx_target = index_from_target(target)) < 0) return BG_E_INVALID_AUTH_TARGET;
+    if ((idx_scheme = index_from_scheme(scheme)) < 0) return BG_E_INVALID_AUTH_SCHEME;
+    new_cred = &job->http_options.creds[idx_target][idx_scheme];
+
+    EnterCriticalSection(&job->cs);
+
+    new_cred->Target = new_cred->Scheme = 0;
+    HeapFree(GetProcessHeap(), 0, new_cred->Credentials.Basic.UserName);
+    new_cred->Credentials.Basic.UserName = NULL;
+    HeapFree(GetProcessHeap(), 0, new_cred->Credentials.Basic.Password);
+    new_cred->Credentials.Basic.Password = NULL;
+
+    LeaveCriticalSection(&job->cs);
     return S_OK;
 }
 
@@ -900,11 +1022,175 @@ static const IBackgroundCopyJob3Vtbl BackgroundCopyJob3Vtbl =
     BackgroundCopyJob_GetFileACLFlags
 };
 
+static inline BackgroundCopyJobImpl *impl_from_IBackgroundCopyJobHttpOptions(
+    IBackgroundCopyJobHttpOptions *iface)
+{
+    return CONTAINING_RECORD(iface, BackgroundCopyJobImpl, IBackgroundCopyJobHttpOptions_iface);
+}
+
+static HRESULT WINAPI http_options_QueryInterface(
+    IBackgroundCopyJobHttpOptions *iface,
+    REFIID riid,
+    void **ppvObject)
+{
+    BackgroundCopyJobImpl *job = impl_from_IBackgroundCopyJobHttpOptions(iface);
+    return IBackgroundCopyJob3_QueryInterface(&job->IBackgroundCopyJob3_iface, riid, ppvObject);
+}
+
+static ULONG WINAPI http_options_AddRef(
+    IBackgroundCopyJobHttpOptions *iface)
+{
+    BackgroundCopyJobImpl *job = impl_from_IBackgroundCopyJobHttpOptions(iface);
+    return IBackgroundCopyJob3_AddRef(&job->IBackgroundCopyJob3_iface);
+}
+
+static ULONG WINAPI http_options_Release(
+    IBackgroundCopyJobHttpOptions *iface)
+{
+    BackgroundCopyJobImpl *job = impl_from_IBackgroundCopyJobHttpOptions(iface);
+    return IBackgroundCopyJob3_Release(&job->IBackgroundCopyJob3_iface);
+}
+
+static HRESULT WINAPI http_options_SetClientCertificateByID(
+    IBackgroundCopyJobHttpOptions *iface,
+    BG_CERT_STORE_LOCATION StoreLocation,
+    LPCWSTR StoreName,
+    BYTE *pCertHashBlob)
+{
+    FIXME("\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI http_options_SetClientCertificateByName(
+    IBackgroundCopyJobHttpOptions *iface,
+    BG_CERT_STORE_LOCATION StoreLocation,
+    LPCWSTR StoreName,
+    LPCWSTR SubjectName)
+{
+    FIXME("\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI http_options_RemoveClientCertificate(
+    IBackgroundCopyJobHttpOptions *iface)
+{
+    FIXME("\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI http_options_GetClientCertificate(
+    IBackgroundCopyJobHttpOptions *iface,
+    BG_CERT_STORE_LOCATION *pStoreLocation,
+    LPWSTR *pStoreName,
+    BYTE **ppCertHashBlob,
+    LPWSTR *pSubjectName)
+{
+    FIXME("\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI http_options_SetCustomHeaders(
+    IBackgroundCopyJobHttpOptions *iface,
+    LPCWSTR RequestHeaders)
+{
+    BackgroundCopyJobImpl *job = impl_from_IBackgroundCopyJobHttpOptions(iface);
+
+    TRACE("(%p)->(%s)\n", iface, debugstr_w(RequestHeaders));
+
+    EnterCriticalSection(&job->cs);
+
+    if (RequestHeaders)
+    {
+        WCHAR *headers = strdupW(RequestHeaders);
+        if (!headers)
+        {
+            LeaveCriticalSection(&job->cs);
+            return E_OUTOFMEMORY;
+        }
+        HeapFree(GetProcessHeap(), 0, job->http_options.headers);
+        job->http_options.headers = headers;
+    }
+    else
+    {
+        HeapFree(GetProcessHeap(), 0, job->http_options.headers);
+        job->http_options.headers = NULL;
+    }
+
+    LeaveCriticalSection(&job->cs);
+    return S_OK;
+}
+
+static HRESULT WINAPI http_options_GetCustomHeaders(
+    IBackgroundCopyJobHttpOptions *iface,
+    LPWSTR *pRequestHeaders)
+{
+    BackgroundCopyJobImpl *job = impl_from_IBackgroundCopyJobHttpOptions(iface);
+
+    TRACE("(%p)->(%p)\n", iface, pRequestHeaders);
+
+    EnterCriticalSection(&job->cs);
+
+    if (job->http_options.headers)
+    {
+        WCHAR *headers = co_strdupW(job->http_options.headers);
+        if (!headers)
+        {
+            LeaveCriticalSection(&job->cs);
+            return E_OUTOFMEMORY;
+        }
+        *pRequestHeaders = headers;
+        LeaveCriticalSection(&job->cs);
+        return S_OK;
+    }
+
+    *pRequestHeaders = NULL;
+    LeaveCriticalSection(&job->cs);
+    return S_FALSE;
+}
+
+static HRESULT WINAPI http_options_SetSecurityFlags(
+    IBackgroundCopyJobHttpOptions *iface,
+    ULONG Flags)
+{
+    BackgroundCopyJobImpl *job = impl_from_IBackgroundCopyJobHttpOptions(iface);
+
+    TRACE("(%p)->(0x%08x)\n", iface, Flags);
+
+    job->http_options.flags = Flags;
+    return S_OK;
+}
+
+static HRESULT WINAPI http_options_GetSecurityFlags(
+    IBackgroundCopyJobHttpOptions *iface,
+    ULONG *pFlags)
+{
+    BackgroundCopyJobImpl *job = impl_from_IBackgroundCopyJobHttpOptions(iface);
+
+    TRACE("(%p)->(%p)\n", iface, pFlags);
+
+    *pFlags = job->http_options.flags;
+    return S_OK;
+}
+
+static const IBackgroundCopyJobHttpOptionsVtbl http_options_vtbl =
+{
+    http_options_QueryInterface,
+    http_options_AddRef,
+    http_options_Release,
+    http_options_SetClientCertificateByID,
+    http_options_SetClientCertificateByName,
+    http_options_RemoveClientCertificate,
+    http_options_GetClientCertificate,
+    http_options_SetCustomHeaders,
+    http_options_GetCustomHeaders,
+    http_options_SetSecurityFlags,
+    http_options_GetSecurityFlags
+};
+
 HRESULT BackgroundCopyJobConstructor(LPCWSTR displayName, BG_JOB_TYPE type, GUID *job_id, BackgroundCopyJobImpl **job)
 {
     HRESULT hr;
     BackgroundCopyJobImpl *This;
-    int n;
 
     TRACE("(%s,%d,%p)\n", debugstr_w(displayName), type, job);
 
@@ -913,14 +1199,14 @@ HRESULT BackgroundCopyJobConstructor(LPCWSTR displayName, BG_JOB_TYPE type, GUID
         return E_OUTOFMEMORY;
 
     This->IBackgroundCopyJob3_iface.lpVtbl = &BackgroundCopyJob3Vtbl;
+    This->IBackgroundCopyJobHttpOptions_iface.lpVtbl = &http_options_vtbl;
     InitializeCriticalSection(&This->cs);
     This->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": BackgroundCopyJobImpl.cs");
 
     This->ref = 1;
     This->type = type;
 
-    n = (strlenW(displayName) + 1) *  sizeof *displayName;
-    This->displayName = HeapAlloc(GetProcessHeap(), 0, n);
+    This->displayName = strdupW(displayName);
     if (!This->displayName)
     {
         This->cs.DebugInfo->Spare[0] = 0;
@@ -928,7 +1214,6 @@ HRESULT BackgroundCopyJobConstructor(LPCWSTR displayName, BG_JOB_TYPE type, GUID
         HeapFree(GetProcessHeap(), 0, This);
         return E_OUTOFMEMORY;
     }
-    memcpy(This->displayName, displayName, n);
 
     hr = CoCreateGuid(&This->jobId);
     if (FAILED(hr))
@@ -956,6 +1241,12 @@ HRESULT BackgroundCopyJobConstructor(LPCWSTR displayName, BG_JOB_TYPE type, GUID
     This->error.context = 0;
     This->error.code = 0;
     This->error.file = NULL;
+
+    memset(&This->http_options, 0, sizeof(This->http_options));
+
+    This->wait   = CreateEventW(NULL, FALSE, FALSE, NULL);
+    This->cancel = CreateEventW(NULL, FALSE, FALSE, NULL);
+    This->done   = CreateEventW(NULL, FALSE, FALSE, NULL);
 
     *job = This;
 
