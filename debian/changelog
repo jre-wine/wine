@@ -1,3 +1,15 @@
+wine-development (1.7.47-1) unstable; urgency=medium
+
+  * New upstream release 1.7.47, released Jul 10, 2015.
+    - Text drawing in Direct2D.
+    - Support for the new thread pool API.
+    - Toolbar state saving.
+    - Beginnings of an implementation for proper HID support.
+    - Support for file objects in device drivers.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 11 Jul 2015 00:01:19 +0000
+
 wine-development (1.7.46-1) unstable; urgency=medium
 
   * New upstream release 1.7.46, released Jun 26, 2015.
