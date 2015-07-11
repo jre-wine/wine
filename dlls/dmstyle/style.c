@@ -440,7 +440,7 @@ static HRESULT parse_part_ref_list(DMUS_PRIVATE_CHUNK *pChunk, IStream *pStm,
       hr = IStream_Read (pStm, &pNewItem->part_ref, sizeof(DMUS_IO_PARTREF), NULL);
       /*TRACE_(dmfile)(" - sizeof %lu\n",  sizeof(DMUS_IO_PARTREF));*/
       list_add_tail (&pNewMotif->Items, &pNewItem->entry);      
-      DM_STRUCT_INIT(&pNewItem->desc);
+      pNewItem->desc.dwSize = sizeof(pNewItem->desc);
       break;
     }    
     case FOURCC_LIST: {
@@ -639,11 +639,8 @@ static HRESULT parse_pattern_list(IDirectMusicStyle8Impl *This, DMUS_PRIVATE_CHU
   DWORD ListSize[3], ListCount[3];
   LARGE_INTEGER liMove; /* used when skipping chunks */
 
-  DMUS_OBJECTDESC desc;
   IDirectMusicBand* pBand = NULL;
   LPDMUS_PRIVATE_STYLE_MOTIF pNewMotif = NULL;
-
-  DM_STRUCT_INIT(&desc);
 
   if (pChunk->fccID != DMUS_FOURCC_PATTERN_LIST) {
     ERR_(dmfile)(": %s chunk should be a PATTERN list\n", debugstr_fourcc (pChunk->fccID));
@@ -672,7 +669,7 @@ static HRESULT parse_pattern_list(IDirectMusicStyle8Impl *This, DMUS_PRIVATE_CHU
       /** TODO trace pattern */
 
       /** reset all data, as a new pattern begin */
-      DM_STRUCT_INIT(&pNewMotif->desc);
+      pNewMotif->desc.dwSize = sizeof(pNewMotif->desc);
       list_init (&pNewMotif->Items);
       break;
     }

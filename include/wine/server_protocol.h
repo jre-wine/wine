@@ -637,19 +637,42 @@ typedef union
     struct
     {
         unsigned int     major;
+        unsigned int     access;
+        unsigned int     sharing;
+        unsigned int     options;
+        client_ptr_t     device;
+    } create;
+    struct
+    {
+        unsigned int     major;
+        int              __pad;
+        client_ptr_t     file;
+    } close;
+    struct
+    {
+        unsigned int     major;
         unsigned int     key;
+        client_ptr_t     file;
         file_pos_t       pos;
     } read;
     struct
     {
         unsigned int     major;
         unsigned int     key;
+        client_ptr_t     file;
         file_pos_t       pos;
     } write;
     struct
     {
         unsigned int     major;
+        int              __pad;
+        client_ptr_t     file;
+    } flush;
+    struct
+    {
+        unsigned int     major;
         ioctl_code_t     code;
+        client_ptr_t     file;
     } ioctl;
 } irp_params_t;
 
@@ -3193,9 +3216,10 @@ struct set_irp_result_request
     obj_handle_t manager;
     obj_handle_t handle;
     unsigned int status;
+    client_ptr_t file_ptr;
     data_size_t  size;
     /* VARARG(data,bytes); */
-    char __pad_28[4];
+    char __pad_36[4];
 };
 struct set_irp_result_reply
 {
@@ -4882,7 +4906,6 @@ struct get_next_device_request_request
 struct get_next_device_request_reply
 {
     struct reply_header __header;
-    client_ptr_t user_ptr;
     irp_params_t params;
     obj_handle_t next;
     process_id_t client_pid;
@@ -6073,6 +6096,6 @@ union generic_reply
     struct terminate_job_reply terminate_job_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 476
+#define SERVER_PROTOCOL_VERSION 481
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

@@ -873,10 +873,201 @@ static void test_bitmap_brush(void)
     DestroyWindow(window);
 }
 
+static void test_path_geometry(void)
+{
+    ID2D1GeometrySink *sink, *tmp_sink;
+    D2D1_POINT_2F point = {0.0f, 0.0f};
+    ID2D1PathGeometry *geometry;
+    IDXGISwapChain *swapchain;
+    ID2D1RenderTarget *rt;
+    ID3D10Device1 *device;
+    IDXGISurface *surface;
+    ID2D1Factory *factory;
+    ULONG refcount;
+    UINT32 count;
+    HWND window;
+    HRESULT hr;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+    window = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    swapchain = create_swapchain(device, window, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain, 0, &IID_IDXGISurface, (void **)&surface);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    rt = create_render_target(surface);
+    ok(!!rt, "Failed to create render target.\n");
+    ID2D1RenderTarget_GetFactory(rt, &factory);
+
+    /* Close() when closed. */
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(!count, "Got unexpected figure count %u.\n", count);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(!count, "Got unexpected segment count %u.\n", count);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(!count, "Got unexpected figure count %u.\n", count);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(!count, "Got unexpected segment count %u.\n", count);
+    ID2D1PathGeometry_Release(geometry);
+
+    /* Open() when closed. */
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(!count, "Got unexpected figure count %u.\n", count);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(!count, "Got unexpected segment count %u.\n", count);
+    ID2D1PathGeometry_Release(geometry);
+
+    /* Open() when open. */
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &tmp_sink);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(!count, "Got unexpected figure count %u.\n", count);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(!count, "Got unexpected segment count %u.\n", count);
+    ID2D1PathGeometry_Release(geometry);
+
+    /* BeginFigure() without EndFigure(). */
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1PathGeometry_Release(geometry);
+
+    /* EndFigure() without BeginFigure(). */
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1PathGeometry_Release(geometry);
+
+    /* BeginFigure()/EndFigure() mismatch. */
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+    ID2D1PathGeometry_Release(geometry);
+
+    /* AddLine() outside BeginFigure()/EndFigure(). */
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ID2D1GeometrySink_AddLine(sink, point);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1GeometrySink_AddLine(sink, point);
+    ID2D1GeometrySink_Release(sink);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#x.\n", hr);
+    ID2D1PathGeometry_Release(geometry);
+
+    /* Empty figure. */
+    hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
+    ok(SUCCEEDED(hr), "Failed to create path geometry, hr %#x.\n", hr);
+    hr = ID2D1PathGeometry_Open(geometry, &sink);
+    ok(SUCCEEDED(hr), "Failed to open geometry sink, hr %#x.\n", hr);
+    ID2D1GeometrySink_BeginFigure(sink, point, D2D1_FIGURE_BEGIN_FILLED);
+    ID2D1GeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
+    hr = ID2D1GeometrySink_Close(sink);
+    ok(SUCCEEDED(hr), "Failed to close geometry sink, hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+    hr = ID2D1PathGeometry_GetFigureCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get figure count, hr %#x.\n", hr);
+    ok(count == 1, "Got unexpected figure count %u.\n", count);
+    hr = ID2D1PathGeometry_GetSegmentCount(geometry, &count);
+    ok(SUCCEEDED(hr), "Failed to get segment count, hr %#x.\n", hr);
+    ok(count == 1, "Got unexpected segment count %u.\n", count);
+    ID2D1PathGeometry_Release(geometry);
+
+    ID2D1RenderTarget_Release(rt);
+    refcount = ID2D1Factory_Release(factory);
+    ok(!refcount, "Factory has %u references left.\n", refcount);
+    IDXGISurface_Release(surface);
+    IDXGISwapChain_Release(swapchain);
+    ID3D10Device1_Release(device);
+    DestroyWindow(window);
+}
+
 START_TEST(d2d1)
 {
     test_clip();
     test_state_block();
     test_color_brush();
     test_bitmap_brush();
+    test_path_geometry();
 }

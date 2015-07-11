@@ -179,6 +179,7 @@ void wined3d_rb_free(void *ptr) DECLSPEC_HIDDEN;
 #define MAX_CONSTANT_BUFFERS        15
 #define MAX_SAMPLER_OBJECTS         16
 #define MAX_SHADER_RESOURCE_VIEWS   128
+#define MAX_VERTEX_BLENDS           4
 
 struct min_lookup
 {
@@ -261,9 +262,7 @@ static inline float float_24_to_32(DWORD in)
  * values in wined3d_main.c as well. */
 struct wined3d_settings
 {
-    /* Ideally, we don't want the user to have to request GLSL. If the
-     * hardware supports GLSL, we should use it. However, until it's fully
-     * implemented, we'll leave it as a registry setting for developers. */
+    DWORD max_gl_version;
     BOOL glslRequested;
     int offscreen_rendering_mode;
     unsigned short pci_vendor_id;
@@ -296,25 +295,26 @@ enum wined3d_shader_resource_type
     WINED3D_SHADER_RESOURCE_TEXTURE_2DMSARRAY,
 };
 
-#define WINED3D_SHADER_CONST_VS_F           0x00000001
-#define WINED3D_SHADER_CONST_VS_I           0x00000002
-#define WINED3D_SHADER_CONST_VS_B           0x00000004
-#define WINED3D_SHADER_CONST_VS_POINTSIZE   0x00000008
-#define WINED3D_SHADER_CONST_VS_POS_FIXUP   0x00000010
-#define WINED3D_SHADER_CONST_PS_F           0x00000020
-#define WINED3D_SHADER_CONST_PS_I           0x00000040
-#define WINED3D_SHADER_CONST_PS_B           0x00000080
-#define WINED3D_SHADER_CONST_PS_BUMP_ENV    0x00000100
-#define WINED3D_SHADER_CONST_PS_FOG         0x00000200
-#define WINED3D_SHADER_CONST_PS_Y_CORR      0x00000400
-#define WINED3D_SHADER_CONST_PS_NP2_FIXUP   0x00000800
-#define WINED3D_SHADER_CONST_FFP_MODELVIEW  0x00001000
-#define WINED3D_SHADER_CONST_FFP_PROJ       0x00002000
-#define WINED3D_SHADER_CONST_FFP_TEXMATRIX  0x00004000
-#define WINED3D_SHADER_CONST_FFP_MATERIAL   0x00008000
-#define WINED3D_SHADER_CONST_FFP_LIGHTS     0x00010000
-#define WINED3D_SHADER_CONST_FFP_PS         0x00020000
-#define WINED3D_SHADER_CONST_FFP_COLOR_KEY  0x00040000
+#define WINED3D_SHADER_CONST_VS_F            0x00000001
+#define WINED3D_SHADER_CONST_VS_I            0x00000002
+#define WINED3D_SHADER_CONST_VS_B            0x00000004
+#define WINED3D_SHADER_CONST_VS_POINTSIZE    0x00000008
+#define WINED3D_SHADER_CONST_VS_POS_FIXUP    0x00000010
+#define WINED3D_SHADER_CONST_PS_F            0x00000020
+#define WINED3D_SHADER_CONST_PS_I            0x00000040
+#define WINED3D_SHADER_CONST_PS_B            0x00000080
+#define WINED3D_SHADER_CONST_PS_BUMP_ENV     0x00000100
+#define WINED3D_SHADER_CONST_PS_FOG          0x00000200
+#define WINED3D_SHADER_CONST_PS_Y_CORR       0x00000400
+#define WINED3D_SHADER_CONST_PS_NP2_FIXUP    0x00000800
+#define WINED3D_SHADER_CONST_FFP_MODELVIEW   0x00001000
+#define WINED3D_SHADER_CONST_FFP_VERTEXBLEND 0x00002000
+#define WINED3D_SHADER_CONST_FFP_PROJ        0x00004000
+#define WINED3D_SHADER_CONST_FFP_TEXMATRIX   0x00008000
+#define WINED3D_SHADER_CONST_FFP_MATERIAL    0x00010000
+#define WINED3D_SHADER_CONST_FFP_LIGHTS      0x00020000
+#define WINED3D_SHADER_CONST_FFP_PS          0x00040000
+#define WINED3D_SHADER_CONST_FFP_COLOR_KEY   0x00080000
 
 enum wined3d_shader_register_type
 {
@@ -1400,7 +1400,7 @@ void context_bind_texture(struct wined3d_context *context, GLenum target, GLuint
 void context_check_fbo_status(const struct wined3d_context *context, GLenum target) DECLSPEC_HIDDEN;
 struct wined3d_context *context_create(struct wined3d_swapchain *swapchain, struct wined3d_surface *target,
         const struct wined3d_format *ds_format) DECLSPEC_HIDDEN;
-BOOL context_debug_output_enabled(const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
+HGLRC context_create_wgl_attribs(const struct wined3d_gl_info *gl_info, HDC hdc, HGLRC share_ctx) DECLSPEC_HIDDEN;
 void context_destroy(struct wined3d_device *device, struct wined3d_context *context) DECLSPEC_HIDDEN;
 void context_free_event_query(struct wined3d_event_query *query) DECLSPEC_HIDDEN;
 void context_free_occlusion_query(struct wined3d_occlusion_query *query) DECLSPEC_HIDDEN;
@@ -1711,6 +1711,7 @@ struct wined3d_gl_limits
 
 struct wined3d_gl_info
 {
+    DWORD selected_gl_version;
     DWORD glsl_version;
     struct wined3d_gl_limits limits;
     DWORD reserved_glsl_constants, reserved_arb_constants;
@@ -1743,6 +1744,7 @@ struct wined3d_d3d_limits
     DWORD ps_uniform_count;
     UINT ffp_textures;
     UINT ffp_blend_stages;
+    UINT ffp_vertex_blend_matrices;
 };
 
 typedef void (WINE_GLAPI *wined3d_ffp_attrib_func)(const void *data);
@@ -1888,6 +1890,7 @@ struct wined3d_ffp_vs_settings
     DWORD specular_source : 2;
 
     DWORD transformed     : 1;
+    DWORD vertexblends    : 2;
     DWORD clipping        : 1;
     DWORD normal          : 1;
     DWORD normalize       : 1;
@@ -1898,7 +1901,7 @@ struct wined3d_ffp_vs_settings
     DWORD fog_mode        : 2;
     DWORD texcoords       : 8;  /* MAX_TEXTURES */
     DWORD ortho_fog       : 1;
-    DWORD padding         : 13;
+    DWORD padding         : 11;
 
     DWORD texgen[MAX_TEXTURES];
 };
@@ -3071,7 +3074,7 @@ static inline BOOL shader_constant_is_local(const struct wined3d_shader *shader,
 
 void get_identity_matrix(struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
 void get_modelview_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
-        struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
+        unsigned int index, struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
 void get_projection_matrix(const struct wined3d_context *context, const struct wined3d_state *state,
         struct wined3d_matrix *mat) DECLSPEC_HIDDEN;
 void get_texture_matrix(const struct wined3d_context *context, const struct wined3d_state *state,

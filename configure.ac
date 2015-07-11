@@ -1839,14 +1839,11 @@ char*f(const char *h,char n) {return strchr(h,n);}]])],[ac_cv_c_logicalop_noisy=
 
   CFLAGS=$saved_CFLAGS
 
-  dnl On Darwin, prefer stabs; everywhere else, default to dwarf-2 debug info
+  dnl Default to dwarf-2 debug info
   for ac_flag in $CFLAGS; do
     case $ac_flag in
-      -g) case $host_os in
-            darwin*) WINE_TRY_CFLAGS([-gstabs+]) ;;
-            *) WINE_TRY_CFLAGS([-gdwarf-2])
-               WINE_TRY_CFLAGS([-gstrict-dwarf]) ;;
-          esac ;;
+      -g) WINE_TRY_CFLAGS([-gdwarf-2])
+          WINE_TRY_CFLAGS([-gstrict-dwarf]) ;;
     esac
   done
 
@@ -2897,6 +2894,7 @@ WINE_CONFIG_DLL(d3dx9_42)
 WINE_CONFIG_DLL(d3dx9_43)
 WINE_CONFIG_DLL(d3dxof,,[clean,implib])
 WINE_CONFIG_TEST(dlls/d3dxof/tests)
+WINE_CONFIG_DLL(davclnt)
 WINE_CONFIG_DLL(dbgeng,,[implib])
 WINE_CONFIG_DLL(dbghelp,,[implib])
 WINE_CONFIG_DLL(dciman32,,[implib])
@@ -2990,6 +2988,7 @@ WINE_CONFIG_DLL(gpkcsp)
 WINE_CONFIG_DLL(hal)
 WINE_CONFIG_DLL(hhctrl.ocx,,[clean,implib,po],[htmlhelp])
 WINE_CONFIG_DLL(hid,,[implib])
+WINE_CONFIG_DLL(hidclass.sys,,[implib],[hidclass])
 WINE_CONFIG_DLL(hlink,,[clean,implib])
 WINE_CONFIG_TEST(dlls/hlink/tests)
 WINE_CONFIG_DLL(hnetcfg,,[clean])

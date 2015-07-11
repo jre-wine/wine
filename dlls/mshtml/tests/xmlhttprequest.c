@@ -279,6 +279,84 @@ static IDispatchExVtbl xmlhttprequest_onreadystatechangeFuncVtbl = {
 };
 static IDispatchEx xmlhttprequest_onreadystatechange_obj = { &xmlhttprequest_onreadystatechangeFuncVtbl };
 
+static BOOL doc_complete;
+static IHTMLDocument2 *notif_doc;
+
+static HRESULT WINAPI PropertyNotifySink_QueryInterface(IPropertyNotifySink *iface,
+        REFIID riid, void**ppv)
+{
+    if(IsEqualGUID(&IID_IPropertyNotifySink, riid)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    ok(0, "unexpected call\n");
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI PropertyNotifySink_AddRef(IPropertyNotifySink *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI PropertyNotifySink_Release(IPropertyNotifySink *iface)
+{
+    return 1;
+}
+
+static HRESULT WINAPI PropertyNotifySink_OnChanged(IPropertyNotifySink *iface, DISPID dispID)
+{
+    if(dispID == DISPID_READYSTATE){
+        BSTR state;
+        HRESULT hres;
+
+        hres = IHTMLDocument2_get_readyState(notif_doc, &state);
+        ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
+
+        if(!strcmp_wa(state, "complete"))
+            doc_complete = TRUE;
+
+        SysFreeString(state);
+    }
+
+    return S_OK;
+}
+
+static HRESULT WINAPI PropertyNotifySink_OnRequestEdit(IPropertyNotifySink *iface, DISPID dispID)
+{
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static IPropertyNotifySinkVtbl PropertyNotifySinkVtbl = {
+    PropertyNotifySink_QueryInterface,
+    PropertyNotifySink_AddRef,
+    PropertyNotifySink_Release,
+    PropertyNotifySink_OnChanged,
+    PropertyNotifySink_OnRequestEdit
+};
+
+static IPropertyNotifySink PropertyNotifySink = { &PropertyNotifySinkVtbl };
+
+static void do_advise(IUnknown *unk, REFIID riid, IUnknown *unk_advise)
+{
+    IConnectionPointContainer *container;
+    IConnectionPoint *cp;
+    DWORD cookie;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IConnectionPointContainer, (void**)&container);
+    ok(hres == S_OK, "QueryInterface(IID_IConnectionPointContainer) failed: %08x\n", hres);
+
+    hres = IConnectionPointContainer_FindConnectionPoint(container, riid, &cp);
+    IConnectionPointContainer_Release(container);
+    ok(hres == S_OK, "FindConnectionPoint failed: %08x\n", hres);
+
+    hres = IConnectionPoint_Advise(cp, unk_advise, &cookie);
+    IConnectionPoint_Release(cp);
+    ok(hres == S_OK, "Advise failed: %08x\n", hres);
+}
+
 static void pump_msgs(BOOL *b)
 {
     MSG msg;
@@ -362,12 +440,12 @@ static void test_sync_xhr(IHTMLDocument2 *doc, const char *xml_url)
     ok(V_DISPATCH(&var) == (IDispatch*)&xmlhttprequest_onreadystatechange_obj, "unexpected onreadystatechange value\n");
 
     hres = IHTMLXMLHttpRequest_get_readyState(xhr, NULL);
-    todo_wine ok(hres == E_POINTER, "Expect E_POINTER, got %08x\n", hres);
+    ok(hres == E_POINTER, "Expect E_POINTER, got %08x\n", hres);
 
     val = 0xdeadbeef;
     hres = IHTMLXMLHttpRequest_get_readyState(xhr, &val);
-    todo_wine ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
-    todo_wine ok(val == 0, "Expect UNSENT, got %d\n", val);
+    ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
+    ok(val == 0, "Expect UNSENT, got %d\n", val);
 
     hres = IHTMLXMLHttpRequest_get_status(xhr, NULL);
     todo_wine ok(hres == E_POINTER, "Expect E_POINTER, got %08x\n", hres);
@@ -485,14 +563,15 @@ static void test_async_xhr(IHTMLDocument2 *doc, const char *xml_url)
     todo_wine ok(hres == E_FAIL, "Expect E_FAIL, got: %08x\n", hres);
     todo_wine ok(val == 0, "Expect 0, got %d\n", val);
 
+    text = (BSTR)0xdeadbeef;
     hres = IHTMLXMLHttpRequest_get_statusText(xhr, &text);
     todo_wine ok(hres == E_FAIL, "Expect E_FAIL, got: %08x\n", hres);
     todo_wine ok(text == NULL, "Expect NULL, got %p\n", text);
 
     val = 0xdeadbeef;
     hres = IHTMLXMLHttpRequest_get_readyState(xhr, &val);
-    todo_wine ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
-    todo_wine ok(val == 0, "Expect UNSENT, got %d\n", val);
+    ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
+    ok(val == 0, "Expect UNSENT, got %d\n", val);
 
     method = a2bstr("GET");
     url = a2bstr(xml_url);
@@ -502,8 +581,8 @@ static void test_async_xhr(IHTMLDocument2 *doc, const char *xml_url)
 
     SET_EXPECT(xmlhttprequest_onreadystatechange_opened);
     hres = IHTMLXMLHttpRequest_open(xhr, method, url, vbool, vempty, vempty);
-    todo_wine ok(hres == S_OK, "open failed: %08x\n", hres);
-    todo_wine CHECK_CALLED(xmlhttprequest_onreadystatechange_opened);
+    ok(hres == S_OK, "open failed: %08x\n", hres);
+    CHECK_CALLED(xmlhttprequest_onreadystatechange_opened);
 
     SysFreeString(method);
     SysFreeString(url);
@@ -516,12 +595,12 @@ static void test_async_xhr(IHTMLDocument2 *doc, const char *xml_url)
 
     val = 0xdeadbeef;
     hres = IHTMLXMLHttpRequest_get_status(xhr, &val);
-    ok(hres == E_FAIL, "Expect E_FAIL, got: %08x\n", hres);
-    ok(val == 0, "Expect 0, got %d\n", val);
+    todo_wine ok(hres == E_FAIL, "Expect E_FAIL, got: %08x\n", hres);
+    todo_wine ok(val == 0, "Expect 0, got %d\n", val);
 
     hres = IHTMLXMLHttpRequest_get_statusText(xhr, &text);
-    ok(hres == E_FAIL, "Expect E_FAIL, got: %08x\n", hres);
-    ok(text == NULL, "Expect NULL, got %p\n", text);
+    todo_wine ok(hres == E_FAIL, "Expect E_FAIL, got: %08x\n", hres);
+    todo_wine ok(text == NULL, "Expect NULL, got %p\n", text);
 
     val = 0xdeadbeef;
     hres = IHTMLXMLHttpRequest_get_readyState(xhr, &val);
@@ -533,24 +612,31 @@ static void test_async_xhr(IHTMLDocument2 *doc, const char *xml_url)
     SET_EXPECT(xmlhttprequest_onreadystatechange_loading);
     SET_EXPECT(xmlhttprequest_onreadystatechange_done);
     hres = IHTMLXMLHttpRequest_send(xhr, vempty);
-    ok(hres == S_OK, "send failed: %08x\n", hres);
 
-    pump_msgs(&called_xmlhttprequest_onreadystatechange_done);
+    ok(hres == S_OK, "send failed: %08x\n", hres);
+    if(SUCCEEDED(hres))
+        pump_msgs(&called_xmlhttprequest_onreadystatechange_done);
     todo_wine CHECK_CALLED(xmlhttprequest_onreadystatechange_opened);
-    todo_wine CHECK_CALLED(xmlhttprequest_onreadystatechange_headers_received);
-    todo_wine CHECK_CALLED(xmlhttprequest_onreadystatechange_loading);
+    CHECK_CALLED(xmlhttprequest_onreadystatechange_headers_received);
+    CHECK_CALLED(xmlhttprequest_onreadystatechange_loading);
     CHECK_CALLED(xmlhttprequest_onreadystatechange_done);
+
+    if(FAILED(hres)) {
+        IHTMLXMLHttpRequest_Release(xhr);
+        xhr = NULL;
+        return;
+    }
 
     val = 0xdeadbeef;
     hres = IHTMLXMLHttpRequest_get_status(xhr, &val);
-    ok(hres == S_OK, "get_status failed: %08x\n", hres);
+    todo_wine ok(hres == S_OK, "get_status failed: %08x\n", hres);
     todo_wine ok(val == 200, "Expect 200, got %d\n", val);
 
+    text = NULL;
     hres = IHTMLXMLHttpRequest_get_statusText(xhr, &text);
-    ok(hres == S_OK, "get_statusText failed: %08x\n", hres);
+    todo_wine ok(hres == S_OK, "get_statusText failed: %08x\n", hres);
     todo_wine ok(text != NULL, "text == NULL\n");
-    todo_wine ok(!strcmp_wa(text, "OK"),
-        "Expected \"OK\", got %s\n", wine_dbgstr_w(text));
+    todo_wine ok(!strcmp_wa(text, "OK"), "Expected \"OK\", got %s\n", wine_dbgstr_w(text));
     SysFreeString(text);
 
     val = 0xdeadbeef;
@@ -558,11 +644,12 @@ static void test_async_xhr(IHTMLDocument2 *doc, const char *xml_url)
     ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
     ok(val == 4, "Expect DONE, got %d\n", val);
 
+    text = NULL;
     hres = IHTMLXMLHttpRequest_get_responseText(xhr, &text);
-    ok(hres == S_OK, "get_responseText failed: %08x\n", hres);
-    ok(text != NULL, "test == NULL\n");
-    ok(!strcmp_wa(text, EXPECT_RESPONSE_TEXT), "expect %s, got %s\n",
-            EXPECT_RESPONSE_TEXT, wine_dbgstr_w(text));
+    todo_wine ok(hres == S_OK, "get_responseText failed: %08x\n", hres);
+    todo_wine ok(text != NULL, "test == NULL\n");
+    todo_wine ok(!strcmp_wa(text, EXPECT_RESPONSE_TEXT), "expect %s, got %s\n",
+        EXPECT_RESPONSE_TEXT, wine_dbgstr_w(text));
     SysFreeString(text);
 
     IHTMLXMLHttpRequest_Release(xhr);
@@ -602,6 +689,11 @@ static IHTMLDocument2 *create_doc_from_url(const char *start_url)
     IMoniker_Release(url_mon);
     IBindCtx_Release(bc);
     SysFreeString(url);
+
+    doc_complete = FALSE;
+    notif_doc = doc;
+    do_advise((IUnknown*)doc, &IID_IPropertyNotifySink, (IUnknown*)&PropertyNotifySink);
+    pump_msgs(&doc_complete);
 
     return doc;
 }

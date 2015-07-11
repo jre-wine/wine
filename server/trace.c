@@ -316,23 +316,42 @@ static void dump_irp_params( const char *prefix, const irp_params_t *data )
 {
     switch (data->major)
     {
+    case IRP_MJ_CREATE:
+        fprintf( stderr, "%s{major=CREATE,access=%08x,sharing=%08x,options=%08x",
+                 prefix, data->create.access, data->create.sharing, data->create.options );
+        dump_uint64( ",device=", &data->create.device );
+        fputc( '}', stderr );
+        break;
+    case IRP_MJ_CLOSE:
+        fprintf( stderr, "%s{major=CLOSE", prefix );
+        dump_uint64( ",file=", &data->close.file );
+        fputc( '}', stderr );
+        break;
     case IRP_MJ_READ:
         fprintf( stderr, "%s{major=READ,key=%08x", prefix, data->read.key );
         dump_uint64( ",pos=", &data->read.pos );
+        dump_uint64( ",file=", &data->read.file );
         fputc( '}', stderr );
         break;
     case IRP_MJ_WRITE:
         fprintf( stderr, "%s{major=WRITE,key=%08x", prefix, data->write.key );
         dump_uint64( ",pos=", &data->write.pos );
+        dump_uint64( ",file=", &data->write.file );
         fputc( '}', stderr );
         break;
     case IRP_MJ_FLUSH_BUFFERS:
-        fprintf( stderr, "%s{major=FLUSH_BUFFERS}", prefix );
+        fprintf( stderr, "%s{major=FLUSH_BUFFERS", prefix );
+        dump_uint64( ",file=", &data->flush.file );
+        fputc( '}', stderr );
         break;
     case IRP_MJ_DEVICE_CONTROL:
         fprintf( stderr, "%s{major=DEVICE_CONTROL", prefix );
         dump_ioctl_code( ",code=", &data->ioctl.code );
+        dump_uint64( ",file=", &data->ioctl.file );
         fputc( '}', stderr );
+        break;
+    case IRP_MJ_MAXIMUM_FUNCTION + 1: /* invalid */
+        fprintf( stderr, "%s{}", prefix );
         break;
     default:
         fprintf( stderr, "%s{major=%u}", prefix, data->major );
@@ -2807,6 +2826,7 @@ static void dump_set_irp_result_request( const struct set_irp_result_request *re
     fprintf( stderr, " manager=%04x", req->manager );
     fprintf( stderr, ", handle=%04x", req->handle );
     fprintf( stderr, ", status=%08x", req->status );
+    dump_uint64( ", file_ptr=", &req->file_ptr );
     fprintf( stderr, ", size=%u", req->size );
     dump_varargs_bytes( ", data=", cur_size );
 }
@@ -3998,8 +4018,7 @@ static void dump_get_next_device_request_request( const struct get_next_device_r
 
 static void dump_get_next_device_request_reply( const struct get_next_device_request_reply *req )
 {
-    dump_uint64( " user_ptr=", &req->user_ptr );
-    dump_irp_params( ", params=", &req->params );
+    dump_irp_params( " params=", &req->params );
     fprintf( stderr, ", next=%04x", req->next );
     fprintf( stderr, ", client_pid=%04x", req->client_pid );
     fprintf( stderr, ", client_tid=%04x", req->client_tid );

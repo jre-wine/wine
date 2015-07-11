@@ -318,6 +318,12 @@ typedef struct {
      */
 } strstream;
 
+struct space_info {
+    ULONGLONG capacity;
+    ULONGLONG free;
+    ULONGLONG available;
+};
+
 #if _MSVCP_VER >= 100
 #define VBTABLE_ALIGN 8
 #else
@@ -14282,6 +14288,49 @@ MSVCP_bool __cdecl tr2_sys__Remove_dir(char const* path)
 {
     TRACE("(%p)\n", path);
     return RemoveDirectoryA(path) != 0;
+}
+
+/* ?_Copy_file@sys@tr2@std@@YAHPBD0_N@Z */
+/* ?_Copy_file@sys@tr2@std@@YAHPEBD0_N@Z */
+int __cdecl tr2_sys__Copy_file(char const* source, char const* dest, MSVCP_bool fail_if_exists)
+{
+    TRACE("(%s %s %x)\n", debugstr_a(source), debugstr_a(dest), fail_if_exists);
+
+    if(CopyFileA(source, dest, fail_if_exists))
+        return ERROR_SUCCESS;
+    return GetLastError();
+}
+
+/* ?_Rename@sys@tr2@std@@YAHPBD0@Z */
+/* ?_Rename@sys@tr2@std@@YAHPEBD0@Z */
+int __cdecl tr2_sys__Rename(char const* old_path, char const* new_path)
+{
+    TRACE("(%s %s)\n", debugstr_a(old_path), debugstr_a(new_path));
+
+    if(!old_path || !new_path)
+        return ERROR_INVALID_PARAMETER;
+
+    if(MoveFileExA(old_path, new_path, MOVEFILE_COPY_ALLOWED))
+        return ERROR_SUCCESS;
+    return GetLastError();
+}
+
+/* ?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PBD@Z */
+/* ?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PEBD@Z */
+struct space_info __cdecl tr2_sys__Statvfs(const char* path)
+{
+    ULARGE_INTEGER available, total, free;
+    struct space_info info;
+    TRACE("(%s)\n", debugstr_a(path));
+
+    if(!path || !GetDiskFreeSpaceExA(path, &available, &total, &free)) {
+        info.capacity = info.free = info.available = 0;
+    }else {
+        info.capacity = total.QuadPart;
+        info.free = free.QuadPart;
+        info.available = available.QuadPart;
+    }
+    return info;
 }
 
 /* ??0strstream@std@@QAE@PADHH@Z */

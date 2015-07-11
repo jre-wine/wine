@@ -6646,6 +6646,20 @@ static void test_paint_messages(void)
     RedrawWindow( hparent, NULL, 0, RDW_ERASENOW );
     ok_sequence( WmEmptySeq, "WmChildPaintNc3", FALSE );
 
+    /* WS_CLIPCHILDREN doesn't exclude children from update region */
+    flush_sequence();
+    RedrawWindow( hparent, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_NOCHILDREN );
+    GetClientRect( hparent, &rect );
+    SetRectRgn( hrgn, rect.left, rect.top, rect.right, rect.bottom );
+    check_update_rgn( hparent, hrgn );
+    flush_events();
+
+    RedrawWindow( hparent, NULL, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
+    GetClientRect( hparent, &rect );
+    SetRectRgn( hrgn, rect.left, rect.top, rect.right, rect.bottom );
+    check_update_rgn( hparent, hrgn );
+    flush_events();
+
     /* test RDW_INTERNALPAINT behavior */
 
     flush_sequence();
@@ -9180,6 +9194,54 @@ todo_wine {
     ok(GetLastError() == ERROR_INVALID_HANDLE || /* Win2k */
 	GetLastError() == 0xdeadbeef, /* Win9x */
 	"unexpected error %d\n", GetLastError());
+}
+
+static HWND hook_hwnd;
+static HHOOK recursive_hook;
+static int hook_depth, max_hook_depth;
+
+static LRESULT WINAPI rec_get_message_hook(int code, WPARAM w, LPARAM l)
+{
+    LRESULT res;
+    MSG msg;
+    BOOL b;
+
+    hook_depth++;
+    if(hook_depth > max_hook_depth)
+        max_hook_depth = hook_depth;
+
+    b = PeekMessageW(&msg, hook_hwnd, 0, 0, PM_NOREMOVE);
+    ok(b, "PeekMessage failed\n");
+
+    res = CallNextHookEx(recursive_hook, code, w, l);
+
+    hook_depth--;
+    return res;
+}
+
+static void test_recursive_hook(void)
+{
+    MSG msg;
+    BOOL b;
+
+    hook_hwnd = CreateWindowA("Static", NULL, WS_POPUP, 0, 0, 200, 60, NULL, NULL, NULL, NULL);
+    ok(hook_hwnd != NULL, "CreateWindow failed\n");
+
+    recursive_hook = SetWindowsHookExW(WH_GETMESSAGE, rec_get_message_hook, NULL, GetCurrentThreadId());
+    ok(recursive_hook != NULL, "SetWindowsHookEx failed\n");
+
+    PostMessageW(hook_hwnd, WM_USER, 0, 0);
+    PostMessageW(hook_hwnd, WM_USER+1, 0, 0);
+
+    hook_depth = 0;
+    GetMessageW(&msg, hook_hwnd, 0, 0);
+    ok(15 < max_hook_depth && max_hook_depth < 45, "max_hook_depth = %d\n", max_hook_depth);
+    trace("max_hook_depth = %d\n", max_hook_depth);
+
+    b = UnhookWindowsHookEx(recursive_hook);
+    ok(b, "UnhokWindowsHookEx failed\n");
+
+    DestroyWindow(hook_hwnd);
 }
 
 static const struct message ScrollWindowPaint1[] = {
@@ -14946,7 +15008,11 @@ START_TEST(msg)
     test_timers();
     test_timers_no_wnd();
     test_timers_exceptions();
-    if (hCBT_hook) test_set_hook();
+    if (hCBT_hook)
+    {
+        test_set_hook();
+        test_recursive_hook();
+    }
     test_DestroyWindow();
     test_DispatchMessage();
     test_SendMessageTimeout();

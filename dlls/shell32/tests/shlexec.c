@@ -127,6 +127,8 @@ static INT_PTR shell_execute(LPCSTR verb, LPCSTR file, LPCSTR parameters, LPCSTR
         if (wait_rc == WAIT_TIMEOUT)
         {
             HWND wnd = FindWindowA("#32770", "Windows");
+            if (!wnd)
+                wnd = FindWindowA("Shell_Flyout", "");
             if (wnd != NULL)
             {
                 SendMessageA(wnd, WM_CLOSE, 0, 0);
@@ -1219,7 +1221,7 @@ static void test_commandline2argv(void)
 
     *strW = 0;
     args = CommandLineToArgvW(strW, &numargs);
-    ok(numargs == 1, "expected 1 args, got %d\n", numargs);
+    ok(numargs == 1 || broken(numargs > 1), "expected 1 args, got %d\n", numargs);
     ok(!args || (!args[numargs] || broken(args[numargs] != NULL) /* before Vista */),
        "expected NULL-terminated list of commandline arguments\n");
     if (numargs == 1)
@@ -2523,7 +2525,12 @@ static void init_test(void)
            "unable to find argv0!\n");
     }
 
-    GetTempPathA(sizeof(filename), filename);
+    /* Older versions (win 2k) fail tests if there is a space in
+       the path. */
+    if (dllver.dwMajorVersion <= 5)
+        strcpy(filename, "c:\\");
+    else
+        GetTempPathA(sizeof(filename), filename);
     GetTempFileNameA(filename, "wt", 0, tmpdir);
     GetLongPathNameA(tmpdir, tmpdir, sizeof(tmpdir));
     DeleteFileA( tmpdir );

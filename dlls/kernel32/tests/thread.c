@@ -86,6 +86,7 @@ static BOOL   (WINAPI *pDeactivateActCtx)(DWORD,ULONG_PTR);
 static BOOL   (WINAPI *pGetCurrentActCtx)(HANDLE *);
 static void   (WINAPI *pReleaseActCtx)(HANDLE);
 static PTP_POOL (WINAPI *pCreateThreadpool)(PVOID);
+static void (WINAPI *pCloseThreadpool)(PTP_POOL);
 static PTP_WORK (WINAPI *pCreateThreadpoolWork)(PTP_WORK_CALLBACK,PVOID,PTP_CALLBACK_ENVIRON);
 static void (WINAPI *pSubmitThreadpoolWork)(PTP_WORK);
 static void (WINAPI *pWaitForThreadpoolWorkCallbacks)(PTP_WORK,BOOL);
@@ -1627,8 +1628,8 @@ static void test_threadpool(void)
     int workcalled = 0;
 
     if (!pCreateThreadpool) {
-        todo_wine win_skip("thread pool apis not supported.\n");
-	return;
+        win_skip("thread pool apis not supported.\n");
+        return;
     }
 
     work = pCreateThreadpoolWork(threadpool_workcallback, &workcalled, NULL);
@@ -1640,7 +1641,8 @@ static void test_threadpool(void)
     ok (workcalled == 1, "expected work to be called once, got %d\n", workcalled);
 
     pool = pCreateThreadpool(NULL);
-    todo_wine ok (pool != NULL, "CreateThreadpool failed\n");
+    ok (pool != NULL, "CreateThreadpool failed\n");
+    pCloseThreadpool(pool);
 }
 
 static void test_reserved_tls(void)
@@ -1705,6 +1707,7 @@ static void init_funcs(void)
     X(ReleaseActCtx);
 
     X(CreateThreadpool);
+    X(CloseThreadpool);
     X(CreateThreadpoolWork);
     X(SubmitThreadpoolWork);
     X(WaitForThreadpoolWorkCallbacks);
