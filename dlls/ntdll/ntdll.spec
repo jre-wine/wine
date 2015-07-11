@@ -513,7 +513,7 @@
 @ stdcall RtlDecodePointer(ptr)
 # @ stub RtlDecodeSystemPointer
 @ stdcall RtlDecompressBuffer(long ptr long ptr long ptr)
-@ stub RtlDecompressFragment
+@ stdcall RtlDecompressFragment(long ptr long ptr long long ptr ptr)
 @ stub RtlDefaultNpAcl
 @ stub RtlDelete
 @ stdcall RtlDeleteAce(ptr long)
@@ -970,6 +970,34 @@
 @ stdcall RtlxOemStringToUnicodeSize(ptr) RtlOemStringToUnicodeSize
 @ stdcall RtlxUnicodeStringToAnsiSize(ptr) RtlUnicodeStringToAnsiSize
 @ stdcall RtlxUnicodeStringToOemSize(ptr) RtlUnicodeStringToOemSize
+@ stdcall TpAllocCleanupGroup(ptr)
+@ stdcall TpAllocPool(ptr ptr)
+@ stdcall TpAllocTimer(ptr ptr ptr ptr)
+@ stdcall TpAllocWait(ptr ptr ptr ptr)
+@ stdcall TpAllocWork(ptr ptr ptr ptr)
+@ stdcall TpCallbackLeaveCriticalSectionOnCompletion(ptr ptr)
+@ stdcall TpCallbackMayRunLong(ptr)
+@ stdcall TpCallbackReleaseMutexOnCompletion(ptr long)
+@ stdcall TpCallbackReleaseSemaphoreOnCompletion(ptr long long)
+@ stdcall TpCallbackSetEventOnCompletion(ptr long)
+@ stdcall TpCallbackUnloadDllOnCompletion(ptr ptr)
+@ stdcall TpDisassociateCallback(ptr)
+@ stdcall TpIsTimerSet(ptr)
+@ stdcall TpPostWork(ptr)
+@ stdcall TpReleaseCleanupGroup(ptr)
+@ stdcall TpReleaseCleanupGroupMembers(ptr long ptr)
+@ stdcall TpReleasePool(ptr)
+@ stdcall TpReleaseTimer(ptr)
+@ stdcall TpReleaseWait(ptr)
+@ stdcall TpReleaseWork(ptr)
+@ stdcall TpSetPoolMaxThreads(ptr long)
+@ stdcall TpSetPoolMinThreads(ptr long)
+@ stdcall TpSetTimer(ptr ptr long long)
+@ stdcall TpSetWait(ptr long ptr)
+@ stdcall TpSimpleTryPost(ptr ptr ptr)
+@ stdcall TpWaitForTimer(ptr long)
+@ stdcall TpWaitForWait(ptr long)
+@ stdcall TpWaitForWork(ptr long)
 @ stdcall -ret64 VerSetConditionMask(int64 long long)
 @ stdcall WinSqmIsOptedIn()
 @ stdcall ZwAcceptConnectPort(ptr long ptr long long ptr) NtAcceptConnectPort

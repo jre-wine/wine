@@ -247,6 +247,8 @@ static LRESULT TOOLBAR_AutoSize(TOOLBAR_INFO *infoPtr);
 static void TOOLBAR_CheckImageListIconSize(TOOLBAR_INFO *infoPtr);
 static void TOOLBAR_TooltipAddTool(const TOOLBAR_INFO *infoPtr, const TBUTTON_INFO *button);
 static void TOOLBAR_TooltipSetRect(const TOOLBAR_INFO *infoPtr, const TBUTTON_INFO *button);
+static LRESULT TOOLBAR_SetButtonInfo(TOOLBAR_INFO *infoPtr, INT Id,
+                                     const TBBUTTONINFOW *lptbbi, BOOL isW);
 
 
 static inline int default_top_margin(const TOOLBAR_INFO *infoPtr)
@@ -326,6 +328,37 @@ static inline BOOL
 TOOLBAR_ButtonHasString(const TBUTTON_INFO *btnPtr)
 {
     return HIWORD(btnPtr->iString) && btnPtr->iString != -1;
+}
+
+static void set_string_index( TBUTTON_INFO *btn, INT_PTR str, BOOL unicode )
+{
+    if (!IS_INTRESOURCE( str ) && str != -1)
+    {
+        if (!TOOLBAR_ButtonHasString( btn )) btn->iString = 0;
+
+        if (unicode)
+            Str_SetPtrW( (WCHAR **)&btn->iString, (WCHAR *)str );
+        else
+            Str_SetPtrAtoW( (WCHAR **)&btn->iString, (char *)str );
+    }
+    else
+    {
+        if (TOOLBAR_ButtonHasString( btn )) Free( (WCHAR *)btn->iString );
+
+        btn->iString  = str;
+    }
+}
+
+static void set_stringT( TBUTTON_INFO *btn, const WCHAR *str, BOOL unicode )
+{
+    if (IS_INTRESOURCE( (DWORD_PTR)str ) || (DWORD_PTR)str == -1) return;
+    set_string_index( btn, (DWORD_PTR)str, unicode );
+}
+
+static void free_string( TBUTTON_INFO *btn )
+{
+    set_string_index( btn, 0, TRUE );
+
 }
 
 /***********************************************************************
@@ -1817,6 +1850,7 @@ TOOLBAR_InternalInsertButtonsT(TOOLBAR_INFO *infoPtr, INT iIndex, UINT nAddButto
     /* insert new buttons data */
     for (iButton = 0; iButton < nAddButtons; iButton++) {
         TBUTTON_INFO *btnPtr = &infoPtr->buttons[iIndex + iButton];
+        INT_PTR str;
 
         TOOLBAR_DumpTBButton(lpTbb + iButton, fUnicode);
 
@@ -1827,18 +1861,13 @@ TOOLBAR_InternalInsertButtonsT(TOOLBAR_INFO *infoPtr, INT iIndex, UINT nAddButto
         btnPtr->fsState   = lpTbb[iButton].fsState;
         btnPtr->fsStyle   = lpTbb[iButton].fsStyle;
         btnPtr->dwData    = lpTbb[iButton].dwData;
+
         if (btnPtr->fsStyle & BTNS_SEP)
-            btnPtr->iString = -1;
-        else if(!IS_INTRESOURCE(lpTbb[iButton].iString) && lpTbb[iButton].iString != -1)
-        {
-            if (fUnicode)
-                Str_SetPtrW((LPWSTR*)&btnPtr->iString, (LPWSTR)lpTbb[iButton].iString );
-            else
-                Str_SetPtrAtoW((LPWSTR*)&btnPtr->iString, (LPSTR)lpTbb[iButton].iString);
-            fHasString = TRUE;
-        }
+            str = -1;
         else
-            btnPtr->iString   = lpTbb[iButton].iString;
+            str = lpTbb[iButton].iString;
+        set_string_index( btnPtr, str, fUnicode );
+        fHasString |= TOOLBAR_ButtonHasString( btnPtr );
 
         TOOLBAR_TooltipAddTool(infoPtr, btnPtr);
     }
@@ -3203,8 +3232,7 @@ TOOLBAR_DeleteButton (TOOLBAR_INFO *infoPtr, INT nIndex)
 
     if (infoPtr->nNumButtons == 1) {
 	TRACE(" simple delete!\n");
-	if (TOOLBAR_ButtonHasString(infoPtr->buttons))
-	    Free((LPWSTR)infoPtr->buttons[0].iString);
+        free_string( infoPtr->buttons );
 	Free (infoPtr->buttons);
 	infoPtr->buttons = NULL;
 	infoPtr->nNumButtons = 0;
@@ -3225,8 +3253,7 @@ TOOLBAR_DeleteButton (TOOLBAR_INFO *infoPtr, INT nIndex)
                     (infoPtr->nNumButtons - nIndex) * sizeof(TBUTTON_INFO));
         }
 
-        if (TOOLBAR_ButtonHasString(&oldButtons[nIndex]))
-            Free((LPWSTR)oldButtons[nIndex].iString);
+        free_string( oldButtons + nIndex );
 	Free (oldButtons);
     }
 
@@ -4046,12 +4073,55 @@ TOOLBAR_ReplaceBitmap (TOOLBAR_INFO *infoPtr, const TBREPLACEBITMAP *lpReplace)
 
 /* helper for TOOLBAR_SaveRestoreW */
 static BOOL
-TOOLBAR_Save(const TBSAVEPARAMSW *lpSave)
+TOOLBAR_Save(TOOLBAR_INFO *infoPtr, const TBSAVEPARAMSW *params)
 {
-    FIXME("save to %s %s\n", debugstr_w(lpSave->pszSubKey),
-        debugstr_w(lpSave->pszValueName));
+    NMTBSAVE save;
+    INT ret, i;
+    BOOL alloced = FALSE;
+    HKEY key;
 
-    return FALSE;
+    TRACE( "save to %s %s\n", debugstr_w(params->pszSubKey), debugstr_w(params->pszValueName) );
+
+    memset( &save, 0, sizeof(save) );
+    save.cbData = infoPtr->nNumButtons * sizeof(DWORD);
+    save.iItem = -1;
+    save.cButtons = infoPtr->nNumButtons;
+    save.tbButton.idCommand = -1;
+    TOOLBAR_SendNotify( &save.hdr, infoPtr, TBN_SAVE );
+
+    if (!save.pData)
+    {
+        save.pData = Alloc( save.cbData );
+        if (!save.pData) return FALSE;
+        alloced = TRUE;
+    }
+    if (!save.pCurrent) save.pCurrent = save.pData;
+
+    for (i = 0; i < infoPtr->nNumButtons; i++)
+    {
+        save.iItem = i;
+        save.tbButton.iBitmap = infoPtr->buttons[i].iBitmap;
+        save.tbButton.idCommand = infoPtr->buttons[i].idCommand;
+        save.tbButton.fsState = infoPtr->buttons[i].fsState;
+        save.tbButton.fsStyle = infoPtr->buttons[i].fsStyle;
+        memset( save.tbButton.bReserved, 0, sizeof(save.tbButton.bReserved) );
+        save.tbButton.dwData = infoPtr->buttons[i].dwData;
+        save.tbButton.iString = infoPtr->buttons[i].iString;
+
+        *save.pCurrent++ = save.tbButton.idCommand;
+
+        TOOLBAR_SendNotify( &save.hdr, infoPtr, TBN_SAVE );
+    }
+
+    ret = RegCreateKeyW( params->hkr, params->pszSubKey, &key );
+    if (ret == ERROR_SUCCESS)
+    {
+        ret = RegSetValueExW( key, params->pszValueName, 0, REG_BINARY, (BYTE *)save.pData, save.cbData );
+        RegCloseKey( key );
+    }
+
+    if (alloced) Free( save.pData );
+    return !ret;
 }
 
 
@@ -4063,6 +4133,7 @@ TOOLBAR_DeleteAllButtons(TOOLBAR_INFO *infoPtr)
 
     for (i = 0; i < infoPtr->nNumButtons; i++)
     {
+        free_string( infoPtr->buttons + i );
         TOOLBAR_TooltipDelTool(infoPtr, &infoPtr->buttons[i]);
     }
 
@@ -4082,6 +4153,7 @@ TOOLBAR_Restore(TOOLBAR_INFO *infoPtr, const TBSAVEPARAMSW *lpSave)
     DWORD dwType;
     DWORD dwSize = 0;
     NMTBRESTORE nmtbr;
+    NMHDR hdr;
 
     /* restore toolbar information */
     TRACE("restore from %s %s\n", debugstr_w(lpSave->pszSubKey),
@@ -4114,30 +4186,30 @@ TOOLBAR_Restore(TOOLBAR_INFO *infoPtr, const TBSAVEPARAMSW *lpSave)
 
         if (!TOOLBAR_SendNotify(&nmtbr.hdr, infoPtr, TBN_RESTORE))
         {
-            INT i;
+            INT i, count = nmtbr.cButtons;
 
             /* remove all existing buttons as this function is designed to
              * restore the toolbar to a previously saved state */
             TOOLBAR_DeleteAllButtons(infoPtr);
 
-            for (i = 0; i < nmtbr.cButtons; i++)
+            for (i = 0; i < count; i++)
             {
                 nmtbr.iItem = i;
                 nmtbr.tbButton.iBitmap = -1;
                 nmtbr.tbButton.fsState = 0;
                 nmtbr.tbButton.fsStyle = 0;
-                nmtbr.tbButton.idCommand = 0;
-                if (*nmtbr.pCurrent == (DWORD)-1)
+                nmtbr.tbButton.dwData = 0;
+                nmtbr.tbButton.iString = 0;
+
+                if (*nmtbr.pCurrent & 0x80000000)
                 {
                     /* separator */
-                    nmtbr.tbButton.fsStyle = TBSTYLE_SEP;
-                    /* when inserting separators, iBitmap controls its size.
-                       0 sets default size (width) */
-                    nmtbr.tbButton.iBitmap = 0;
+                    nmtbr.tbButton.iBitmap = SEPARATOR_WIDTH;
+                    nmtbr.tbButton.idCommand = 0;
+                    nmtbr.tbButton.fsStyle = BTNS_SEP;
+                    if (*nmtbr.pCurrent != (DWORD)-1)
+                        nmtbr.tbButton.fsState = TBSTATE_HIDDEN;
                 }
-                else if (*nmtbr.pCurrent == (DWORD)-2)
-                    /* hidden button */
-                    nmtbr.tbButton.fsState = TBSTATE_HIDDEN;
                 else
                     nmtbr.tbButton.idCommand = (int)*nmtbr.pCurrent;
 
@@ -4145,21 +4217,51 @@ TOOLBAR_Restore(TOOLBAR_INFO *infoPtr, const TBSAVEPARAMSW *lpSave)
                 
                 TOOLBAR_SendNotify(&nmtbr.hdr, infoPtr, TBN_RESTORE);
 
-                /* can't contain real string as we don't know whether
-                 * the client put an ANSI or Unicode string in there */
+                /* All returned ptrs and -1 are ignored */
                 if (!IS_INTRESOURCE(nmtbr.tbButton.iString))
                     nmtbr.tbButton.iString = 0;
 
                 TOOLBAR_InsertButtonT(infoPtr, -1, &nmtbr.tbButton, TRUE);
             }
 
-            /* do legacy notifications */
-            if (infoPtr->iVersion < 5)
+            TOOLBAR_SendNotify( &hdr, infoPtr, TBN_BEGINADJUST );
+            for (i = 0; ; i++)
             {
-                /* FIXME: send TBN_BEGINADJUST */
-                FIXME("send TBN_GETBUTTONINFO for each button\n");
-                /* FIXME: send TBN_ENDADJUST */
+                NMTOOLBARW tb;
+                TBBUTTONINFOW bi;
+                WCHAR buf[128];
+                UINT code = infoPtr->bUnicode ? TBN_GETBUTTONINFOW : TBN_GETBUTTONINFOA;
+                INT idx;
+
+                memset( &tb, 0, sizeof(tb) );
+                tb.iItem = i;
+                tb.cchText = sizeof(buf) / sizeof(buf[0]);
+                tb.pszText = buf;
+
+                /* Use the same struct for both A and W versions since the layout is the same. */
+                if (!TOOLBAR_SendNotify( &tb.hdr, infoPtr, code ))
+                    break;
+
+                idx = TOOLBAR_GetButtonIndex( infoPtr, tb.tbButton.idCommand, FALSE );
+                if (idx == -1) continue;
+
+                /* tb.pszText is ignored - the string comes from tb.tbButton.iString, which may
+                   be an index or a ptr.  Either way it is simply copied.  There is no api to change
+                   the string index, so we set it manually.  The other properties can be set with SetButtonInfo. */
+                free_string( infoPtr->buttons + idx );
+                infoPtr->buttons[idx].iString = tb.tbButton.iString;
+
+                memset( &bi, 0, sizeof(bi) );
+                bi.cbSize = sizeof(bi);
+                bi.dwMask = TBIF_IMAGE | TBIF_STATE | TBIF_STYLE | TBIF_LPARAM;
+                bi.iImage = tb.tbButton.iBitmap;
+                bi.fsState = tb.tbButton.fsState;
+                bi.fsStyle = tb.tbButton.fsStyle;
+                bi.lParam = tb.tbButton.dwData;
+
+                TOOLBAR_SetButtonInfo( infoPtr, tb.tbButton.idCommand, &bi, TRUE );
             }
+            TOOLBAR_SendNotify( &hdr, infoPtr, TBN_ENDADJUST );
 
             /* remove all uninitialised buttons
              * note: loop backwards to avoid having to fixup i on a
@@ -4185,7 +4287,7 @@ TOOLBAR_SaveRestoreW (TOOLBAR_INFO *infoPtr, WPARAM wParam, const TBSAVEPARAMSW 
     if (lpSave == NULL) return 0;
 
     if (wParam)
-        return TOOLBAR_Save(lpSave);
+        return TOOLBAR_Save(infoPtr, lpSave);
     else
         return TOOLBAR_Restore(infoPtr, lpSave);
 }
@@ -4320,15 +4422,8 @@ TOOLBAR_SetButtonInfo (TOOLBAR_INFO *infoPtr, INT Id,
     if (lptbbi->dwMask & TBIF_STYLE)
 	btnPtr->fsStyle = lptbbi->fsStyle;
 
-    if ((lptbbi->dwMask & TBIF_TEXT) && ((INT_PTR)lptbbi->pszText != -1)) {
-        /* iString is index, zero it to make Str_SetPtr succeed */
-        if (!TOOLBAR_ButtonHasString(btnPtr)) btnPtr->iString = 0;
-
-        if (isW)
-            Str_SetPtrW ((LPWSTR *)&btnPtr->iString, lptbbi->pszText);
-        else
-            Str_SetPtrAtoW ((LPWSTR *)&btnPtr->iString, (LPSTR)lptbbi->pszText);
-    }
+    if (lptbbi->dwMask & TBIF_TEXT)
+        set_stringT( btnPtr, lptbbi->pszText, isW );
 
     /* save the button rect to see if we need to redraw the whole toolbar */
     oldBtnRect = btnPtr->rect;
@@ -5213,8 +5308,7 @@ TOOLBAR_Destroy (TOOLBAR_INFO *infoPtr)
 
     /* delete button data */
     for (i = 0; i < infoPtr->nNumButtons; i++)
-        if (TOOLBAR_ButtonHasString(&infoPtr->buttons[i]))
-            Free ((LPWSTR)infoPtr->buttons[i].iString);
+        free_string( infoPtr->buttons + i );
     Free (infoPtr->buttons);
 
     /* delete strings */

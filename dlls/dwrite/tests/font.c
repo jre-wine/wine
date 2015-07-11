@@ -19,9 +19,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <math.h>
+
 #define COBJMACROS
 
 #include "windows.h"
+#include "winternl.h"
 #include "dwrite_2.h"
 #include "initguid.h"
 #include "d2d1.h"
@@ -33,6 +36,7 @@
                     ((DWORD)(BYTE)(ch2) << 16) | ((DWORD)(BYTE)(ch3) << 24))
 
 #define MS_CMAP_TAG MS_MAKE_TAG('c','m','a','p')
+#define MS_VDMX_TAG MS_MAKE_TAG('V','D','M','X')
 
 #define EXPECT_HR(hr,hr_exp) \
     ok(hr == hr_exp, "got 0x%08x, expected 0x%08x\n", hr, hr_exp)
@@ -87,6 +91,7 @@ static inline BOOL heap_free(void *mem)
 
 static const WCHAR test_fontfile[] = {'w','i','n','e','_','t','e','s','t','_','f','o','n','t','.','t','t','f',0};
 static const WCHAR tahomaW[] = {'T','a','h','o','m','a',0};
+static const WCHAR arialW[] = {'A','r','i','a','l',0};
 static const WCHAR tahomaUppercaseW[] = {'T','A','H','O','M','A',0};
 static const WCHAR tahomaStrangecaseW[] = {'t','A','h','O','m','A',0};
 static const WCHAR blahW[]  = {'B','l','a','h','!',0};
@@ -2255,11 +2260,11 @@ static void test_GetFontFromFontFace(void)
     DELETE_FONTFILE(path);
 }
 
-static IDWriteFont *get_tahoma_instance(IDWriteFactory *factory, DWRITE_FONT_STYLE style)
+static IDWriteFont *get_font(IDWriteFactory *factory, const WCHAR *name, DWRITE_FONT_STYLE style)
 {
     IDWriteFontCollection *collection;
     IDWriteFontFamily *family;
-    IDWriteFont *font;
+    IDWriteFont *font = NULL;
     UINT32 index;
     BOOL exists;
     HRESULT hr;
@@ -2269,9 +2274,9 @@ static IDWriteFont *get_tahoma_instance(IDWriteFactory *factory, DWRITE_FONT_STY
 
     index = ~0;
     exists = FALSE;
-    hr = IDWriteFontCollection_FindFamilyName(collection, tahomaW, &index, &exists);
+    hr = IDWriteFontCollection_FindFamilyName(collection, name, &index, &exists);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok(exists, "got %d\n", exists);
+    if (!exists) goto not_found;
 
     hr = IDWriteFontCollection_GetFontFamily(collection, index, &family);
     ok(hr == S_OK, "got 0x%08x\n", hr);
@@ -2281,7 +2286,15 @@ static IDWriteFont *get_tahoma_instance(IDWriteFactory *factory, DWRITE_FONT_STY
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     IDWriteFontFamily_Release(family);
+not_found:
     IDWriteFontCollection_Release(collection);
+    return font;
+}
+
+static IDWriteFont *get_tahoma_instance(IDWriteFactory *factory, DWRITE_FONT_STYLE style)
+{
+    IDWriteFont *font = get_font(factory, tahomaW, style);
+    ok(font != NULL, "failed to get Tahoma\n");
     return font;
 }
 
@@ -3418,6 +3431,399 @@ static void test_CreateGlyphRunAnalysis(void)
     IDWriteFactory_Release(factory);
 }
 
+#define round(x) ((int)floor((x) + 0.5))
+
+struct VDMX_Header
+{
+    WORD version;
+    WORD numRecs;
+    WORD numRatios;
+};
+
+struct VDMX_Ratio
+{
+    BYTE bCharSet;
+    BYTE xRatio;
+    BYTE yStartRatio;
+    BYTE yEndRatio;
+};
+
+struct VDMX_group
+{
+    WORD recs;
+    BYTE startsz;
+    BYTE endsz;
+};
+
+struct VDMX_vTable
+{
+    WORD yPelHeight;
+    SHORT yMax;
+    SHORT yMin;
+};
+
+#ifdef WORDS_BIGENDIAN
+#define GET_BE_WORD(x) (x)
+#else
+#define GET_BE_WORD(x) RtlUshortByteSwap(x)
+#endif
+
+static const struct VDMX_group *find_vdmx_group(const struct VDMX_Header *hdr)
+{
+    WORD num_ratios, i, group_offset = 0;
+    struct VDMX_Ratio *ratios = (struct VDMX_Ratio*)(hdr + 1);
+    BYTE dev_x_ratio = 1, dev_y_ratio = 1;
+
+    num_ratios = GET_BE_WORD(hdr->numRatios);
+
+    for (i = 0; i < num_ratios; i++)
+    {
+        if (!ratios[i].bCharSet) continue;
+
+        if ((ratios[i].xRatio == 0 && ratios[i].yStartRatio == 0 &&
+             ratios[i].yEndRatio == 0) ||
+	   (ratios[i].xRatio == dev_x_ratio && ratios[i].yStartRatio <= dev_y_ratio &&
+            ratios[i].yEndRatio >= dev_y_ratio))
+        {
+            group_offset = GET_BE_WORD(*((WORD *)(ratios + num_ratios) + i));
+            break;
+        }
+    }
+    if (group_offset)
+        return (const struct VDMX_group *)((BYTE *)hdr + group_offset);
+    return NULL;
+}
+
+static BOOL get_vdmx_size(const struct VDMX_group *group, int emsize, int *a, int *d)
+{
+    WORD recs, i;
+    const struct VDMX_vTable *tables;
+
+    if (!group) return FALSE;
+
+    recs = GET_BE_WORD(group->recs);
+    if (emsize < group->startsz || emsize >= group->endsz) return FALSE;
+
+    tables = (const struct VDMX_vTable *)(group + 1);
+    for (i = 0; i < recs; i++)
+    {
+        WORD ppem = GET_BE_WORD(tables[i].yPelHeight);
+        if (ppem > emsize)
+        {
+            /* FIXME: Supposed to interpolate */
+            trace("FIXME interpolate %d\n", emsize);
+            return FALSE;
+        }
+
+        if (ppem == emsize)
+        {
+            *a = (SHORT)GET_BE_WORD(tables[i].yMax);
+            *d = -(SHORT)GET_BE_WORD(tables[i].yMin);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static void test_metrics_cmp(FLOAT emsize, const DWRITE_FONT_METRICS *metrics, const DWRITE_FONT_METRICS1 *expected)
+{
+    ok(metrics->designUnitsPerEm == expected->designUnitsPerEm, "%.2f: emsize: got %u expect %u\n",
+           emsize, metrics->designUnitsPerEm, expected->designUnitsPerEm);
+    ok(metrics->ascent == expected->ascent, "%.2f a: got %u expect %u\n",
+           emsize, metrics->ascent, expected->ascent);
+    ok(metrics->descent == expected->descent, "%.2f d: got %u expect %u\n",
+           emsize, metrics->descent, expected->descent);
+    ok(metrics->lineGap == expected->lineGap, "%.2f lg: got %d expect %d\n",
+           emsize, metrics->lineGap, expected->lineGap);
+    ok(metrics->capHeight == expected->capHeight, "%.2f capH: got %u expect %u\n",
+           emsize, metrics->capHeight, expected->capHeight);
+    ok(metrics->xHeight == expected->xHeight, "%.2f xH: got %u expect %u\n",
+           emsize, metrics->xHeight, expected->xHeight);
+    ok(metrics->underlinePosition == expected->underlinePosition, "%.2f ulP: got %d expect %d\n",
+            emsize, metrics->underlinePosition, expected->underlinePosition);
+    ok(metrics->underlineThickness == expected->underlineThickness, "%.2f ulTh: got %u expect %u\n",
+           emsize, metrics->underlineThickness, expected->underlineThickness);
+    ok(metrics->strikethroughPosition == expected->strikethroughPosition, "%.2f stP: got %d expect %d\n",
+           emsize, metrics->strikethroughPosition, expected->strikethroughPosition);
+    ok(metrics->strikethroughThickness == expected->strikethroughThickness, "%.2f stTh: got %u expect %u\n",
+           emsize, metrics->strikethroughThickness, expected->strikethroughThickness);
+}
+
+static void test_metrics1_cmp(FLOAT emsize, const DWRITE_FONT_METRICS1 *metrics, const DWRITE_FONT_METRICS1 *expected)
+{
+    ok(metrics->designUnitsPerEm == expected->designUnitsPerEm, "%.2f: emsize: got %u expect %u\n",
+           emsize, metrics->designUnitsPerEm, expected->designUnitsPerEm);
+    ok(metrics->ascent == expected->ascent, "%.2f a: got %u expect %u\n",
+           emsize, metrics->ascent, expected->ascent);
+    ok(metrics->descent == expected->descent, "%.2f d: got %u expect %u\n",
+           emsize, metrics->descent, expected->descent);
+    ok(metrics->lineGap == expected->lineGap, "%.2f lg: got %d expect %d\n",
+           emsize, metrics->lineGap, expected->lineGap);
+    ok(metrics->capHeight == expected->capHeight, "%.2f capH: got %u expect %u\n",
+           emsize, metrics->capHeight, expected->capHeight);
+    ok(metrics->xHeight == expected->xHeight, "%.2f xH: got %u expect %u\n",
+           emsize, metrics->xHeight, expected->xHeight);
+    ok(metrics->underlinePosition == expected->underlinePosition, "%.2f ulP: got %d expect %d\n",
+            emsize, metrics->underlinePosition, expected->underlinePosition);
+    ok(metrics->underlineThickness == expected->underlineThickness, "%.2f ulTh: got %u expect %u\n",
+           emsize, metrics->underlineThickness, expected->underlineThickness);
+    ok(metrics->strikethroughPosition == expected->strikethroughPosition, "%.2f stP: got %d expect %d\n",
+           emsize, metrics->strikethroughPosition, expected->strikethroughPosition);
+    ok(metrics->strikethroughThickness == expected->strikethroughThickness, "%.2f stTh: got %u expect %u\n",
+           emsize, metrics->strikethroughThickness, expected->strikethroughThickness);
+    ok(metrics->glyphBoxLeft == expected->glyphBoxLeft, "%.2f box left: got %d expect %d\n",
+           emsize, metrics->glyphBoxLeft, expected->glyphBoxLeft);
+if (0) { /* this is not consistent */
+    ok(metrics->glyphBoxTop == expected->glyphBoxTop, "%.2f box top: got %d expect %d\n",
+           emsize, metrics->glyphBoxTop, expected->glyphBoxTop);
+    ok(metrics->glyphBoxRight == expected->glyphBoxRight, "%.2f box right: got %d expect %d\n",
+           emsize, metrics->glyphBoxRight, expected->glyphBoxRight);
+}
+    ok(metrics->glyphBoxBottom == expected->glyphBoxBottom, "%.2f box bottom: got %d expect %d\n",
+           emsize, metrics->glyphBoxBottom, expected->glyphBoxBottom);
+    ok(metrics->subscriptPositionX == expected->subscriptPositionX, "%.2f subX: got %d expect %d\n",
+           emsize, metrics->subscriptPositionX, expected->subscriptPositionX);
+    ok(metrics->subscriptPositionY == expected->subscriptPositionY, "%.2f subY: got %d expect %d\n",
+           emsize, metrics->subscriptPositionY, expected->subscriptPositionY);
+    ok(metrics->subscriptSizeX == expected->subscriptSizeX, "%.2f subsizeX: got %d expect %d\n",
+           emsize, metrics->subscriptSizeX, expected->subscriptSizeX);
+    ok(metrics->subscriptPositionY == expected->subscriptPositionY, "%.2f subsizeY: got %d expect %d\n",
+           emsize, metrics->subscriptSizeY, expected->subscriptSizeY);
+    ok(metrics->superscriptPositionX == expected->superscriptPositionX, "%.2f supX: got %d expect %d\n",
+           emsize, metrics->superscriptPositionX, expected->superscriptPositionX);
+if (0)
+    ok(metrics->superscriptPositionY == expected->superscriptPositionY, "%.2f supY: got %d expect %d\n",
+           emsize, metrics->superscriptPositionY, expected->superscriptPositionY);
+    ok(metrics->superscriptSizeX == expected->superscriptSizeX, "%.2f supsizeX: got %d expect %d\n",
+           emsize, metrics->superscriptSizeX, expected->superscriptSizeX);
+    ok(metrics->superscriptSizeY == expected->superscriptSizeY, "%.2f supsizeY: got %d expect %d\n",
+           emsize, metrics->superscriptSizeY, expected->superscriptSizeY);
+    ok(metrics->hasTypographicMetrics == expected->hasTypographicMetrics, "%.2f hastypo: got %d expect %d\n",
+           emsize, metrics->hasTypographicMetrics, expected->hasTypographicMetrics);
+}
+
+static void test_GetGdiCompatibleMetrics_face(IDWriteFontFace *face)
+{
+    IDWriteFontFace1 *fontface1 = NULL;
+    HRESULT hr;
+    DWRITE_FONT_METRICS design_metrics, comp_metrics;
+    DWRITE_FONT_METRICS1 design_metrics1, expected;
+    FLOAT emsize, scale;
+    int ascent, descent;
+    const struct VDMX_Header *vdmx;
+    UINT32 vdmx_len;
+    void *vdmx_ctx;
+    BOOL exists;
+    const struct VDMX_group *vdmx_group = NULL;
+    DWRITE_MATRIX m;
+
+    hr = IDWriteFontFace_QueryInterface(face, &IID_IDWriteFontFace1, (void**)&fontface1);
+    if (hr != S_OK)
+        win_skip("gdi compatible DWRITE_FONT_METRICS1 are not supported.\n");
+
+    if (fontface1) {
+        IDWriteFontFace1_GetMetrics(fontface1, &design_metrics1);
+        memcpy(&design_metrics, &design_metrics1, sizeof(design_metrics));
+    }
+    else
+        IDWriteFontFace_GetMetrics(face, &design_metrics);
+
+    hr = IDWriteFontFace_TryGetFontTable(face, MS_VDMX_TAG, (const void **)&vdmx,
+                                         &vdmx_len, &vdmx_ctx, &exists);
+    if (hr != S_OK || !exists)
+        vdmx = NULL;
+    else
+        vdmx_group = find_vdmx_group(vdmx);
+
+    /* zero pixels per dip */
+    memset(&comp_metrics, 0xcc, sizeof(comp_metrics));
+    memset(&expected, 0, sizeof(expected));
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 5.0, 0.0, NULL, &comp_metrics);
+    ok(hr == E_INVALIDARG, "got %08x\n", hr);
+    test_metrics_cmp(5.0, &comp_metrics, &expected);
+
+    memset(&comp_metrics, 0xcc, sizeof(comp_metrics));
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 5.0, -1.0, NULL, &comp_metrics);
+    ok(hr == E_INVALIDARG, "got %08x\n", hr);
+    test_metrics_cmp(5.0, &comp_metrics, &expected);
+
+    memset(&m, 0, sizeof(m));
+    /* zero matrix m22 */
+    m.m22 = 1.0;
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 5.0, 1.0, NULL, (DWRITE_FONT_METRICS*)&expected);
+    ok(hr == S_OK, "got %08x\n", hr);
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 5.0, 1.0, &m, &comp_metrics);
+    ok(hr == S_OK, "got %08x\n", hr);
+    test_metrics_cmp(5.0, &comp_metrics, &expected);
+
+    m.m22 = -1.0;
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 5.0, 1.0, &m, &comp_metrics);
+    ok(hr == S_OK, "got %08x\n", hr);
+    test_metrics_cmp(5.0, &comp_metrics, &expected);
+
+    /* pixels per dip == 2 */
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 10.0, 1.0, NULL, (DWRITE_FONT_METRICS*)&expected);
+    ok(hr == S_OK, "got %08x\n", hr);
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 5.0, 2.0, NULL, &comp_metrics);
+    ok(hr == S_OK, "got %08x\n", hr);
+    test_metrics_cmp(5.0, &comp_metrics, &expected);
+
+    /* pixels per dip == 2, m22 == 3.0 */
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 30.0, 1.0, NULL, (DWRITE_FONT_METRICS*)&expected);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    m.m22 = 3.0;
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 5.0, 2.0, &m, &comp_metrics);
+    ok(hr == S_OK, "got %08x\n", hr);
+    test_metrics_cmp(5.0, &comp_metrics, &expected);
+    m.m22 = -3.0;
+    hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, 5.0, 2.0, &m, &comp_metrics);
+    ok(hr == S_OK, "got %08x\n", hr);
+    test_metrics_cmp(5.0, &comp_metrics, &expected);
+
+    for (emsize = 5; emsize <= design_metrics.designUnitsPerEm; emsize++)
+    {
+        DWRITE_FONT_METRICS1 comp_metrics1, expected;
+
+        if (fontface1) {
+            hr = IDWriteFontFace1_GetGdiCompatibleMetrics(fontface1, emsize, 1.0, NULL, &comp_metrics1);
+            ok(hr == S_OK, "got %08x\n", hr);
+        }
+        else {
+            hr = IDWriteFontFace_GetGdiCompatibleMetrics(face, emsize, 1.0, NULL, &comp_metrics);
+            ok(hr == S_OK, "got %08x\n", hr);
+        }
+
+        scale = emsize / design_metrics.designUnitsPerEm;
+        if (!get_vdmx_size(vdmx_group, emsize, &ascent, &descent))
+        {
+            ascent = round(design_metrics.ascent * scale);
+            descent = round(design_metrics.descent * scale);
+        }
+
+        expected.designUnitsPerEm = design_metrics.designUnitsPerEm;
+        expected.ascent = round(ascent / scale );
+        expected.descent = round(descent / scale );
+        expected.lineGap = round(round(design_metrics.lineGap * scale) / scale);
+        expected.capHeight = round(round(design_metrics.capHeight * scale) / scale);
+        expected.xHeight = round(round(design_metrics.xHeight * scale) / scale);
+        expected.underlinePosition = round(round(design_metrics.underlinePosition * scale) / scale);
+        expected.underlineThickness = round(round(design_metrics.underlineThickness * scale) / scale);
+        expected.strikethroughPosition = round(round(design_metrics.strikethroughPosition * scale) / scale);
+        expected.strikethroughThickness = round(round(design_metrics.strikethroughThickness * scale) / scale);
+
+        if (fontface1) {
+            expected.glyphBoxLeft = round(round(design_metrics1.glyphBoxLeft * scale) / scale);
+
+        if (0) { /* those two fail on Tahoma and Win7 */
+            expected.glyphBoxTop = round(round(design_metrics1.glyphBoxTop * scale) / scale);
+            expected.glyphBoxRight = round(round(design_metrics1.glyphBoxRight * scale) / scale);
+        }
+            expected.glyphBoxBottom = round(round(design_metrics1.glyphBoxBottom * scale) / scale);
+            expected.subscriptPositionX = round(round(design_metrics1.subscriptPositionX * scale) / scale);
+            expected.subscriptPositionY = round(round(design_metrics1.subscriptPositionY * scale) / scale);
+            expected.subscriptSizeX = round(round(design_metrics1.subscriptSizeX * scale) / scale);
+            expected.subscriptSizeY = round(round(design_metrics1.subscriptSizeY * scale) / scale);
+            expected.superscriptPositionX = round(round(design_metrics1.superscriptPositionX * scale) / scale);
+        if (0) /* this fails for 3 emsizes, Tahoma from [5, 2048] range */
+            expected.superscriptPositionY = round(round(design_metrics1.superscriptPositionY * scale) / scale);
+            expected.superscriptSizeX = round(round(design_metrics1.superscriptSizeX * scale) / scale);
+            expected.superscriptSizeY = round(round(design_metrics1.superscriptSizeY * scale) / scale);
+            expected.hasTypographicMetrics = design_metrics1.hasTypographicMetrics;
+
+            test_metrics1_cmp(emsize, &comp_metrics1, &expected);
+        }
+        else
+            test_metrics_cmp(emsize, &comp_metrics, &expected);
+
+    }
+
+    if (fontface1)
+        IDWriteFontFace1_Release(fontface1);
+    if (vdmx) IDWriteFontFace_ReleaseFontTable(face, vdmx_ctx);
+}
+
+static void test_GetGdiCompatibleMetrics(void)
+{
+    IDWriteFactory *factory;
+    IDWriteFont *font;
+    IDWriteFontFace *fontface;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    font = get_font(factory, tahomaW, DWRITE_FONT_STYLE_NORMAL);
+    hr = IDWriteFont_CreateFontFace(font, &fontface);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IDWriteFont_Release(font);
+    test_GetGdiCompatibleMetrics_face(fontface);
+    IDWriteFontFace_Release(fontface);
+
+    font = get_font(factory, arialW, DWRITE_FONT_STYLE_NORMAL);
+    if (!font)
+        skip("Skipping tests with Arial\n");
+    else
+    {
+        hr = IDWriteFont_CreateFontFace(font, &fontface);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        IDWriteFont_Release(font);
+
+        test_GetGdiCompatibleMetrics_face(fontface);
+        IDWriteFontFace_Release(fontface);
+    }
+
+    IDWriteFactory_Release(factory);
+}
+
+static void test_GetPanose(void)
+{
+    IDWriteFactory *factory;
+    IDWriteFont1 *font1;
+    IDWriteFont *font;
+    HRESULT hr;
+
+    factory = create_factory();
+    font = get_tahoma_instance(factory, DWRITE_FONT_STYLE_NORMAL);
+
+    hr = IDWriteFont_QueryInterface(font, &IID_IDWriteFont1, (void**)&font1);
+    IDWriteFont_Release(font);
+    if (hr == S_OK) {
+        DWRITE_PANOSE panose;
+
+    if (0) /* crashes on native */
+        IDWriteFont1_GetPanose(font1, NULL);
+
+        memset(&panose, 0, sizeof(panose));
+        IDWriteFont1_GetPanose(font1, &panose);
+        ok(panose.familyKind == DWRITE_PANOSE_FAMILY_TEXT_DISPLAY,
+            "got %u\n", panose.familyKind);
+        ok(panose.text.serifStyle == DWRITE_PANOSE_SERIF_STYLE_NORMAL_SANS,
+            "got %u\n", panose.text.serifStyle);
+        ok(panose.text.weight == DWRITE_PANOSE_WEIGHT_MEDIUM,
+            "got %u\n", panose.text.weight);
+        ok(panose.text.proportion == DWRITE_PANOSE_PROPORTION_EVEN_WIDTH,
+            "got %u\n", panose.text.proportion);
+        ok(panose.text.contrast == DWRITE_PANOSE_CONTRAST_VERY_LOW,
+            "got %u\n", panose.text.contrast);
+        ok(panose.text.strokeVariation == DWRITE_PANOSE_STROKE_VARIATION_GRADUAL_VERTICAL,
+            "got %u\n", panose.text.strokeVariation);
+        ok(panose.text.armStyle == DWRITE_PANOSE_ARM_STYLE_STRAIGHT_ARMS_VERTICAL,
+            "got %u\n", panose.text.armStyle);
+        ok(panose.text.letterform == DWRITE_PANOSE_LETTERFORM_NORMAL_BOXED,
+            "got %u\n", panose.text.letterform);
+        ok(panose.text.midline == DWRITE_PANOSE_MIDLINE_STANDARD_TRIMMED,
+            "got %u\n", panose.text.midline);
+        ok(panose.text.xHeight == DWRITE_PANOSE_XHEIGHT_CONSTANT_LARGE,
+            "got %u\n", panose.text.xHeight);
+
+        IDWriteFont1_Release(font1);
+    }
+    else
+        win_skip("GetPanose() is not supported.\n");
+
+    IDWriteFactory_Release(factory);
+}
+
 START_TEST(font)
 {
     IDWriteFactory *factory;
@@ -3461,6 +3867,8 @@ START_TEST(font)
     test_GetKerningPairAdjustments();
     test_CreateRenderingParams();
     test_CreateGlyphRunAnalysis();
+    test_GetGdiCompatibleMetrics();
+    test_GetPanose();
 
     IDWriteFactory_Release(factory);
 }

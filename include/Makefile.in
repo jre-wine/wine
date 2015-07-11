@@ -254,7 +254,9 @@ SRCDIR_INCLUDES = \
 	ddk/csq.h \
 	ddk/hidclass.h \
 	ddk/hidpi.h \
+	ddk/hidport.h \
 	ddk/hidsdi.h \
+	ddk/hidtypes.h \
 	ddk/imm.h \
 	ddk/mountmgr.h \
 	ddk/ntddcdvd.h \

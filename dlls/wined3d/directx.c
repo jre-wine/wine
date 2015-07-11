@@ -279,19 +279,18 @@ static void wined3d_caps_gl_ctx_destroy(const struct wined3d_caps_gl_ctx *ctx)
         ERR("Failed to restore previous GL context.\n");
 }
 
-static void wined3d_caps_gl_ctx_create_attribs(struct wined3d_caps_gl_ctx *caps_gl_ctx,
-        struct wined3d_gl_info *gl_info, const GLint *ctx_attribs)
+static BOOL wined3d_caps_gl_ctx_create_attribs(struct wined3d_caps_gl_ctx *caps_gl_ctx,
+        struct wined3d_gl_info *gl_info)
 {
     HGLRC new_ctx;
 
     if (!(gl_info->p_wglCreateContextAttribsARB = (void *)wglGetProcAddress("wglCreateContextAttribsARB")))
-        return;
+        return TRUE;
 
-    if (!(new_ctx = gl_info->p_wglCreateContextAttribsARB(caps_gl_ctx->dc, NULL, ctx_attribs)))
+    if (!(new_ctx = context_create_wgl_attribs(gl_info, caps_gl_ctx->dc, NULL)))
     {
-        ERR("Failed to create a context using wglCreateContextAttribsARB(), last error %#x.\n", GetLastError());
         gl_info->p_wglCreateContextAttribsARB = NULL;
-        return;
+        return FALSE;
     }
 
     if (!wglMakeCurrent(caps_gl_ctx->dc, new_ctx))
@@ -300,12 +299,14 @@ static void wined3d_caps_gl_ctx_create_attribs(struct wined3d_caps_gl_ctx *caps_
         if (!wglDeleteContext(new_ctx))
             ERR("Failed to delete new context, last error %#x.\n", GetLastError());
         gl_info->p_wglCreateContextAttribsARB = NULL;
-        return;
+        return TRUE;
     }
 
     if (!wglDeleteContext(caps_gl_ctx->gl_ctx))
         ERR("Failed to delete old context, last error %#x.\n", GetLastError());
     caps_gl_ctx->gl_ctx = new_ctx;
+
+    return TRUE;
 }
 
 static BOOL wined3d_caps_gl_ctx_create(struct wined3d_caps_gl_ctx *ctx)
@@ -2420,6 +2421,30 @@ static void parse_extension_string(struct wined3d_gl_info *gl_info, const char *
     }
 }
 
+static void enumerate_gl_extensions(struct wined3d_gl_info *gl_info,
+        const struct wined3d_extension_map *map, unsigned int map_entries_count)
+{
+    const char *gl_extension_name;
+    unsigned int i, j;
+    GLint extensions_count;
+
+    glGetIntegerv(GL_NUM_EXTENSIONS, &extensions_count);
+    for (i = 0; i < extensions_count; ++i)
+    {
+        gl_extension_name = (const char *)GL_EXTCALL(glGetStringi(GL_EXTENSIONS, i));
+        TRACE("- %s.\n", debugstr_a(gl_extension_name));
+        for (j = 0; j < map_entries_count; ++j)
+        {
+            if (!strcmp(gl_extension_name, map[j].extension_string))
+            {
+                TRACE("FOUND: %s support.\n", map[j].extension_string);
+                gl_info->supported[map[j].extension] = TRUE;
+                break;
+            }
+        }
+    }
+}
+
 static void load_gl_funcs(struct wined3d_gl_info *gl_info)
 {
 #define USE_GL_FUNC(pfn) gl_info->gl_ops.ext.p_##pfn = (void *)wglGetProcAddress(#pfn);
@@ -2912,6 +2937,7 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     USE_GL_FUNC(glGetShaderInfoLog)         /* OpenGL 2.0 */
     USE_GL_FUNC(glGetShaderiv)              /* OpenGL 2.0 */
     USE_GL_FUNC(glGetShaderSource)          /* OpenGL 2.0 */
+    USE_GL_FUNC(glGetStringi)               /* OpenGL 3.0 */
     USE_GL_FUNC(glGetUniformfv)             /* OpenGL 2.0 */
     USE_GL_FUNC(glGetUniformiv)             /* OpenGL 2.0 */
     USE_GL_FUNC(glGetUniformLocation)       /* OpenGL 2.0 */
@@ -3324,12 +3350,12 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     struct fragment_caps fragment_caps;
     struct shader_caps shader_caps;
     const char *WGL_Extensions = NULL;
-    const char *GL_Extensions = NULL;
     enum wined3d_gl_vendor gl_vendor;
     enum wined3d_pci_device device;
     DWORD gl_version;
     HDC hdc;
     unsigned int i;
+    GLint context_profile = 0;
 
     TRACE("adapter %p.\n", adapter);
 
@@ -3359,23 +3385,39 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     }
     gl_version = wined3d_parse_gl_version(gl_version_str);
 
-    /* Parse the gl supported features, in theory enabling parts of our code appropriately. */
-    GL_Extensions = (const char *)gl_info->gl_ops.gl.p_glGetString(GL_EXTENSIONS);
-    if (!GL_Extensions)
-    {
-        ERR("Received a NULL GL_EXTENSIONS.\n");
-        return FALSE;
-    }
+    load_gl_funcs(gl_info);
 
     memset(gl_info->supported, 0, sizeof(gl_info->supported));
     gl_info->supported[WINED3D_GL_EXT_NONE] = TRUE;
 
-    TRACE("GL extensions reported:\n");
-    parse_extension_string(gl_info, GL_Extensions, gl_extension_map,
-            sizeof(gl_extension_map) / sizeof(*gl_extension_map));
+    if (gl_version >= MAKEDWORD_VERSION(3, 2))
+    {
+        glGetIntegerv(GL_CONTEXT_PROFILE_MASK, &context_profile);
+        checkGLcall("Querying context profile");
+    }
+    if (context_profile & GL_CONTEXT_CORE_PROFILE_BIT)
+        TRACE("Got a core profile context.\n");
+    else
+        gl_info->supported[WINED3D_GL_LEGACY_CONTEXT] = TRUE;
 
-    /* Now work out what GL support this card really has. */
-    load_gl_funcs( gl_info );
+    TRACE("GL extensions reported:\n");
+    if (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT])
+    {
+        const char *gl_extensions = (const char *)gl_info->gl_ops.gl.p_glGetString(GL_EXTENSIONS);
+
+        if (!gl_extensions)
+        {
+            ERR("Received a NULL GL_EXTENSIONS.\n");
+            return FALSE;
+        }
+        parse_extension_string(gl_info, gl_extensions, gl_extension_map,
+                sizeof(gl_extension_map) / sizeof(*gl_extension_map));
+    }
+    else
+    {
+        enumerate_gl_extensions(gl_info, gl_extension_map,
+                sizeof(gl_extension_map) / sizeof(*gl_extension_map));
+    }
 
     hdc = wglGetCurrentDC();
     /* Not all GL drivers might offer WGL extensions e.g. VirtualBox. */
@@ -3465,10 +3507,20 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
         TRACE(" IMPLIED: ARB_vertex_array_bgra support (by EXT_vertex_array_bgra).\n");
         gl_info->supported[ARB_VERTEX_ARRAY_BGRA] = TRUE;
     }
+    if (!gl_info->supported[EXT_TEXTURE_COMPRESSION_RGTC] && gl_info->supported[ARB_TEXTURE_COMPRESSION_RGTC])
+    {
+        TRACE(" IMPLIED: EXT_texture_compression_rgtc support (by ARB_texture_compression_rgtc).\n");
+        gl_info->supported[EXT_TEXTURE_COMPRESSION_RGTC] = TRUE;
+    }
     if (!gl_info->supported[ARB_TEXTURE_COMPRESSION_RGTC] && gl_info->supported[EXT_TEXTURE_COMPRESSION_RGTC])
     {
         TRACE(" IMPLIED: ARB_texture_compression_rgtc support (by EXT_texture_compression_rgtc).\n");
         gl_info->supported[ARB_TEXTURE_COMPRESSION_RGTC] = TRUE;
+    }
+    if (gl_info->supported[ARB_TEXTURE_COMPRESSION_RGTC] && !gl_info->supported[ARB_TEXTURE_RG])
+    {
+        TRACE("ARB_texture_rg not supported, disabling ARB_texture_compression_rgtc.\n");
+        gl_info->supported[ARB_TEXTURE_COMPRESSION_RGTC] = FALSE;
     }
     if (gl_info->supported[NV_TEXTURE_SHADER2])
     {
@@ -3564,7 +3616,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     adapter->fragment_pipe = select_fragment_implementation(gl_info, adapter->shader_backend);
     adapter->blitter = select_blit_implementation(gl_info, adapter->shader_backend);
 
-    adapter->shader_backend->shader_get_caps(&adapter->gl_info, &shader_caps);
+    adapter->shader_backend->shader_get_caps(gl_info, &shader_caps);
     adapter->d3d_info.vs_clipping = shader_caps.wined3d_caps & WINED3D_SHADER_CAP_VS_CLIPPING;
     adapter->d3d_info.limits.vs_version = shader_caps.vs_version;
     adapter->d3d_info.limits.gs_version = shader_caps.gs_version;
@@ -3575,6 +3627,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     adapter->vertex_pipe->vp_get_caps(gl_info, &vertex_caps);
     adapter->d3d_info.xyzrhw = vertex_caps.xyzrhw;
     adapter->d3d_info.ffp_generic_attributes = vertex_caps.ffp_generic_attributes;
+    adapter->d3d_info.limits.ffp_vertex_blend_matrices = vertex_caps.max_vertex_blend_matrices;
 
     adapter->fragment_pipe->get_caps(gl_info, &fragment_caps);
     adapter->d3d_info.limits.ffp_blend_stages = fragment_caps.MaxTextureBlendStages;
@@ -4882,8 +4935,9 @@ HRESULT CDECL wined3d_get_device_caps(const struct wined3d *wined3d, UINT adapte
 
     if (!gl_info->supported[ARB_TEXTURE_NON_POWER_OF_TWO])
     {
-        caps->TextureCaps  |= WINED3DPTEXTURECAPS_POW2 |
-                              WINED3DPTEXTURECAPS_NONPOW2CONDITIONAL;
+        caps->TextureCaps |= WINED3DPTEXTURECAPS_POW2;
+        if (gl_info->supported[WINED3D_GL_NORMALIZED_TEXRECT] || gl_info->supported[ARB_TEXTURE_RECTANGLE])
+            caps->TextureCaps |= WINED3DPTEXTURECAPS_NONPOW2CONDITIONAL;
     }
 
     if (gl_info->supported[EXT_TEXTURE3D])
@@ -5655,11 +5709,15 @@ static void wined3d_adapter_init_fb_cfgs(struct wined3d_adapter *adapter, HDC dc
 
 static BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, UINT ordinal)
 {
+    static const DWORD supported_gl_versions[] =
+    {
+        MAKEDWORD_VERSION(3, 2),
+        MAKEDWORD_VERSION(1, 0),
+    };
     struct wined3d_gl_info *gl_info = &adapter->gl_info;
     struct wined3d_caps_gl_ctx caps_gl_ctx = {0};
-    unsigned int ctx_attrib_idx = 0;
+    unsigned int i;
     DISPLAY_DEVICEW display_device;
-    GLint ctx_attribs[3];
 
     TRACE("adapter %p, ordinal %u.\n", adapter, ordinal);
 
@@ -5705,13 +5763,28 @@ static BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, UINT ordinal)
         return FALSE;
     }
 
-    if (context_debug_output_enabled(gl_info))
+    for (i = 0; i < ARRAY_SIZE(supported_gl_versions); ++i)
     {
-        ctx_attribs[ctx_attrib_idx++] = WGL_CONTEXT_FLAGS_ARB;
-        ctx_attribs[ctx_attrib_idx++] = WGL_CONTEXT_DEBUG_BIT_ARB;
+        if (supported_gl_versions[i] <= wined3d_settings.max_gl_version)
+            break;
     }
-    ctx_attribs[ctx_attrib_idx] = 0;
-    wined3d_caps_gl_ctx_create_attribs(&caps_gl_ctx, gl_info, ctx_attribs);
+    if (i == ARRAY_SIZE(supported_gl_versions))
+    {
+        ERR_(winediag)("Requested invalid GL version %u.%u.\n",
+                wined3d_settings.max_gl_version >> 16, wined3d_settings.max_gl_version & 0xffff);
+        i = ARRAY_SIZE(supported_gl_versions) - 1;
+    }
+
+    for (; i < ARRAY_SIZE(supported_gl_versions); ++i)
+    {
+        gl_info->selected_gl_version = supported_gl_versions[i];
+
+        if (wined3d_caps_gl_ctx_create_attribs(&caps_gl_ctx, gl_info))
+            break;
+
+        WARN("Couldn't create an OpenGL %u.%u context, trying fallback to a lower version.\n",
+                supported_gl_versions[i] >> 16, supported_gl_versions[i] & 0xffff);
+    }
 
     if (!wined3d_adapter_init_gl_caps(adapter))
     {

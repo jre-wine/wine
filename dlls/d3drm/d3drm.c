@@ -963,10 +963,10 @@ static HRESULT WINAPI d3drm3_CreateDevice(IDirect3DRM3 *iface,
 }
 
 static HRESULT WINAPI d3drm3_CreateDeviceFromSurface(IDirect3DRM3 *iface, GUID *guid,
-        IDirectDraw *ddraw, IDirectDrawSurface *backbuffer, IDirect3DRMDevice3 **device)
+        IDirectDraw *ddraw, IDirectDrawSurface *backbuffer, DWORD flags, IDirect3DRMDevice3 **device)
 {
-    FIXME("iface %p, guid %s, ddraw %p, backbuffer %p, device %p partial stub.\n",
-            iface, debugstr_guid(guid), ddraw, backbuffer, device);
+    FIXME("iface %p, guid %s, ddraw %p, backbuffer %p, flags %#x, device %p partial stub.\n",
+            iface, debugstr_guid(guid), ddraw, backbuffer, flags, device);
 
     return Direct3DRMDevice_create(&IID_IDirect3DRMDevice3, (IUnknown **)device);
 }
@@ -1527,4 +1527,19 @@ HRESULT WINAPI Direct3DRMCreate(IDirect3DRM **d3drm)
     *d3drm = &object->IDirect3DRM_iface;
 
     return S_OK;
+}
+
+HRESULT WINAPI DllCanUnloadNow(void)
+{
+    return S_FALSE;
+}
+
+HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
+{
+    TRACE("(%s, %s, %p): stub\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
+
+    if(!ppv)
+        return E_INVALIDARG;
+
+    return CLASS_E_CLASSNOTAVAILABLE;
 }

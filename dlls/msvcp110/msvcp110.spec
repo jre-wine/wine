@@ -517,9 +517,9 @@
 @ cdecl -arch=arm ??1ctype_base@std@@UAA@XZ(ptr) ctype_base_dtor
 @ thiscall -arch=i386 ??1ctype_base@std@@UAE@XZ(ptr) ctype_base_dtor
 @ cdecl -arch=win64 ??1ctype_base@std@@UEAA@XZ(ptr) ctype_base_dtor
-@ stub -arch=arm ??1facet@locale@std@@MAA@XZ
-@ stub -arch=i386 ??1facet@locale@std@@MAE@XZ
-@ stub -arch=win64 ??1facet@locale@std@@MEAA@XZ
+@ cdecl -arch=arm ??1facet@locale@std@@MAA@XZ(ptr) locale_facet_dtor
+@ thiscall -arch=i386 ??1facet@locale@std@@MAE@XZ(ptr) locale_facet_dtor
+@ cdecl -arch=win64 ??1facet@locale@std@@MEAA@XZ(ptr) locale_facet_dtor
 @ cdecl -arch=arm ??1ios_base@std@@UAA@XZ(ptr) ios_base_dtor
 @ thiscall -arch=i386 ??1ios_base@std@@UAE@XZ(ptr) ios_base_dtor
 @ cdecl -arch=win64 ??1ios_base@std@@UEAA@XZ(ptr) ios_base_dtor
@@ -1163,8 +1163,8 @@
 @ extern -arch=win64 ?_Clocptr@_Locimp@locale@std@@0PEAV123@EA locale__Locimp__Clocptr
 @ stub -arch=win32 ?_Close_dir@sys@tr2@std@@YAXPAX@Z
 @ stub -arch=win64 ?_Close_dir@sys@tr2@std@@YAXPEAX@Z
-@ stub -arch=win32 ?_Copy_file@sys@tr2@std@@YAHPBD0_N@Z
-@ stub -arch=win64 ?_Copy_file@sys@tr2@std@@YAHPEBD0_N@Z
+@ cdecl -arch=win32 ?_Copy_file@sys@tr2@std@@YAHPBD0_N@Z(str str long) tr2_sys__Copy_file
+@ cdecl -arch=win64 ?_Copy_file@sys@tr2@std@@YAHPEBD0_N@Z(str str long) tr2_sys__Copy_file
 @ stub -arch=win32 ?_Copy_file@sys@tr2@std@@YAHPB_W0_N@Z
 @ stub -arch=win64 ?_Copy_file@sys@tr2@std@@YAHPEB_W0_N@Z
 @ cdecl -arch=win32 ?_Current_get@sys@tr2@std@@YAPADPAD@Z(ptr) tr2_sys__Current_get
@@ -1722,8 +1722,8 @@
 @ cdecl -arch=win64 ?_Remove_dir@sys@tr2@std@@YA_NPEBD@Z(str) tr2_sys__Remove_dir
 @ stub -arch=win32 ?_Remove_dir@sys@tr2@std@@YA_NPB_W@Z
 @ stub -arch=win64 ?_Remove_dir@sys@tr2@std@@YA_NPEB_W@Z
-@ stub -arch=win32 ?_Rename@sys@tr2@std@@YAHPBD0@Z
-@ stub -arch=win64 ?_Rename@sys@tr2@std@@YAHPEBD0@Z
+@ cdecl -arch=win32 ?_Rename@sys@tr2@std@@YAHPBD0@Z(str str) tr2_sys__Rename
+@ cdecl -arch=win64 ?_Rename@sys@tr2@std@@YAHPEBD0@Z(str str) tr2_sys__Rename
 @ stub -arch=win32 ?_Rename@sys@tr2@std@@YAHPB_W0@Z
 @ stub -arch=win64 ?_Rename@sys@tr2@std@@YAHPEB_W0@Z
 @ cdecl -arch=win32 ?_Rep@?$num_put@DV?$ostreambuf_iterator@DU?$char_traits@D@std@@@std@@@std@@ABA?AV?$ostreambuf_iterator@DU?$char_traits@D@std@@@2@V32@DI@Z(ptr ptr long ptr long long) num_put_char__Rep
@@ -1761,8 +1761,8 @@
 @ stub -arch=win64 ?_Stat@sys@tr2@std@@YA?AW4file_type@123@PEBDAEAH@Z
 @ stub -arch=win32 ?_Stat@sys@tr2@std@@YA?AW4file_type@123@PB_WAAH@Z
 @ stub -arch=win64 ?_Stat@sys@tr2@std@@YA?AW4file_type@123@PEB_WAEAH@Z
-@ stub -arch=win32 ?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PBD@Z
-@ stub -arch=win64 ?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PEBD@Z
+@ cdecl -arch=win32 ?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PBD@Z(str) tr2_sys__Statvfs
+@ cdecl -arch=win64 ?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PEBD@Z(str) tr2_sys__Statvfs
 @ stub -arch=win32 ?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PB_W@Z
 @ stub -arch=win64 ?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PEB_W@Z
 @ cdecl -arch=arm ?_Swap_all@_Container_base0@std@@QAAXAAU12@@Z(ptr ptr) Container_base0_Swap_all

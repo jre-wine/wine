@@ -44,6 +44,12 @@ static void d2d_matrix_multiply(D2D_MATRIX_3X2_F *a, const D2D_MATRIX_3X2_F *b)
     a->_32 = tmp._31 * b->_12 + tmp._32 * b->_22 + b->_32;
 }
 
+static void d2d_point_set(D2D1_POINT_2F *dst, float x, float y)
+{
+    dst->x = x;
+    dst->y = y;
+}
+
 static void d2d_point_transform(D2D1_POINT_2F *dst, const D2D1_MATRIX_3X2_F *matrix, float x, float y)
 {
     dst->x = x * matrix->_11 + y * matrix->_21 + matrix->_31;
@@ -798,10 +804,38 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawText(ID2D1RenderTarget *
         const WCHAR *string, UINT32 string_len, IDWriteTextFormat *text_format, const D2D1_RECT_F *layout_rect,
         ID2D1Brush *brush, D2D1_DRAW_TEXT_OPTIONS options, DWRITE_MEASURING_MODE measuring_mode)
 {
-    FIXME("iface %p, string %s, string_len %u, text_format %p, layout_rect %p, "
-            "brush %p, options %#x, measuring_mode %#x stub!\n",
+    IDWriteTextLayout *text_layout;
+    IDWriteFactory *dwrite_factory;
+    D2D1_POINT_2F origin;
+    HRESULT hr;
+
+    TRACE("iface %p, string %s, string_len %u, text_format %p, layout_rect %p, "
+            "brush %p, options %#x, measuring_mode %#x.\n",
             iface, debugstr_wn(string, string_len), string_len, text_format, layout_rect,
             brush, options, measuring_mode);
+
+    if (measuring_mode != DWRITE_MEASURING_MODE_NATURAL)
+        FIXME("Ignoring measuring mode %#x.\n", measuring_mode);
+
+    if (FAILED(hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+            &IID_IDWriteFactory, (IUnknown **)&dwrite_factory)))
+    {
+        ERR("Failed to create dwrite factory, hr %#x.\n", hr);
+        return;
+    }
+
+    hr = IDWriteFactory_CreateTextLayout(dwrite_factory, string, string_len, text_format,
+            layout_rect->right - layout_rect->left, layout_rect->bottom - layout_rect->top, &text_layout);
+    IDWriteFactory_Release(dwrite_factory);
+    if (FAILED(hr))
+    {
+        ERR("Failed to create text layout, hr %#x.\n", hr);
+        return;
+    }
+
+    d2d_point_set(&origin, layout_rect->left, layout_rect->top);
+    ID2D1RenderTarget_DrawTextLayout(iface, origin, text_layout, brush, options);
+    IDWriteTextLayout_Release(text_layout);
 }
 
 static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawTextLayout(ID2D1RenderTarget *iface,
@@ -826,8 +860,53 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawGlyphRun(ID2D1RenderTarg
         D2D1_POINT_2F baseline_origin, const DWRITE_GLYPH_RUN *glyph_run, ID2D1Brush *brush,
         DWRITE_MEASURING_MODE measuring_mode)
 {
-    FIXME("iface %p, baseline_origin {%.8e, %.8e}, glyph_run %p, brush %p, measuring_mode %#x stub!\n",
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
+    D2D1_MATRIX_3X2_F *transform, prev_transform;
+    ID2D1PathGeometry *geometry;
+    ID2D1GeometrySink *sink;
+    HRESULT hr;
+
+    TRACE("iface %p, baseline_origin {%.8e, %.8e}, glyph_run %p, brush %p, measuring_mode %#x.\n",
             iface, baseline_origin.x, baseline_origin.y, glyph_run, brush, measuring_mode);
+
+    if (measuring_mode)
+        FIXME("Ignoring measuring mode %#x.\n", measuring_mode);
+
+    if (FAILED(hr = ID2D1Factory_CreatePathGeometry(render_target->factory, &geometry)))
+    {
+        ERR("Failed to create geometry, hr %#x.\n", hr);
+        return;
+    }
+
+    if (FAILED(hr = ID2D1PathGeometry_Open(geometry, &sink)))
+    {
+        ERR("Failed to open geometry sink, hr %#x.\n", hr);
+        ID2D1PathGeometry_Release(geometry);
+        return;
+    }
+
+    if (FAILED(hr = IDWriteFontFace_GetGlyphRunOutline(glyph_run->fontFace, glyph_run->fontEmSize,
+            glyph_run->glyphIndices, glyph_run->glyphAdvances, glyph_run->glyphOffsets, glyph_run->glyphCount,
+            glyph_run->isSideways, glyph_run->bidiLevel & 1, (IDWriteGeometrySink *)sink)))
+    {
+        ERR("Failed to get glyph run outline, hr %#x.\n", hr);
+        ID2D1GeometrySink_Release(sink);
+        ID2D1PathGeometry_Release(geometry);
+        return;
+    }
+
+    if (FAILED(hr = ID2D1GeometrySink_Close(sink)))
+        ERR("Failed to close geometry sink, hr %#x.\n", hr);
+    ID2D1GeometrySink_Release(sink);
+
+    transform = &render_target->drawing_state.transform;
+    prev_transform = *transform;
+    transform->_31 += baseline_origin.x * transform->_11 + baseline_origin.y * transform->_21;
+    transform->_32 += baseline_origin.x * transform->_12 + baseline_origin.y * transform->_22;
+    ID2D1RenderTarget_FillGeometry(iface, (ID2D1Geometry *)geometry, brush, NULL);
+    *transform = prev_transform;
+
+    ID2D1PathGeometry_Release(geometry);
 }
 
 static void STDMETHODCALLTYPE d2d_d3d_render_target_SetTransform(ID2D1RenderTarget *iface,
@@ -1269,24 +1348,36 @@ static ULONG STDMETHODCALLTYPE d2d_text_renderer_Release(IDWriteTextRenderer *if
 static HRESULT STDMETHODCALLTYPE d2d_text_renderer_IsPixelSnappingDisabled(IDWriteTextRenderer *iface,
         void *ctx, BOOL *disabled)
 {
-    FIXME("iface %p, ctx %p, disabled %p stub!\n", iface, ctx, disabled);
+    struct d2d_draw_text_layout_ctx *context = ctx;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, ctx %p, disabled %p.\n", iface, ctx, disabled);
+
+    *disabled = context->options & D2D1_DRAW_TEXT_OPTIONS_NO_SNAP;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_text_renderer_GetCurrentTransform(IDWriteTextRenderer *iface,
         void *ctx, DWRITE_MATRIX *transform)
 {
-    FIXME("iface %p, ctx %p, transform %p stub!\n", iface, ctx, transform);
+    struct d2d_d3d_render_target *render_target = impl_from_IDWriteTextRenderer(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, ctx %p, transform %p.\n", iface, ctx, transform);
+
+    ID2D1RenderTarget_GetTransform(&render_target->ID2D1RenderTarget_iface, (D2D1_MATRIX_3X2_F *)transform);
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_text_renderer_GetPixelsPerDip(IDWriteTextRenderer *iface, void *ctx, float *ppd)
 {
-    FIXME("iface %p, ctx %p, ppd %p stub!\n", iface, ctx, ppd);
+    struct d2d_d3d_render_target *render_target = impl_from_IDWriteTextRenderer(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, ctx %p, ppd %p.\n", iface, ctx, ppd);
+
+    *ppd = render_target->dpi_y / 96.0f;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRenderer *iface, void *ctx,
@@ -1306,7 +1397,7 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
         FIXME("Ignoring glyph run description %p.\n", desc);
     if (effect)
         FIXME("Ignoring effect %p.\n", effect);
-    if (context->options)
+    if (context->options & ~D2D1_DRAW_TEXT_OPTIONS_NO_SNAP)
         FIXME("Ignoring options %#x.\n", context->options);
 
     TRACE("%s\n", debugstr_wn(desc->string, desc->stringLength));
