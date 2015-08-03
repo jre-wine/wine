@@ -1287,10 +1287,14 @@ struct fragment_caps
     DWORD MaxSimultaneousTextures;
 };
 
+#define GL_EXT_EMUL_ARB_MULTITEXTURE 0x00000001
+#define GL_EXT_EMUL_EXT_FOG_COORD    0x00000002
+
 struct fragment_pipeline
 {
     void (*enable_extension)(const struct wined3d_gl_info *gl_info, BOOL enable);
     void (*get_caps)(const struct wined3d_gl_info *gl_info, struct fragment_caps *caps);
+    DWORD (*get_emul_mask)(const struct wined3d_gl_info *gl_info);
     void *(*alloc_private)(const struct wined3d_shader_backend_ops *shader_backend, void *shader_priv);
     void (*free_private)(struct wined3d_device *device);
     BOOL (*allocate_context_data)(struct wined3d_context *context);
@@ -1316,6 +1320,7 @@ struct wined3d_vertex_pipe_ops
 {
     void (*vp_enable)(const struct wined3d_gl_info *gl_info, BOOL enable);
     void (*vp_get_caps)(const struct wined3d_gl_info *gl_info, struct wined3d_vertex_caps *caps);
+    DWORD (*vp_get_emul_mask)(const struct wined3d_gl_info *gl_info);
     void *(*vp_alloc)(const struct wined3d_shader_backend_ops *shader_backend, void *shader_priv);
     void (*vp_free)(struct wined3d_device *device);
     const struct StateEntryTemplate *vp_states;
@@ -1794,11 +1799,25 @@ struct wined3d_adapter
     const struct blit_shader *blitter;
 };
 
-BOOL wined3d_adapter_init_format_info(struct wined3d_adapter *adapter) DECLSPEC_HIDDEN;
+struct wined3d_caps_gl_ctx
+{
+    HDC dc;
+    HWND wnd;
+    HGLRC gl_ctx;
+    HDC restore_dc;
+    HGLRC restore_gl_ctx;
+
+    const struct wined3d_gl_info *gl_info;
+    GLuint test_vbo;
+    GLuint test_program_id;
+};
+
+BOOL wined3d_adapter_init_format_info(struct wined3d_adapter *adapter,
+        struct wined3d_caps_gl_ctx *ctx) DECLSPEC_HIDDEN;
 UINT64 adapter_adjust_memory(struct wined3d_adapter *adapter, INT64 amount) DECLSPEC_HIDDEN;
 
 BOOL initPixelFormatsNoGL(struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
-extern void add_gl_compat_wrappers(struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
+void install_gl_compat_wrapper(struct wined3d_gl_info *gl_info, enum wined3d_gl_extension ext) DECLSPEC_HIDDEN;
 
 enum projection_types
 {
@@ -3102,6 +3121,9 @@ struct ps_np2fixup_info {
     WORD              active; /* bitfield indicating if we can apply the fixup */
     WORD              num_consts;
 };
+
+void print_glsl_info_log(const struct wined3d_gl_info *gl_info, GLuint id, BOOL program) DECLSPEC_HIDDEN;
+void shader_glsl_validate_link(const struct wined3d_gl_info *gl_info, GLuint program) DECLSPEC_HIDDEN;
 
 struct wined3d_palette
 {

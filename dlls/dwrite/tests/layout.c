@@ -21,6 +21,8 @@
 #define COBJMACROS
 
 #include <assert.h>
+#include <math.h>
+#include <limits.h>
 
 #include "windows.h"
 #include "dwrite.h"
@@ -417,29 +419,59 @@ static ULONG WINAPI testrenderer_Release(IDWriteTextRenderer *iface)
     return 1;
 }
 
+struct renderer_context {
+    BOOL gdicompat;
+    BOOL use_gdi_natural;
+    BOOL snapping_disabled;
+    DWRITE_MATRIX m;
+    FLOAT ppdip;
+    FLOAT originX;
+    FLOAT originY;
+};
+
 static HRESULT WINAPI testrenderer_IsPixelSnappingDisabled(IDWriteTextRenderer *iface,
-    void *client_drawingcontext, BOOL *disabled)
+    void *context, BOOL *disabled)
 {
-    *disabled = TRUE;
+    struct renderer_context *ctxt = (struct renderer_context*)context;
+    if (ctxt)
+        *disabled = ctxt->snapping_disabled;
+    else
+        *disabled = TRUE;
     return S_OK;
 }
 
 static HRESULT WINAPI testrenderer_GetCurrentTransform(IDWriteTextRenderer *iface,
-    void *client_drawingcontext, DWRITE_MATRIX *transform)
+    void *context, DWRITE_MATRIX *m)
 {
-    ok(0, "unexpected call\n");
-    return E_NOTIMPL;
+    struct renderer_context *ctxt = (struct renderer_context*)context;
+    ok(!ctxt->snapping_disabled, "expected enabled snapping\n");
+    *m = ctxt->m;
+    return S_OK;
 }
 
 static HRESULT WINAPI testrenderer_GetPixelsPerDip(IDWriteTextRenderer *iface,
-    void *client_drawingcontext, FLOAT *pixels_per_dip)
+    void *context, FLOAT *pixels_per_dip)
 {
-    ok(0, "unexpected call\n");
-    return E_NOTIMPL;
+    struct renderer_context *ctxt = (struct renderer_context*)context;
+    *pixels_per_dip = ctxt->ppdip;
+    return S_OK;
+}
+
+#define TEST_MEASURING_MODE(ctxt, mode) test_measuring_mode(ctxt, mode, __LINE__)
+static void test_measuring_mode(const struct renderer_context *ctxt, DWRITE_MEASURING_MODE mode, int line)
+{
+    if (ctxt->gdicompat) {
+        if (ctxt->use_gdi_natural)
+            ok_(__FILE__, line)(mode == DWRITE_MEASURING_MODE_GDI_NATURAL, "got %d\n", mode);
+        else
+            ok_(__FILE__, line)(mode == DWRITE_MEASURING_MODE_GDI_CLASSIC, "got %d\n", mode);
+    }
+    else
+        ok_(__FILE__, line)(mode == DWRITE_MEASURING_MODE_NATURAL, "got %d\n", mode);
 }
 
 static HRESULT WINAPI testrenderer_DrawGlyphRun(IDWriteTextRenderer *iface,
-    void* client_drawingcontext,
+    void *context,
     FLOAT baselineOriginX,
     FLOAT baselineOriginY,
     DWRITE_MEASURING_MODE mode,
@@ -447,8 +479,15 @@ static HRESULT WINAPI testrenderer_DrawGlyphRun(IDWriteTextRenderer *iface,
     DWRITE_GLYPH_RUN_DESCRIPTION const *descr,
     IUnknown *effect)
 {
+    struct renderer_context *ctxt = (struct renderer_context*)context;
     struct drawcall_entry entry;
     DWRITE_SCRIPT_ANALYSIS sa;
+
+    if (ctxt) {
+        TEST_MEASURING_MODE(ctxt, mode);
+        ctxt->originX = baselineOriginX;
+        ctxt->originY = baselineOriginY;
+    }
 
     ok(descr->stringLength < sizeof(entry.string)/sizeof(WCHAR), "string is too long\n");
     if (descr->stringLength && descr->stringLength < sizeof(entry.string)/sizeof(WCHAR)) {
@@ -480,13 +519,18 @@ static HRESULT WINAPI testrenderer_DrawGlyphRun(IDWriteTextRenderer *iface,
 }
 
 static HRESULT WINAPI testrenderer_DrawUnderline(IDWriteTextRenderer *iface,
-    void *client_drawingcontext,
+    void *context,
     FLOAT baselineOriginX,
     FLOAT baselineOriginY,
     DWRITE_UNDERLINE const* underline,
     IUnknown *effect)
 {
+    struct renderer_context *ctxt = (struct renderer_context*)context;
     struct drawcall_entry entry;
+
+    if (ctxt)
+        TEST_MEASURING_MODE(ctxt, underline->measuringMode);
+
     entry.kind = DRAW_UNDERLINE;
     if (effect)
         entry.kind |= DRAW_EFFECT;
@@ -495,13 +539,18 @@ static HRESULT WINAPI testrenderer_DrawUnderline(IDWriteTextRenderer *iface,
 }
 
 static HRESULT WINAPI testrenderer_DrawStrikethrough(IDWriteTextRenderer *iface,
-    void *client_drawingcontext,
+    void *context,
     FLOAT baselineOriginX,
     FLOAT baselineOriginY,
     DWRITE_STRIKETHROUGH const* strikethrough,
     IUnknown *effect)
 {
+    struct renderer_context *ctxt = (struct renderer_context*)context;
     struct drawcall_entry entry;
+
+    if (ctxt)
+        TEST_MEASURING_MODE(ctxt, strikethrough->measuringMode);
+
     entry.kind = DRAW_STRIKETHROUGH;
     if (effect)
         entry.kind |= DRAW_EFFECT;
@@ -510,7 +559,7 @@ static HRESULT WINAPI testrenderer_DrawStrikethrough(IDWriteTextRenderer *iface,
 }
 
 static HRESULT WINAPI testrenderer_DrawInlineObject(IDWriteTextRenderer *iface,
-    void *client_drawingcontext,
+    void *context,
     FLOAT originX,
     FLOAT originY,
     IDWriteInlineObject *object,
@@ -736,6 +785,16 @@ static void test_CreateTextLayout(void)
     IDWriteFactory_Release(factory);
 }
 
+static DWRITE_MATRIX layoutcreate_transforms[] = {
+    { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 },
+    { 1.0, 0.0, 0.0, 1.0, 0.3, 0.2 },
+    { 1.0, 0.0, 0.0, 1.0,-0.3,-0.2 },
+
+    { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 },
+    { 1.0, 0.0, 0.0, 0.0, 0.0, 0.0 },
+    { 1.0, 2.0, 0.5, 1.0, 0.0, 0.0 },
+};
+
 static void test_CreateGdiCompatibleTextLayout(void)
 {
     static const WCHAR strW[] = {'s','t','r','i','n','g',0};
@@ -744,6 +803,7 @@ static void test_CreateGdiCompatibleTextLayout(void)
     IDWriteFactory *factory;
     FLOAT dimension;
     HRESULT hr;
+    int i;
 
     factory = create_factory();
 
@@ -790,6 +850,24 @@ static void test_CreateGdiCompatibleTextLayout(void)
     ok(dimension == 100.0, "got %f\n", dimension);
 
     IDWriteTextLayout_Release(layout);
+
+    /* negative, zero ppdip */
+    hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 1, format, 100.0, 100.0, -1.0, NULL, FALSE, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IDWriteTextLayout_Release(layout);
+
+    hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 1, format, 100.0, 100.0, 0.0, NULL, FALSE, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IDWriteTextLayout_Release(layout);
+
+    /* transforms */
+    for (i = 0; i < sizeof(layoutcreate_transforms)/sizeof(layoutcreate_transforms[0]); i++) {
+        hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 1, format, 100.0, 100.0, 1.0,
+            &layoutcreate_transforms[i], FALSE, &layout);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        IDWriteTextLayout_Release(layout);
+    }
+
     IDWriteTextFormat_Release(format);
     IDWriteFactory_Release(factory);
 }
@@ -958,6 +1036,7 @@ static const struct drawcall_entry drawellipsis_seq[] = {
 
 static void test_CreateEllipsisTrimmingSign(void)
 {
+    DWRITE_INLINE_OBJECT_METRICS metrics;
     DWRITE_BREAK_CONDITION before, after;
     IDWriteTextFormat *format;
     IDWriteInlineObject *sign;
@@ -979,8 +1058,21 @@ static void test_CreateEllipsisTrimmingSign(void)
     hr = IDWriteInlineObject_QueryInterface(sign, &IID_IDWriteTextLayout, (void**)&unk);
     ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
 
-if (0) /* crashes on native */
+if (0) {/* crashes on native */
     hr = IDWriteInlineObject_GetBreakConditions(sign, NULL, NULL);
+    hr = IDWriteInlineObject_GetMetrics(sign, NULL);
+}
+    metrics.width = 0.0;
+    metrics.height = 123.0;
+    metrics.baseline = 123.0;
+    metrics.supportsSideways = TRUE;
+    hr = IDWriteInlineObject_GetMetrics(sign, &metrics);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+todo_wine
+    ok(metrics.width > 0.0, "got %.2f\n", metrics.width);
+    ok(metrics.height == 0.0, "got %.2f\n", metrics.height);
+    ok(metrics.baseline == 0.0, "got %.2f\n", metrics.baseline);
+    ok(!metrics.supportsSideways, "got %d\n", metrics.supportsSideways);
 
     before = after = DWRITE_BREAK_CONDITION_CAN_BREAK;
     hr = IDWriteInlineObject_GetBreakConditions(sign, &before, &after);
@@ -1305,14 +1397,20 @@ static void test_Draw(void)
     static const WCHAR str2W[] = {0x202a,0x202c,'a','b',0};
     static const WCHAR ruW[] = {'r','u',0};
     IDWriteInlineObject *inlineobj;
+    struct renderer_context ctxt;
     IDWriteTextFormat *format;
     IDWriteTextLayout *layout;
     DWRITE_TEXT_RANGE range;
     IDWriteFactory *factory;
+    DWRITE_TEXT_METRICS tm;
     DWRITE_MATRIX m;
     HRESULT hr;
 
     factory = create_factory();
+
+    ctxt.gdicompat = FALSE;
+    ctxt.use_gdi_natural = FALSE;
+    ctxt.snapping_disabled = TRUE;
 
     hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, 10.0, ruW, &format);
@@ -1345,7 +1443,7 @@ static void test_Draw(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     flush_sequence(sequences, RENDERER_ID);
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_seq, "draw test", TRUE);
     IDWriteTextLayout_Release(layout);
@@ -1354,7 +1452,7 @@ static void test_Draw(void)
     hr = IDWriteFactory_CreateTextLayout(factory, strW, 6, format, 5.0, 100.0, &layout);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     flush_sequence(sequences, RENDERER_ID);
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_seq2, "draw test 2", TRUE);
     IDWriteTextLayout_Release(layout);
@@ -1363,7 +1461,7 @@ static void test_Draw(void)
     hr = IDWriteFactory_CreateTextLayout(factory, str2W, 4, format, 500.0, 100.0, &layout);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     flush_sequence(sequences, RENDERER_ID);
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_seq3, "draw test 3", TRUE);
     IDWriteTextLayout_Release(layout);
@@ -1379,7 +1477,7 @@ static void test_Draw(void)
     hr = IDWriteTextLayout_SetStrikethrough(layout, TRUE, range);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_seq4, "draw test 4", FALSE);
     IDWriteTextLayout_Release(layout);
@@ -1394,7 +1492,7 @@ static void test_Draw(void)
     hr = IDWriteTextLayout_SetStrikethrough(layout, TRUE, range);
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_seq5, "draw test 5", FALSE);
     IDWriteTextLayout_Release(layout);
@@ -1404,48 +1502,79 @@ static void test_Draw(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
 
     flush_sequence(sequences, RENDERER_ID);
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, empty_seq, "draw test 6", FALSE);
     IDWriteTextLayout_Release(layout);
+
+    ctxt.gdicompat = TRUE;
+    ctxt.use_gdi_natural = TRUE;
 
     /* different parameter combinations with gdi-compatible layout */
     hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 6, format, 100.0, 100.0, 1.0, NULL, TRUE, &layout);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     flush_sequence(sequences, RENDERER_ID);
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_single_run_seq, "draw test 7", FALSE);
+
+    /* text alignment keeps pixel-aligned origin */
+    hr = IDWriteTextLayout_GetMetrics(layout, &tm);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(tm.width == floorf(tm.width), "got %f\n", tm.width);
+
+    hr = IDWriteTextLayout_SetMaxWidth(layout, tm.width + 3.0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    hr = IDWriteTextLayout_SetTextAlignment(layout, DWRITE_TEXT_ALIGNMENT_CENTER);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    ctxt.originX = ctxt.originY = 0.0;
+    flush_sequence(sequences, RENDERER_ID);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok_sequence(sequences, RENDERER_ID, draw_single_run_seq, "draw test 7", FALSE);
+    ok(ctxt.originX != 0.0 && ctxt.originX == floorf(ctxt.originX), "got %f\n", ctxt.originX);
+
     IDWriteTextLayout_Release(layout);
+
+    ctxt.gdicompat = TRUE;
+    ctxt.use_gdi_natural = FALSE;
 
     hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 6, format, 100.0, 100.0, 1.0, NULL, FALSE, &layout);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     flush_sequence(sequences, RENDERER_ID);
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_single_run_seq, "draw test 8", FALSE);
     IDWriteTextLayout_Release(layout);
+
+    ctxt.gdicompat = TRUE;
+    ctxt.use_gdi_natural = TRUE;
 
     m.m11 = m.m22 = 2.0;
     m.m12 = m.m21 = m.dx = m.dy = 0.0;
     hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 6, format, 100.0, 100.0, 1.0, &m, TRUE, &layout);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     flush_sequence(sequences, RENDERER_ID);
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_single_run_seq, "draw test 9", FALSE);
     IDWriteTextLayout_Release(layout);
+
+    ctxt.gdicompat = TRUE;
+    ctxt.use_gdi_natural = FALSE;
 
     m.m11 = m.m22 = 2.0;
     m.m12 = m.m21 = m.dx = m.dy = 0.0;
     hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 6, format, 100.0, 100.0, 1.0, &m, FALSE, &layout);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     flush_sequence(sequences, RENDERER_ID);
-    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok_sequence(sequences, RENDERER_ID, draw_single_run_seq, "draw test 10", FALSE);
     IDWriteTextLayout_Release(layout);
 
+    IDWriteInlineObject_Release(inlineobj);
     IDWriteTextFormat_Release(format);
     IDWriteFactory_Release(factory);
 }
@@ -1501,12 +1630,14 @@ static void test_typography(void)
 
 static void test_GetClusterMetrics(void)
 {
+    static const WCHAR str5W[] = {'a','\r','b','\n','c','\n','\r','d','\r','\n','e',0xb,'f',0xc,
+        'g',0x0085,'h',0x2028,'i',0x2029,0};
     static const WCHAR str3W[] = {0x2066,')',')',0x661,'(',0x627,')',0};
     static const WCHAR str2W[] = {0x202a,0x202c,'a',0};
     static const WCHAR strW[] = {'a','b','c','d',0};
     static const WCHAR str4W[] = {'a',' ',0};
     DWRITE_INLINE_OBJECT_METRICS inline_metrics;
-    DWRITE_CLUSTER_METRICS metrics[4];
+    DWRITE_CLUSTER_METRICS metrics[20];
     IDWriteTextLayout1 *layout1;
     IDWriteInlineObject *trimm;
     IDWriteTextFormat *format;
@@ -1761,6 +1892,69 @@ todo_wine
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(count == 1, "got %u\n", count);
     ok(metrics[0].canWrapLineAfter == 1, "got %d\n", metrics[0].canWrapLineAfter);
+
+    IDWriteTextLayout_Release(layout);
+
+    /* compare natural cluster width with gdi layout */
+    hr = IDWriteFactory_CreateTextLayout(factory, str4W, 1, format, 100.0, 100.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    count = 0;
+    memset(metrics, 0, sizeof(metrics));
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, metrics, 1, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(count == 1, "got %u\n", count);
+    ok(metrics[0].width != floorf(metrics[0].width), "got %f\n", metrics[0].width);
+
+    IDWriteTextLayout_Release(layout);
+
+    hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, str4W, 1, format, 100.0, 100.0, 1.0, NULL, FALSE, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    count = 0;
+    memset(metrics, 0, sizeof(metrics));
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, metrics, 1, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(count == 1, "got %u\n", count);
+    ok(metrics[0].width == floorf(metrics[0].width), "got %f\n", metrics[0].width);
+
+    IDWriteTextLayout_Release(layout);
+
+    /* isNewline tests */
+    hr = IDWriteFactory_CreateTextLayout(factory, str5W, 20, format, 100.0, 200.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    count = 0;
+    memset(metrics, 0, sizeof(metrics));
+    hr = IDWriteTextLayout_GetClusterMetrics(layout, metrics, 20, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(count == 20, "got %u\n", count);
+
+todo_wine {
+    ok(metrics[1].isNewline == 1, "got %d\n", metrics[1].isNewline);
+    ok(metrics[3].isNewline == 1, "got %d\n", metrics[3].isNewline);
+    ok(metrics[5].isNewline == 1, "got %d\n", metrics[5].isNewline);
+    ok(metrics[6].isNewline == 1, "got %d\n", metrics[6].isNewline);
+    ok(metrics[9].isNewline == 1, "got %d\n", metrics[9].isNewline);
+    ok(metrics[11].isNewline == 1, "got %d\n", metrics[11].isNewline);
+    ok(metrics[13].isNewline == 1, "got %d\n", metrics[13].isNewline);
+    ok(metrics[15].isNewline == 1, "got %d\n", metrics[15].isNewline);
+    ok(metrics[17].isNewline == 1, "got %d\n", metrics[17].isNewline);
+    ok(metrics[19].isNewline == 1, "got %d\n", metrics[19].isNewline);
+}
+    ok(metrics[0].isNewline == 0, "got %d\n", metrics[0].isNewline);
+    ok(metrics[2].isNewline == 0, "got %d\n", metrics[2].isNewline);
+    ok(metrics[4].isNewline == 0, "got %d\n", metrics[4].isNewline);
+    ok(metrics[7].isNewline == 0, "got %d\n", metrics[7].isNewline);
+    ok(metrics[8].isNewline == 0, "got %d\n", metrics[8].isNewline);
+    ok(metrics[10].isNewline == 0, "got %d\n", metrics[10].isNewline);
+    ok(metrics[12].isNewline == 0, "got %d\n", metrics[12].isNewline);
+    ok(metrics[14].isNewline == 0, "got %d\n", metrics[14].isNewline);
+    ok(metrics[16].isNewline == 0, "got %d\n", metrics[16].isNewline);
+    ok(metrics[18].isNewline == 0, "got %d\n", metrics[18].isNewline);
+
+    for (i = 0; i < count; i++)
+        ok(metrics[i].length == 1, "%d: got %d\n", i, metrics[i].length);
 
     IDWriteTextLayout_Release(layout);
 
@@ -2821,10 +3015,11 @@ static IDWriteFontFace *get_fontface_from_format(IDWriteTextFormat *format)
 
 static void test_GetLineMetrics(void)
 {
+    static const WCHAR str3W[] = {'a','\r','b','\n','c','\n','\r','d','\r','\n',0};
     static const WCHAR strW[] = {'a','b','c','d',' ',0};
     static const WCHAR str2W[] = {'a','b','\r','c','d',0};
     DWRITE_FONT_METRICS fontmetrics;
-    DWRITE_LINE_METRICS metrics[2];
+    DWRITE_LINE_METRICS metrics[6];
     IDWriteTextFormat *format;
     IDWriteTextLayout *layout;
     IDWriteFontFace *fontface;
@@ -2881,9 +3076,42 @@ todo_wine {
         metrics[1].baseline);
 }
     IDWriteTextLayout_Release(layout);
-
-    IDWriteFontFace_Release(fontface);
     IDWriteTextFormat_Release(format);
+
+    /* line breaks */
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 12.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, str3W, 10, format, 100.0, 300.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    memset(metrics, 0xcc, sizeof(metrics));
+    hr = IDWriteTextLayout_GetLineMetrics(layout, metrics, 6, &count);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+todo_wine
+    ok(count == 6, "got %u\n", count);
+
+todo_wine {
+    ok(metrics[0].length == 2, "got %u\n", metrics[0].length);
+    ok(metrics[1].length == 2, "got %u\n", metrics[1].length);
+    ok(metrics[2].length == 2, "got %u\n", metrics[2].length);
+    ok(metrics[3].length == 1, "got %u\n", metrics[3].length);
+    ok(metrics[4].length == 3, "got %u\n", metrics[4].length);
+    ok(metrics[5].length == 0, "got %u\n", metrics[5].length);
+}
+
+todo_wine {
+    ok(metrics[0].newlineLength == 1, "got %u\n", metrics[0].newlineLength);
+    ok(metrics[1].newlineLength == 1, "got %u\n", metrics[1].newlineLength);
+    ok(metrics[2].newlineLength == 1, "got %u\n", metrics[2].newlineLength);
+    ok(metrics[3].newlineLength == 1, "got %u\n", metrics[3].newlineLength);
+    ok(metrics[4].newlineLength == 2, "got %u\n", metrics[4].newlineLength);
+    ok(metrics[5].newlineLength == 0, "got %u\n", metrics[5].newlineLength);
+}
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+    IDWriteFontFace_Release(fontface);
     IDWriteFactory_Release(factory);
 }
 
@@ -3212,6 +3440,223 @@ static void test_SetReadingDirection(void)
     IDWriteFactory_Release(factory);
 }
 
+static inline FLOAT get_scaled_font_metric(UINT32 metric, FLOAT emSize, const DWRITE_FONT_METRICS *metrics)
+{
+    return (FLOAT)metric * emSize / (FLOAT)metrics->designUnitsPerEm;
+}
+
+static FLOAT snap_coord(const DWRITE_MATRIX *m, FLOAT ppdip, FLOAT coord)
+{
+    FLOAT vec[2], det, vec2[2];
+    BOOL transform;
+
+    /* has to be a diagonal matrix */
+    if ((ppdip <= 0.0) ||
+        (m->m11 * m->m22 != 0.0 && (m->m12 != 0.0 || m->m21 != 0.0)) ||
+        (m->m12 * m->m21 != 0.0 && (m->m11 != 0.0 || m->m22 != 0.0)))
+        return coord;
+
+    det = m->m11 * m->m22 - m->m12 * m->m21;
+    transform = fabsf(det) > 1e-10;
+
+    if (transform) {
+        /* apply transform */
+        vec[0] = 0.0;
+        vec[1] = coord * ppdip;
+
+        vec2[0] = m->m11 * vec[0] + m->m21 * vec[1] + m->dx;
+        vec2[1] = m->m12 * vec[0] + m->m22 * vec[1] + m->dy;
+
+        /* snap */
+        vec2[0] = floorf(vec2[0] + 0.5f);
+        vec2[1] = floorf(vec2[1] + 0.5f);
+
+        /* apply inverted transform */
+        vec[1] = (-m->m12 * vec2[0] + m->m11 * vec2[1] - (m->m11 * m->dy - m->m12 * m->dx)) / det;
+        vec[1] /= ppdip;
+    }
+    else
+        vec[1] = floorf(coord * ppdip + 0.5f) / ppdip;
+    return vec[1];
+}
+
+static inline BOOL float_eq(FLOAT left, FLOAT right)
+{
+    int x = *(int *)&left;
+    int y = *(int *)&right;
+
+    if (x < 0)
+        x = INT_MIN - x;
+    if (y < 0)
+        y = INT_MIN - y;
+
+    return abs(x - y) <= 16;
+}
+
+struct snapping_test {
+    DWRITE_MATRIX m;
+    FLOAT ppdip;
+};
+
+static struct snapping_test snapping_tests[] = {
+    { {  0.0,  1.0,  2.0,  0.0, 0.2, 0.3 },   1.0 },
+    { {  0.0,  1.0,  2.0,  0.0, 0.0, 0.0 },   1.0 },
+    { {  1.0,  0.0,  0.0,  1.0, 0.0, 0.0 },   1.0 }, /* identity transform */
+    { {  1.0,  0.0,  0.0,  1.0, 0.0, 0.0 },   0.9 },
+    { {  1.0,  0.0,  0.0,  1.0, 0.0, 0.0 },  -1.0 },
+    { {  1.0,  0.0,  0.0,  1.0, 0.0, 0.0 },   0.0 },
+    { {  1.0,  0.0,  0.0,  1.0, 0.0, 0.3 },   1.0 }, /* simple Y shift */
+    { {  1.0,  0.0,  0.0,  1.0, 0.0, 0.0 },  10.0 }, /* identity, 10 ppdip */
+    { {  1.0,  0.0,  0.0, 10.0, 0.0, 0.0 },  10.0 },
+    { {  0.0,  1.0,  1.0,  0.0, 0.2, 0.6 },   1.0 },
+    { {  0.0,  2.0,  2.0,  0.0, 0.2, 0.6 },   1.0 },
+    { {  0.0,  0.5, -0.5,  0.0, 0.2, 0.6 },   1.0 },
+    { {  1.0,  2.0,  0.0,  1.0, 0.2, 0.6 },   1.0 },
+    { {  1.0,  1.0,  0.0,  1.0, 0.2, 0.6 },   1.0 },
+    { {  0.5,  0.5, -0.5,  0.5, 0.2, 0.6 },   1.0 }, /*  45 degrees rotation */
+    { {  0.5,  0.5, -0.5,  0.5, 0.0, 0.0 }, 100.0 }, /*  45 degrees rotation */
+    { {  1.0,  0.0,  0.0,  1.0, 0.0, 0.0 }, 100.0 },
+    { {  0.0,  1.0, -1.0,  0.0, 0.2, 0.6 },   1.0 }, /*  90 degrees rotation */
+    { { -1.0,  0.0,  0.0, -1.0, 0.2, 0.6 },   1.0 }, /* 180 degrees rotation */
+    { {  0.0, -1.0,  1.0,  0.0, 0.2, 0.6 },   1.0 }, /* 270 degrees rotation */
+    { {  1.0,  0.0,  0.0,  1.0,-0.1, 0.2 },   1.0 },
+    { {  0.0,  1.0, -1.0,  0.0,-0.2,-0.3 },   1.0 }, /*  90 degrees rotation */
+    { { -1.0,  0.0,  0.0, -1.0,-0.3,-1.6 },   1.0 }, /* 180 degrees rotation */
+    { {  0.0, -1.0,  1.0,  0.0,-0.7, 0.6 },  10.0 }, /* 270 degrees rotation */
+    { {  0.0,  2.0,  1.0,  0.0, 0.2, 0.6 },   1.0 },
+    { {  0.0,  0.0,  1.0,  0.0, 0.0, 0.0 },   1.0 },
+    { {  3.0,  0.0,  0.0,  5.0, 0.2,-0.3 },  10.0 },
+    { {  0.0, -3.0,  5.0,  0.0,-0.1, 0.7 },  10.0 },
+};
+
+static DWRITE_MATRIX compattransforms[] = {
+    { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 },
+    { 1.0, 0.0, 0.0, 1.0, 0.2, 0.3 },
+    { 2.0, 0.0, 0.0, 2.0, 0.2, 0.3 },
+    { 2.0, 1.0, 2.0, 2.0, 0.2, 0.3 },
+};
+
+static void test_pixelsnapping(void)
+{
+    static const WCHAR strW[] = {'a',0};
+    IDWriteTextLayout *layout, *layout2;
+    struct renderer_context ctxt;
+    DWRITE_FONT_METRICS metrics;
+    IDWriteTextFormat *format;
+    IDWriteFontFace *fontface;
+    IDWriteFactory *factory;
+    FLOAT baseline, originX;
+    HRESULT hr;
+    int i, j;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 12.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    fontface = get_fontface_from_format(format);
+    IDWriteFontFace_GetMetrics(fontface, &metrics);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 1, format, 500.0, 100.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* disabled snapping */
+    ctxt.snapping_disabled = TRUE;
+    ctxt.gdicompat = FALSE;
+    ctxt.use_gdi_natural = FALSE;
+    ctxt.ppdip = 1.0f;
+    memset(&ctxt.m, 0, sizeof(ctxt.m));
+    ctxt.m.m11 = ctxt.m.m22 = 1.0;
+    originX = 0.1;
+
+    hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, originX, 0.0);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    baseline = get_scaled_font_metric(metrics.ascent, 12.0, &metrics);
+    ok(ctxt.originX == originX, "got %f, originX %f\n", ctxt.originX, originX);
+    ok(ctxt.originY == baseline, "got %f, baseline %f\n", ctxt.originY, baseline);
+    ok(floor(baseline) != baseline, "got %f\n", baseline);
+
+    ctxt.snapping_disabled = FALSE;
+
+    for (i = 0; i < sizeof(snapping_tests)/sizeof(snapping_tests[0]); i++) {
+        struct snapping_test *ptr = &snapping_tests[i];
+        FLOAT expectedY;
+
+        ctxt.m = ptr->m;
+        ctxt.ppdip = ptr->ppdip;
+        ctxt.originX = 678.9;
+        ctxt.originY = 678.9;
+
+        expectedY = snap_coord(&ctxt.m, ctxt.ppdip, baseline);
+        hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, originX, 0.0);
+        ok(hr == S_OK, "%d: got 0x%08x\n", i, hr);
+        ok(ctxt.originX == originX, "%d: got %f, originX %f\n", i, ctxt.originX, originX);
+        ok(float_eq(ctxt.originY, expectedY), "%d: got %f, expected %f, baseline %f\n",
+            i, ctxt.originY, expectedY, baseline);
+
+        /* gdicompat layout transform doesn't affect snapping */
+        for (j = 0; j < sizeof(compattransforms)/sizeof(compattransforms[0]); j++) {
+            hr = IDWriteFactory_CreateGdiCompatibleTextLayout(factory, strW, 1, format, 500.0, 100.0,
+                1.0, &compattransforms[j], FALSE, &layout2);
+            ok(hr == S_OK, "%d: got 0x%08x\n", i, hr);
+
+            expectedY = snap_coord(&ctxt.m, ctxt.ppdip, baseline);
+            hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, originX, 0.0);
+            ok(hr == S_OK, "%d: got 0x%08x\n", i, hr);
+            ok(ctxt.originX == originX, "%d: got %f, originX %f\n", i, ctxt.originX, originX);
+            ok(float_eq(ctxt.originY, expectedY), "%d: got %f, expected %f, baseline %f\n",
+                i, ctxt.originY, expectedY, baseline);
+
+            IDWriteTextLayout_Release(layout2);
+        }
+    }
+
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+    IDWriteFontFace_Release(fontface);
+    IDWriteFactory_Release(factory);
+}
+
+static void test_SetWordWrapping(void)
+{
+    static const WCHAR strW[] = {'a',0};
+    IDWriteTextFormat *format;
+    IDWriteTextLayout *layout;
+    IDWriteFactory *factory;
+    DWRITE_WORD_WRAPPING v;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_CreateTextFormat(factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 12.0, enusW, &format);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    v = IDWriteTextFormat_GetWordWrapping(format);
+    ok(v == DWRITE_WORD_WRAPPING_WRAP, "got %d\n", v);
+
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 1, format, 500.0, 100.0, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    v = IDWriteTextLayout_GetWordWrapping(layout);
+    ok(v == DWRITE_WORD_WRAPPING_WRAP, "got %d\n", v);
+
+    hr = IDWriteTextLayout_SetWordWrapping(layout, DWRITE_WORD_WRAPPING_NO_WRAP);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteTextLayout_SetWordWrapping(layout, DWRITE_WORD_WRAPPING_NO_WRAP);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    v = IDWriteTextFormat_GetWordWrapping(format);
+    ok(v == DWRITE_WORD_WRAPPING_WRAP, "got %d\n", v);
+
+    IDWriteTextLayout_Release(layout);
+    IDWriteTextFormat_Release(format);
+    IDWriteFactory_Release(factory);
+}
+
 START_TEST(layout)
 {
     static const WCHAR ctrlstrW[] = {0x202a,0};
@@ -3255,6 +3700,8 @@ START_TEST(layout)
     test_SetTextAlignment();
     test_SetParagraphAlignment();
     test_SetReadingDirection();
+    test_pixelsnapping();
+    test_SetWordWrapping();
 
     IDWriteFactory_Release(factory);
 }

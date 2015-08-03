@@ -333,7 +333,7 @@ static const char *get_info_log_line(const char **ptr)
 }
 
 /* Context activation is done by the caller. */
-static void print_glsl_info_log(const struct wined3d_gl_info *gl_info, GLuint id, BOOL program)
+void print_glsl_info_log(const struct wined3d_gl_info *gl_info, GLuint id, BOOL program)
 {
     int length = 0;
     char *log;
@@ -453,7 +453,7 @@ static void shader_glsl_dump_program_source(const struct wined3d_gl_info *gl_inf
 }
 
 /* Context activation is done by the caller. */
-static void shader_glsl_validate_link(const struct wined3d_gl_info *gl_info, GLuint program)
+void shader_glsl_validate_link(const struct wined3d_gl_info *gl_info, GLuint program)
 {
     GLint tmp;
 
@@ -7742,6 +7742,13 @@ static void glsl_vertex_pipe_vp_get_caps(const struct wined3d_gl_info *gl_info, 
     caps->raster_caps = WINED3DPRASTERCAPS_FOGRANGE;
 }
 
+static DWORD glsl_vertex_pipe_vp_get_emul_mask(const struct wined3d_gl_info *gl_info)
+{
+    if (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT])
+        return GL_EXT_EMUL_ARB_MULTITEXTURE;
+    return 0;
+}
+
 static void *glsl_vertex_pipe_vp_alloc(const struct wined3d_shader_backend_ops *shader_backend, void *shader_priv)
 {
     struct shader_glsl_priv *priv;
@@ -8121,6 +8128,7 @@ const struct wined3d_vertex_pipe_ops glsl_vertex_pipe =
 {
     glsl_vertex_pipe_vp_enable,
     glsl_vertex_pipe_vp_get_caps,
+    glsl_vertex_pipe_vp_get_emul_mask,
     glsl_vertex_pipe_vp_alloc,
     glsl_vertex_pipe_vp_free,
     glsl_vertex_pipe_vp_states,
@@ -8165,6 +8173,13 @@ static void glsl_fragment_pipe_get_caps(const struct wined3d_gl_info *gl_info, s
             | WINED3DTEXOPCAPS_BUMPENVMAPLUMINANCE;
     caps->MaxTextureBlendStages = 8;
     caps->MaxSimultaneousTextures = min(gl_info->limits.fragment_samplers, 8);
+}
+
+static DWORD glsl_fragment_pipe_get_emul_mask(const struct wined3d_gl_info *gl_info)
+{
+    if (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT])
+        return GL_EXT_EMUL_ARB_MULTITEXTURE;
+    return 0;
 }
 
 static void *glsl_fragment_pipe_alloc(const struct wined3d_shader_backend_ops *shader_backend, void *shader_priv)
@@ -8446,6 +8461,7 @@ const struct fragment_pipeline glsl_fragment_pipe =
 {
     glsl_fragment_pipe_enable,
     glsl_fragment_pipe_get_caps,
+    glsl_fragment_pipe_get_emul_mask,
     glsl_fragment_pipe_alloc,
     glsl_fragment_pipe_free,
     glsl_fragment_pipe_alloc_context_data,

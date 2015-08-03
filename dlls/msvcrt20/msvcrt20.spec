@@ -387,7 +387,7 @@
 @ cdecl ?_set_new_mode@@YAHH@Z(long) msvcrt.?_set_new_mode@@YAHH@Z
 @ cdecl -arch=win32 ?_set_se_translator@@YAP6AXIPAU_EXCEPTION_POINTERS@@@ZP6AXI0@Z@Z(ptr) msvcrt.?_set_se_translator@@YAP6AXIPAU_EXCEPTION_POINTERS@@@ZP6AXI0@Z@Z
 @ cdecl -arch=win64 ?_set_se_translator@@YAP6AXIPEAU_EXCEPTION_POINTERS@@@ZP6AXI0@Z@Z(ptr) msvcrt.?_set_se_translator@@YAP6AXIPEAU_EXCEPTION_POINTERS@@@ZP6AXI0@Z@Z
-# @ extern ?adjustfield@ios@@2JB
+@ extern ?adjustfield@ios@@2JB msvcirt.?adjustfield@ios@@2JB
 @ thiscall -arch=win32 ?allocate@streambuf@@IAEHXZ(ptr) msvcirt.?allocate@streambuf@@IAEHXZ
 @ cdecl -arch=win64 ?allocate@streambuf@@IEAAHXZ(ptr) msvcirt.?allocate@streambuf@@IEAAHXZ
 @ stub -arch=win32 ?attach@filebuf@@QAEPAV1@H@Z
@@ -402,7 +402,7 @@
 @ cdecl -arch=win64 ?bad@ios@@QEBAHXZ(ptr) msvcirt.?bad@ios@@QEBAHXZ
 @ thiscall -arch=win32 ?base@streambuf@@IBEPADXZ(ptr) msvcirt.?base@streambuf@@IBEPADXZ
 @ cdecl -arch=win64 ?base@streambuf@@IEBAPEADXZ(ptr) msvcirt.?base@streambuf@@IEBAPEADXZ
-# @ extern ?basefield@ios@@2JB
+@ extern ?basefield@ios@@2JB msvcirt.?basefield@ios@@2JB
 # @ extern ?binary@filebuf@@2HB
 @ cdecl ?bitalloc@ios@@SAJXZ() msvcirt.?bitalloc@ios@@SAJXZ
 @ thiscall -arch=win32 ?blen@streambuf@@IBEHXZ(ptr) msvcirt.?blen@streambuf@@IBEHXZ
@@ -453,7 +453,7 @@
 @ cdecl -arch=win64 ?eof@ios@@QEBAHXZ(ptr) msvcirt.?eof@ios@@QEBAHXZ
 @ thiscall -arch=win32 ?epptr@streambuf@@IBEPADXZ(ptr) msvcirt.?epptr@streambuf@@IBEPADXZ
 @ cdecl -arch=win64 ?epptr@streambuf@@IEBAPEADXZ(ptr) msvcirt.?epptr@streambuf@@IEBAPEADXZ
-# @ extern ?fLockcInit@ios@@0HA
+@ extern ?fLockcInit@ios@@0HA msvcirt.?fLockcInit@ios@@0HA
 @ thiscall -arch=win32 ?fail@ios@@QBEHXZ(ptr) msvcirt.?fail@ios@@QBEHXZ
 @ cdecl -arch=win64 ?fail@ios@@QEBAHXZ(ptr) msvcirt.?fail@ios@@QEBAHXZ
 @ stub -arch=win32 ?fd@filebuf@@QBEHXZ
@@ -472,7 +472,7 @@
 @ cdecl -arch=win64 ?flags@ios@@QEAAJJ@Z(ptr long) msvcirt.?flags@ios@@QEAAJJ@Z
 @ thiscall -arch=win32 ?flags@ios@@QBEJXZ(ptr) msvcirt.?flags@ios@@QBEJXZ
 @ cdecl -arch=win64 ?flags@ios@@QEBAJXZ(ptr) msvcirt.?flags@ios@@QEBAJXZ
-# @ extern ?floatfield@ios@@2JB
+@ extern ?floatfield@ios@@2JB msvcirt.?floatfield@ios@@2JB
 @ stub -arch=win32 ?flush@@YAAAVostream@@AAV1@@Z
 @ stub -arch=win64 ?flush@@YAAEAVostream@@AEAV1@@Z
 @ stub -arch=win32 ?flush@ostream@@QAEAAV1@XZ
@@ -764,10 +764,10 @@
 @ stub -arch=win64 ?writepad@ostream@@AEAAAEAV1@PEBD0@Z
 @ stub -arch=win32 ?ws@@YAAAVistream@@AAV1@@Z
 @ stub -arch=win64 ?ws@@YAAEAVistream@@AEAV1@@Z
-# @ extern ?x_curindex@ios@@0HA
-# @ extern ?x_lockc@ios@@0U_RTL_CRITICAL_SECTION@@A
-# @ extern ?x_maxbit@ios@@0JA
-# @ extern ?x_statebuf@ios@@0QAJA
+@ extern ?x_curindex@ios@@0HA msvcirt.?x_curindex@ios@@0HA
+@ extern ?x_lockc@ios@@0U_CRT_CRITICAL_SECTION@@A msvcirt.?x_lockc@ios@@0U_CRT_CRITICAL_SECTION@@A
+@ extern ?x_maxbit@ios@@0JA msvcirt.?x_maxbit@ios@@0JA
+@ extern ?x_statebuf@ios@@0QAJA msvcirt.?x_statebuf@ios@@0PAJA
 @ cdecl ?xalloc@ios@@SAHXZ() msvcirt.?xalloc@ios@@SAHXZ
 @ thiscall -arch=win32 ?xsgetn@streambuf@@UAEHPADH@Z(ptr ptr long) msvcirt.?xsgetn@streambuf@@UAEHPADH@Z
 @ cdecl -arch=win64 ?xsgetn@streambuf@@UEAAHPEADH@Z(ptr ptr long) msvcirt.?xsgetn@streambuf@@UEAAHPEADH@Z

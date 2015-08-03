@@ -35,6 +35,14 @@ enum d2d_brush_type
     D2D_BRUSH_TYPE_SOLID,
     D2D_BRUSH_TYPE_LINEAR,
     D2D_BRUSH_TYPE_BITMAP,
+    D2D_BRUSH_TYPE_COUNT,
+};
+
+enum d2d_shape_type
+{
+    D2D_SHAPE_TYPE_TRIANGLE,
+    D2D_SHAPE_TYPE_BEZIER,
+    D2D_SHAPE_TYPE_COUNT,
 };
 
 struct d2d_clip_stack
@@ -42,6 +50,13 @@ struct d2d_clip_stack
     D2D1_RECT_F *stack;
     unsigned int size;
     unsigned int count;
+};
+
+struct d2d_shape_resources
+{
+    ID3D10InputLayout *il;
+    ID3D10VertexShader *vs;
+    ID3D10PixelShader *ps[D2D_BRUSH_TYPE_COUNT];
 };
 
 struct d2d_d3d_render_target
@@ -54,19 +69,17 @@ struct d2d_d3d_render_target
     ID3D10Device *device;
     ID3D10RenderTargetView *view;
     ID3D10StateBlock *stateblock;
-    ID3D10InputLayout *il;
+    struct d2d_shape_resources shape_resources[D2D_SHAPE_TYPE_COUNT];
+    ID3D10Buffer *ib;
     unsigned int vb_stride;
     ID3D10Buffer *vb;
-    ID3D10VertexShader *vs;
     ID3D10RasterizerState *rs;
     ID3D10BlendState *bs;
-
-    ID3D10PixelShader *rect_solid_ps;
-    ID3D10PixelShader *rect_bitmap_ps;
 
     D2D1_DRAWING_STATE_DESCRIPTION drawing_state;
     IDWriteRenderingParams *text_rendering_params;
 
+    D2D1_PIXEL_FORMAT format;
     D2D1_SIZE_U pixel_size;
     struct d2d_clip_stack clip_stack;
     float dpi_x;
@@ -141,7 +154,10 @@ void d2d_linear_gradient_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *
 HRESULT d2d_bitmap_brush_init(struct d2d_brush *brush, struct d2d_d3d_render_target *render_target,
         ID2D1Bitmap *bitmap, const D2D1_BITMAP_BRUSH_PROPERTIES *bitmap_brush_desc,
         const D2D1_BRUSH_PROPERTIES *brush_desc) DECLSPEC_HIDDEN;
-void d2d_brush_bind_resources(struct d2d_brush *brush, ID3D10Device *device) DECLSPEC_HIDDEN;
+void d2d_brush_bind_resources(struct d2d_brush *brush, struct d2d_d3d_render_target *render_target,
+        enum d2d_shape_type shape_type) DECLSPEC_HIDDEN;
+HRESULT d2d_brush_get_ps_cb(struct d2d_brush *brush, struct d2d_d3d_render_target *render_target,
+        ID3D10Buffer **ps_cb) DECLSPEC_HIDDEN;
 struct d2d_brush *unsafe_impl_from_ID2D1Brush(ID2D1Brush *iface) DECLSPEC_HIDDEN;
 
 struct d2d_stroke_style
@@ -198,16 +214,73 @@ enum d2d_geometry_state
     D2D_GEOMETRY_STATE_FIGURE,
 };
 
+struct d2d_bezier
+{
+    struct
+    {
+        D2D1_POINT_2F position;
+        struct
+        {
+            float u, v, sign;
+        } texcoord;
+    } v[3];
+};
+
+struct d2d_face
+{
+    UINT16 v[3];
+};
+
 struct d2d_geometry
 {
     ID2D1Geometry ID2D1Geometry_iface;
-    ID2D1GeometrySink ID2D1GeometrySink_iface;
     LONG refcount;
 
-    enum d2d_geometry_state state;
-    UINT32 figure_count, segment_count;
+    D2D1_POINT_2F *vertices;
+    size_t vertex_count;
+
+    struct d2d_face *faces;
+    size_t faces_size;
+    size_t face_count;
+
+    struct d2d_bezier *beziers;
+    size_t bezier_count;
+
+    union
+    {
+        struct
+        {
+            ID2D1GeometrySink ID2D1GeometrySink_iface;
+
+            struct d2d_figure *figures;
+            size_t figures_size;
+            size_t figure_count;
+
+            enum d2d_geometry_state state;
+            D2D1_FILL_MODE fill_mode;
+            UINT32 segment_count;
+        } path;
+        struct
+        {
+            D2D1_RECT_F rect;
+        } rectangle;
+    } u;
 };
 
 void d2d_path_geometry_init(struct d2d_geometry *geometry) DECLSPEC_HIDDEN;
+HRESULT d2d_rectangle_geometry_init(struct d2d_geometry *geometry, const D2D1_RECT_F *rect) DECLSPEC_HIDDEN;
+struct d2d_geometry *unsafe_impl_from_ID2D1Geometry(ID2D1Geometry *iface) DECLSPEC_HIDDEN;
+
+static inline void d2d_matrix_multiply(D2D_MATRIX_3X2_F *a, const D2D_MATRIX_3X2_F *b)
+{
+    D2D_MATRIX_3X2_F tmp = *a;
+
+    a->_11 = tmp._11 * b->_11 + tmp._12 * b->_21;
+    a->_12 = tmp._11 * b->_12 + tmp._12 * b->_22;
+    a->_21 = tmp._21 * b->_11 + tmp._22 * b->_21;
+    a->_22 = tmp._21 * b->_12 + tmp._22 * b->_22;
+    a->_31 = tmp._31 * b->_11 + tmp._32 * b->_21 + b->_31;
+    a->_32 = tmp._31 * b->_12 + tmp._32 * b->_22 + b->_32;
+}
 
 #endif /* __WINE_D2D1_PRIVATE_H */

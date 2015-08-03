@@ -143,7 +143,8 @@ DEFINE_EXPECT(OnUIDeactivate);
 DEFINE_EXPECT(OnInPlaceDeactivate);
 DEFINE_EXPECT(RequestUIActivate);
 DEFINE_EXPECT(ControlSite_TranslateAccelerator);
-DEFINE_EXPECT(OnFocus);
+DEFINE_EXPECT(OnFocus_TRUE);
+DEFINE_EXPECT(OnFocus_FALSE);
 DEFINE_EXPECT(GetExternal);
 
 static const WCHAR wszItem[] = {'i','t','e','m',0};
@@ -833,6 +834,7 @@ static HRESULT WINAPI WebBrowserEvents2_Invoke(IDispatch *iface, DISPID dispIdMe
         ok(pDispParams->cArgs == 1, "cArgs=%d, expected 1\n", pDispParams->cArgs);
         ok(V_VT(pDispParams->rgvarg) == VT_BSTR, "V_VT(pDispParams->rgvarg)=%d, expected VT_BSTR\n",
            V_VT(pDispParams->rgvarg));
+        ok(V_BSTR(pDispParams->rgvarg) != NULL, "V_BSTR(pDispParams->rgvarg) is NULL\n");
         /* TODO: Check text */
         break;
 
@@ -1134,7 +1136,10 @@ static HRESULT WINAPI IOleControlSite_fnTranslateAccelerator(IOleControlSite* Th
 
 static HRESULT WINAPI IOleControlSite_fnOnFocus(IOleControlSite* This, BOOL fGotFocus)
 {
-    CHECK_EXPECT2(OnFocus);
+    if(fGotFocus)
+        CHECK_EXPECT2(OnFocus_TRUE);
+    else
+        CHECK_EXPECT2(OnFocus_FALSE);
     return E_NOTIMPL;
 }
 
@@ -1812,7 +1817,7 @@ static void test_DoVerb(IWebBrowser2 *unk)
     SET_EXPECT(Frame_SetActiveObject);
     SET_EXPECT(UIWindow_SetActiveObject);
     SET_EXPECT(SetMenu);
-    SET_EXPECT(OnFocus);
+    SET_EXPECT(OnFocus_TRUE);
 
     hres = IOleObject_DoVerb(oleobj, OLEIVERB_SHOW, NULL, &ClientSite,
                              0, (HWND)0xdeadbeef, &rect);
@@ -1829,7 +1834,7 @@ static void test_DoVerb(IWebBrowser2 *unk)
     CHECK_CALLED(Frame_SetActiveObject);
     CHECK_CALLED(UIWindow_SetActiveObject);
     CHECK_CALLED(SetMenu);
-    todo_wine CHECK_CALLED(OnFocus);
+    CHECK_CALLED(OnFocus_TRUE);
 
     hres = IOleObject_DoVerb(oleobj, OLEIVERB_SHOW, NULL, &ClientSite,
                            0, (HWND)0xdeadbeef, &rect);
@@ -3212,7 +3217,7 @@ static void test_UIActivate(IWebBrowser2 *unk, BOOL activate)
             SET_EXPECT(RequestUIActivate);
             SET_EXPECT(ShowUI);
             SET_EXPECT(HideUI);
-            SET_EXPECT(OnFocus);
+            SET_EXPECT(OnFocus_FALSE);
         }
 
         hres = IOleDocumentView_UIActivate(docview, activate);
@@ -3226,7 +3231,7 @@ static void test_UIActivate(IWebBrowser2 *unk, BOOL activate)
                 CHECK_CALLED(RequestUIActivate);
                 CHECK_CALLED(ShowUI);
                 CHECK_CALLED(HideUI);
-                CHECK_CALLED(OnFocus);
+                CHECK_CALLED(OnFocus_FALSE);
             }
         }
 
@@ -3489,7 +3494,7 @@ static void test_Close(IWebBrowser2 *wb, BOOL do_download)
     SET_EXPECT(Frame_SetActiveObject);
     SET_EXPECT(UIWindow_SetActiveObject);
     SET_EXPECT(OnUIDeactivate);
-    SET_EXPECT(OnFocus);
+    SET_EXPECT(OnFocus_FALSE);
     SET_EXPECT(OnInPlaceDeactivate);
     SET_EXPECT(Invoke_STATUSTEXTCHANGE);
     if(!do_download) {
@@ -3512,7 +3517,7 @@ static void test_Close(IWebBrowser2 *wb, BOOL do_download)
     CHECK_CALLED(Frame_SetActiveObject);
     CHECK_CALLED(UIWindow_SetActiveObject);
     CHECK_CALLED(OnUIDeactivate);
-    todo_wine CHECK_CALLED(OnFocus);
+    CHECK_CALLED(OnFocus_FALSE);
     CHECK_CALLED(OnInPlaceDeactivate);
     CLEAR_CALLED(Invoke_STATUSTEXTCHANGE); /* Called by IE9 */
     if(!do_download) {
@@ -3841,6 +3846,107 @@ static void test_FileProtocol(void)
         DeleteFileA(file_path);
 }
 
+static HRESULT WINAPI sink_QueryInterface( IAdviseSink *iface, REFIID riid, void **obj)
+{
+    if (IsEqualGUID(riid, &IID_IAdviseSink) || IsEqualGUID(riid, &IID_IUnknown)) {
+        *obj = iface;
+        return S_OK;
+    }
+
+    ok(0, "unexpected call QI(%s)\n", wine_dbgstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI sink_AddRef(IAdviseSink *iface)
+{
+    return 2;
+}
+
+static ULONG WINAPI sink_Release(IAdviseSink *iface)
+{
+    return 1;
+}
+
+static void WINAPI sink_OnDataChange(IAdviseSink *iface, FORMATETC *format, STGMEDIUM *medium)
+{
+    trace("%p, %p, %p\n", iface, format, medium);
+}
+
+static void WINAPI sink_OnViewChange(IAdviseSink *iface, DWORD aspect, LONG index)
+{
+    trace("%p, %08x, %d\n", iface, aspect, index);
+}
+
+static void WINAPI sink_OnRename(IAdviseSink *iface, IMoniker *moniker)
+{
+    trace("%p, %p\n", iface, moniker);
+}
+
+static void WINAPI sink_OnSave(IAdviseSink *iface)
+{
+    trace("%p\n", iface);
+}
+
+static void WINAPI sink_OnClose(IAdviseSink *iface)
+{
+    trace("%p\n", iface);
+}
+
+static const IAdviseSinkVtbl sink_vtbl =
+{
+    sink_QueryInterface,
+    sink_AddRef,
+    sink_Release,
+    sink_OnDataChange,
+    sink_OnViewChange,
+    sink_OnRename,
+    sink_OnSave,
+    sink_OnClose
+};
+
+static IAdviseSink test_sink = { &sink_vtbl };
+
+static void test_SetAdvise(void)
+{
+    HRESULT hr;
+    IWebBrowser2 *browser;
+    IViewObject2 *view;
+    IAdviseSink *sink;
+    DWORD aspects, flags;
+
+    if (!(browser = create_webbrowser())) return;
+    init_test(browser, 0);
+
+    hr = IWebBrowser2_QueryInterface(browser, &IID_IViewObject2, (void **)&view);
+    ok(hr == S_OK, "got %08x\n", hr);
+    if (FAILED(hr)) return;
+
+    aspects = flags = 0xdeadbeef;
+    sink = (IAdviseSink *)0xdeadbeef;
+    hr = IViewObject2_GetAdvise(view, &aspects, &flags, &sink);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(!aspects, "got %08x\n", aspects);
+    ok(!flags, "got %08x\n", aspects);
+    ok(sink == NULL, "got %p\n", sink);
+
+    hr = IViewObject2_SetAdvise(view, DVASPECT_CONTENT, 0, (IAdviseSink *)&test_sink);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    aspects = flags = 0xdeadbeef;
+    sink = (IAdviseSink *)0xdeadbeef;
+    hr = IViewObject2_GetAdvise(view, &aspects, &flags, &sink);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(aspects == DVASPECT_CONTENT, "got %08x\n", aspects);
+    ok(!flags, "got %08x\n", aspects);
+    ok(sink == &test_sink, "got %p\n", sink);
+
+    hr = IViewObject2_SetAdvise(view, 0, 0, NULL);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    IViewObject2_Release(view);
+    IWebBrowser2_Release(browser);
+}
+
 START_TEST(webbrowser)
 {
     OleInitialize(NULL);
@@ -3867,6 +3973,7 @@ START_TEST(webbrowser)
     trace("Testing WebBrowserV1...\n");
     test_WebBrowserV1();
     test_FileProtocol();
+    test_SetAdvise();
 
     OleUninitialize();
 }

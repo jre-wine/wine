@@ -30,6 +30,32 @@
 WINE_DEFAULT_DEBUG_CHANNEL(msvcirt);
 
 #define RESERVE_SIZE 512
+#define STATEBUF_SIZE 8
+
+/* ?adjustfield@ios@@2JB */
+const LONG ios_adjustfield = FLAGS_left | FLAGS_right | FLAGS_internal;
+/* ?basefield@ios@@2JB */
+const LONG ios_basefield = FLAGS_dec | FLAGS_oct | FLAGS_hex;
+/* ?floatfield@ios@@2JB */
+const LONG ios_floatfield = FLAGS_scientific | FLAGS_fixed;
+/* ?fLockcInit@ios@@0HA */
+/* FIXME: should be initialized to 0 and increased on construction of cin, cout, cerr and clog */
+int ios_fLockcInit = 4;
+/* ?x_lockc@ios@@0U_CRT_CRITICAL_SECTION@@A */
+extern CRITICAL_SECTION ios_static_lock;
+CRITICAL_SECTION_DEBUG ios_static_lock_debug =
+{
+    0, 0, &ios_static_lock,
+    { &ios_static_lock_debug.ProcessLocksList, &ios_static_lock_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": ios_static_lock") }
+};
+CRITICAL_SECTION ios_static_lock = { &ios_static_lock_debug, -1, 0, 0, 0, 0 };
+/* ?x_maxbit@ios@@0JA */
+LONG ios_maxbit = 0x8000;
+/* ?x_curindex@ios@@0HA */
+int ios_curindex = -1;
+/* ?x_statebuf@ios@@0PAJA */
+LONG ios_statebuf[STATEBUF_SIZE] = {0};
 
 /* class streambuf */
 typedef struct {
@@ -72,6 +98,12 @@ typedef struct {
 } ios;
 
 ios* __thiscall ios_assign(ios*, const ios*);
+int __thiscall ios_fail(const ios*);
+void __cdecl ios_lock(ios*);
+void __cdecl ios_lockc(void);
+LONG __thiscall ios_setf_mask(ios*, LONG, LONG);
+void __cdecl ios_unlock(ios*);
+void __cdecl ios_unlockc(void);
 
 /* class ostream */
 typedef struct _ostream {
@@ -712,6 +744,7 @@ DEFINE_THISCALL_WRAPPER(ios_copy_ctor, 8)
 ios* __thiscall ios_copy_ctor(ios *this, const ios *copy)
 {
     TRACE("(%p %p)\n", this, copy);
+    ios_fLockcInit++;
     this->vtable = &MSVCP_ios_vtable;
     this->sb = NULL;
     this->delbuf = 0;
@@ -725,6 +758,7 @@ DEFINE_THISCALL_WRAPPER(ios_sb_ctor, 8)
 ios* __thiscall ios_sb_ctor(ios *this, streambuf *sb)
 {
     TRACE("(%p %p)\n", this, sb);
+    ios_fLockcInit++;
     this->vtable = &MSVCP_ios_vtable;
     this->sb = sb;
     this->state = sb ? IOSTATE_goodbit : IOSTATE_badbit;
@@ -754,6 +788,7 @@ DEFINE_THISCALL_WRAPPER(ios_dtor, 4)
 void __thiscall ios_dtor(ios *this)
 {
     TRACE("(%p)\n", this);
+    ios_fLockcInit--;
     if (this->delbuf && this->sb)
         call_streambuf_vector_dtor(this->sb, 1);
     this->sb = NULL;
@@ -783,8 +818,8 @@ ios* __thiscall ios_assign(ios *this, const ios *rhs)
 DEFINE_THISCALL_WRAPPER(ios_op_not, 4)
 int __thiscall ios_op_not(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return ios_fail(this);
 }
 
 /* ??Bios@@QBEPAXXZ */
@@ -792,8 +827,8 @@ int __thiscall ios_op_not(const ios *this)
 DEFINE_THISCALL_WRAPPER(ios_op_void, 4)
 void* __thiscall ios_op_void(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return NULL;
+    TRACE("(%p)\n", this);
+    return ios_fail(this) ? NULL : (void*)this;
 }
 
 /* ??_Eios@@UAEPAXI@Z */
@@ -831,15 +866,18 @@ ios* __thiscall ios_scalar_dtor(ios *this, unsigned int flags)
 DEFINE_THISCALL_WRAPPER(ios_bad, 4)
 int __thiscall ios_bad(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return (this->state & IOSTATE_badbit);
 }
 
 /* ?bitalloc@ios@@SAJXZ */
 LONG __cdecl ios_bitalloc(void)
 {
-    FIXME("() stub\n");
-    return 0;
+    TRACE("()\n");
+    ios_lockc();
+    ios_maxbit <<= 1;
+    ios_unlockc();
+    return ios_maxbit;
 }
 
 /* ?clear@ios@@QAEXH@Z */
@@ -847,14 +885,21 @@ LONG __cdecl ios_bitalloc(void)
 DEFINE_THISCALL_WRAPPER(ios_clear, 8)
 void __thiscall ios_clear(ios *this, int state)
 {
-    FIXME("(%p %d) stub\n", this, state);
+    TRACE("(%p %d)\n", this, state);
+    ios_lock(this);
+    this->state = state;
+    ios_unlock(this);
 }
 
 /* ?clrlock@ios@@QAAXXZ */
 /* ?clrlock@ios@@QEAAXXZ */
 void __cdecl ios_clrlock(ios *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    if (this->do_lock <= 0)
+        this->do_lock++;
+    if (this->sb)
+        streambuf_clrlock(this->sb);
 }
 
 /* ?delbuf@ios@@QAEXH@Z */
@@ -862,7 +907,8 @@ void __cdecl ios_clrlock(ios *this)
 DEFINE_THISCALL_WRAPPER(ios_delbuf_set, 8)
 void __thiscall ios_delbuf_set(ios *this, int delete)
 {
-    FIXME("(%p %d) stub\n", this, delete);
+    TRACE("(%p %d)\n", this, delete);
+    this->delbuf = delete;
 }
 
 /* ?delbuf@ios@@QBEHXZ */
@@ -870,15 +916,16 @@ void __thiscall ios_delbuf_set(ios *this, int delete)
 DEFINE_THISCALL_WRAPPER(ios_delbuf_get, 4)
 int __thiscall ios_delbuf_get(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return this->delbuf;
 }
 
 /* ?dec@@YAAAVios@@AAV1@@Z */
 /* ?dec@@YAAEAVios@@AEAV1@@Z */
 ios* __cdecl ios_dec(ios *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    ios_setf_mask(this, FLAGS_dec, ios_basefield);
     return this;
 }
 
@@ -887,8 +934,8 @@ ios* __cdecl ios_dec(ios *this)
 DEFINE_THISCALL_WRAPPER(ios_eof, 4)
 int __thiscall ios_eof(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return (this->state & IOSTATE_eofbit);
 }
 
 /* ?fail@ios@@QBEHXZ */
@@ -896,8 +943,8 @@ int __thiscall ios_eof(const ios *this)
 DEFINE_THISCALL_WRAPPER(ios_fail, 4)
 int __thiscall ios_fail(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return (this->state & (IOSTATE_failbit|IOSTATE_badbit));
 }
 
 /* ?fill@ios@@QAEDD@Z */
@@ -905,8 +952,12 @@ int __thiscall ios_fail(const ios *this)
 DEFINE_THISCALL_WRAPPER(ios_fill_set, 8)
 char __thiscall ios_fill_set(ios *this, char fill)
 {
-    FIXME("(%p %d) stub\n", this, fill);
-    return EOF;
+    char prev = this->fill;
+
+    TRACE("(%p %d)\n", this, fill);
+
+    this->fill = fill;
+    return prev;
 }
 
 /* ?fill@ios@@QBEDXZ */
@@ -914,8 +965,8 @@ char __thiscall ios_fill_set(ios *this, char fill)
 DEFINE_THISCALL_WRAPPER(ios_fill_get, 4)
 char __thiscall ios_fill_get(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return EOF;
+    TRACE("(%p)\n", this);
+    return this->fill;
 }
 
 /* ?flags@ios@@QAEJJ@Z */
@@ -923,8 +974,12 @@ char __thiscall ios_fill_get(const ios *this)
 DEFINE_THISCALL_WRAPPER(ios_flags_set, 8)
 LONG __thiscall ios_flags_set(ios *this, LONG flags)
 {
-    FIXME("(%p %x) stub\n", this, flags);
-    return 0;
+    LONG prev = this->flags;
+
+    TRACE("(%p %x)\n", this, flags);
+
+    this->flags = flags;
+    return prev;
 }
 
 /* ?flags@ios@@QBEJXZ */
@@ -932,8 +987,8 @@ LONG __thiscall ios_flags_set(ios *this, LONG flags)
 DEFINE_THISCALL_WRAPPER(ios_flags_get, 4)
 LONG __thiscall ios_flags_get(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return this->flags;
 }
 
 /* ?good@ios@@QBEHXZ */
@@ -941,15 +996,16 @@ LONG __thiscall ios_flags_get(const ios *this)
 DEFINE_THISCALL_WRAPPER(ios_good, 4)
 int __thiscall ios_good(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return this->state == IOSTATE_goodbit;
 }
 
 /* ?hex@@YAAAVios@@AAV1@@Z */
 /* ?hex@@YAAEAVios@@AEAV1@@Z */
 ios* __cdecl ios_hex(ios *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    ios_setf_mask(this, FLAGS_hex, ios_basefield);
     return this;
 }
 
@@ -973,28 +1029,32 @@ void __thiscall ios_init(ios *this, streambuf *sb)
 DEFINE_THISCALL_WRAPPER(ios_iword, 8)
 LONG* __thiscall ios_iword(const ios *this, int index)
 {
-    FIXME("(%p %d) stub\n", this, index);
-    return NULL;
+    TRACE("(%p %d)\n", this, index);
+    return &ios_statebuf[index];
 }
 
 /* ?lock@ios@@QAAXXZ */
 /* ?lock@ios@@QEAAXXZ */
 void __cdecl ios_lock(ios *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    if (this->do_lock < 0)
+        EnterCriticalSection(&this->lock);
 }
 
 /* ?lockbuf@ios@@QAAXXZ */
 /* ?lockbuf@ios@@QEAAXXZ */
 void __cdecl ios_lockbuf(ios *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    streambuf_lock(this->sb);
 }
 
 /* ?lockc@ios@@KAXXZ */
 void __cdecl ios_lockc(void)
 {
-    FIXME("() stub\n");
+    TRACE("()\n");
+    EnterCriticalSection(&ios_static_lock);
 }
 
 /* ?lockptr@ios@@IAEPAU_CRT_CRITICAL_SECTION@@XZ */
@@ -1002,15 +1062,16 @@ void __cdecl ios_lockc(void)
 DEFINE_THISCALL_WRAPPER(ios_lockptr, 4)
 CRITICAL_SECTION* __thiscall ios_lockptr(ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return NULL;
+    TRACE("(%p)\n", this);
+    return &this->lock;
 }
 
 /* ?oct@@YAAAVios@@AAV1@@Z */
 /* ?oct@@YAAEAVios@@AEAV1@@Z */
 ios* __cdecl ios_oct(ios *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    ios_setf_mask(this, FLAGS_oct, ios_basefield);
     return this;
 }
 
@@ -1019,8 +1080,12 @@ ios* __cdecl ios_oct(ios *this)
 DEFINE_THISCALL_WRAPPER(ios_precision_set, 8)
 int __thiscall ios_precision_set(ios *this, int prec)
 {
-    FIXME("(%p %d) stub\n", this, prec);
-    return 0;
+    int prev = this->precision;
+
+    TRACE("(%p %d)\n", this, prec);
+
+    this->precision = prec;
+    return prev;
 }
 
 /* ?precision@ios@@QBEHXZ */
@@ -1028,8 +1093,8 @@ int __thiscall ios_precision_set(ios *this, int prec)
 DEFINE_THISCALL_WRAPPER(ios_precision_get, 4)
 int __thiscall ios_precision_get(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return this->precision;
 }
 
 /* ?pword@ios@@QBEAAPAXH@Z */
@@ -1037,8 +1102,8 @@ int __thiscall ios_precision_get(const ios *this)
 DEFINE_THISCALL_WRAPPER(ios_pword, 8)
 void** __thiscall ios_pword(const ios *this, int index)
 {
-    FIXME("(%p %d) stub\n", this, index);
-    return NULL;
+    TRACE("(%p %d)\n", this, index);
+    return (void**)&ios_statebuf[index];
 }
 
 /* ?rdbuf@ios@@QBEPAVstreambuf@@XZ */
@@ -1046,8 +1111,8 @@ void** __thiscall ios_pword(const ios *this, int index)
 DEFINE_THISCALL_WRAPPER(ios_rdbuf, 4)
 streambuf* __thiscall ios_rdbuf(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return NULL;
+    TRACE("(%p)\n", this);
+    return this->sb;
 }
 
 /* ?rdstate@ios@@QBEHXZ */
@@ -1055,8 +1120,8 @@ streambuf* __thiscall ios_rdbuf(const ios *this)
 DEFINE_THISCALL_WRAPPER(ios_rdstate, 4)
 int __thiscall ios_rdstate(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return this->state;
 }
 
 /* ?setf@ios@@QAEJJ@Z */
@@ -1064,8 +1129,14 @@ int __thiscall ios_rdstate(const ios *this)
 DEFINE_THISCALL_WRAPPER(ios_setf, 8)
 LONG __thiscall ios_setf(ios *this, LONG flags)
 {
-    FIXME("(%p %x) stub\n", this, flags);
-    return 0;
+    LONG prev = this->flags;
+
+    TRACE("(%p %x)\n", this, flags);
+
+    ios_lock(this);
+    this->flags |= flags;
+    ios_unlock(this);
+    return prev;
 }
 
 /* ?setf@ios@@QAEJJJ@Z */
@@ -1073,15 +1144,24 @@ LONG __thiscall ios_setf(ios *this, LONG flags)
 DEFINE_THISCALL_WRAPPER(ios_setf_mask, 12)
 LONG __thiscall ios_setf_mask(ios *this, LONG flags, LONG mask)
 {
-    FIXME("(%p %x %x) stub\n", this, flags, mask);
-    return 0;
+    LONG prev = this->flags;
+
+    TRACE("(%p %x %x)\n", this, flags, mask);
+
+    ios_lock(this);
+    this->flags = (this->flags & (~mask)) | (flags & mask);
+    ios_unlock(this);
+    return prev;
 }
 
 /* ?setlock@ios@@QAAXXZ */
 /* ?setlock@ios@@QEAAXXZ */
 void __cdecl ios_setlock(ios *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    this->do_lock--;
+    if (this->sb)
+        streambuf_setlock(this->sb);
 }
 
 /* ?sync_with_stdio@ios@@SAXXZ */
@@ -1095,8 +1175,12 @@ void __cdecl ios_sync_with_stdio(void)
 DEFINE_THISCALL_WRAPPER(ios_tie_set, 8)
 ostream* __thiscall ios_tie_set(ios *this, ostream *ostr)
 {
-    FIXME("(%p %p) stub\n", this, ostr);
-    return NULL;
+    ostream *prev = this->tie;
+
+    TRACE("(%p %p)\n", this, ostr);
+
+    this->tie = ostr;
+    return prev;
 }
 
 /* ?tie@ios@@QBEPAVostream@@XZ */
@@ -1104,28 +1188,32 @@ ostream* __thiscall ios_tie_set(ios *this, ostream *ostr)
 DEFINE_THISCALL_WRAPPER(ios_tie_get, 4)
 ostream* __thiscall ios_tie_get(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return NULL;
+    TRACE("(%p)\n", this);
+    return this->tie;
 }
 
 /* ?unlock@ios@@QAAXXZ */
 /* ?unlock@ios@@QEAAXXZ */
 void __cdecl ios_unlock(ios *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    if (this->do_lock < 0)
+        LeaveCriticalSection(&this->lock);
 }
 
 /* ?unlockbuf@ios@@QAAXXZ */
 /* ?unlockbuf@ios@@QEAAXXZ */
 void __cdecl ios_unlockbuf(ios *this)
 {
-    FIXME("(%p) stub\n", this);
+    TRACE("(%p)\n", this);
+    streambuf_unlock(this->sb);
 }
 
 /* ?unlockc@ios@@KAXXZ */
 void __cdecl ios_unlockc(void)
 {
-    FIXME("() stub\n");
+    TRACE("()\n");
+    LeaveCriticalSection(&ios_static_lock);
 }
 
 /* ?unsetf@ios@@QAEJJ@Z */
@@ -1133,8 +1221,14 @@ void __cdecl ios_unlockc(void)
 DEFINE_THISCALL_WRAPPER(ios_unsetf, 8)
 LONG __thiscall ios_unsetf(ios *this, LONG flags)
 {
-    FIXME("(%p %x) stub\n", this, flags);
-    return 0;
+    LONG prev = this->flags;
+
+    TRACE("(%p %x)\n", this, flags);
+
+    ios_lock(this);
+    this->flags &= ~flags;
+    ios_unlock(this);
+    return prev;
 }
 
 /* ?width@ios@@QAEHH@Z */
@@ -1142,8 +1236,12 @@ LONG __thiscall ios_unsetf(ios *this, LONG flags)
 DEFINE_THISCALL_WRAPPER(ios_width_set, 8)
 int __thiscall ios_width_set(ios *this, int width)
 {
-    FIXME("(%p %d) stub\n", this, width);
-    return 0;
+    int prev = this->width;
+
+    TRACE("(%p %d)\n", this, width);
+
+    this->width = width;
+    return prev;
 }
 
 /* ?width@ios@@QBEHXZ */
@@ -1151,15 +1249,21 @@ int __thiscall ios_width_set(ios *this, int width)
 DEFINE_THISCALL_WRAPPER(ios_width_get, 4)
 int __thiscall ios_width_get(const ios *this)
 {
-    FIXME("(%p) stub\n", this);
-    return 0;
+    TRACE("(%p)\n", this);
+    return this->width;
 }
 
 /* ?xalloc@ios@@SAHXZ */
 int __cdecl ios_xalloc(void)
 {
-    FIXME("() stub\n");
-    return 0;
+    int ret;
+
+    TRACE("()\n");
+
+    ios_lockc();
+    ret = (ios_curindex < STATEBUF_SIZE-1) ? ++ios_curindex : -1;
+    ios_unlockc();
+    return ret;
 }
 
 /******************************************************************

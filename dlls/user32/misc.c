@@ -717,7 +717,16 @@ BOOL WINAPI UserHandleGrantAccess(HANDLE handle, HANDLE job, BOOL grant)
 HPOWERNOTIFY WINAPI RegisterPowerSettingNotification(HANDLE recipient, const GUID *guid, DWORD flags)
 {
     FIXME("(%p,%s,%x): stub\n", recipient, debugstr_guid(guid), flags);
-    return NULL;
+    return (HPOWERNOTIFY)0xdeadbeef;
+}
+
+/**********************************************************************
+ * UnregisterPowerSettingNotification [USER32.@]
+ */
+BOOL WINAPI UnregisterPowerSettingNotification(HPOWERNOTIFY handle)
+{
+    FIXME("(%p): stub\n", handle);
+    return TRUE;
 }
 
 /**********************************************************************

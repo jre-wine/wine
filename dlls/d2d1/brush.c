@@ -709,9 +709,105 @@ static D3D10_TEXTURE_ADDRESS_MODE texture_addres_mode_from_extend_mode(D2D1_EXTE
     }
 }
 
-void d2d_brush_bind_resources(struct d2d_brush *brush, ID3D10Device *device)
+HRESULT d2d_brush_get_ps_cb(struct d2d_brush *brush, struct d2d_d3d_render_target *render_target,
+        ID3D10Buffer **ps_cb)
 {
+    D3D10_SUBRESOURCE_DATA buffer_data;
+    D3D10_BUFFER_DESC buffer_desc;
+    struct
+    {
+        float _11, _21, _31, pad0;
+        float _12, _22, _32, pad1;
+    } transform;
+    D2D1_COLOR_F color;
     HRESULT hr;
+
+    buffer_desc.Usage = D3D10_USAGE_DEFAULT;
+    buffer_desc.BindFlags = D3D10_BIND_CONSTANT_BUFFER;
+    buffer_desc.CPUAccessFlags = 0;
+    buffer_desc.MiscFlags = 0;
+
+    buffer_data.SysMemPitch = 0;
+    buffer_data.SysMemSlicePitch = 0;
+
+    if (brush->type == D2D_BRUSH_TYPE_SOLID)
+    {
+        color = brush->u.solid.color;
+        color.a *= brush->opacity;
+
+        buffer_desc.ByteWidth = sizeof(color);
+        buffer_data.pSysMem = &color;
+    }
+    else if (brush->type == D2D_BRUSH_TYPE_BITMAP)
+    {
+        struct d2d_bitmap *bitmap = brush->u.bitmap.bitmap;
+        D2D_MATRIX_3X2_F w, b;
+        float dpi_scale, d;
+
+        /* Scale for dpi. */
+        w = render_target->drawing_state.transform;
+        dpi_scale = render_target->dpi_x / 96.0f;
+        w._11 *= dpi_scale;
+        w._21 *= dpi_scale;
+        w._31 *= dpi_scale;
+        dpi_scale = render_target->dpi_y / 96.0f;
+        w._12 *= dpi_scale;
+        w._22 *= dpi_scale;
+        w._32 *= dpi_scale;
+
+        /* Scale for bitmap size and dpi. */
+        b = brush->transform;
+        dpi_scale = bitmap->pixel_size.width * (96.0f / bitmap->dpi_x);
+        b._11 *= dpi_scale;
+        b._21 *= dpi_scale;
+        dpi_scale = bitmap->pixel_size.height * (96.0f / bitmap->dpi_y);
+        b._12 *= dpi_scale;
+        b._22 *= dpi_scale;
+
+        d2d_matrix_multiply(&b, &w);
+
+        /* Invert the matrix. (Because the matrix is applied to the sampling
+         * coordinates. I.e., to scale the bitmap by 2 we need to divide the
+         * coordinates by 2.) */
+        d = b._11 * b._22 - b._21 * b._12;
+        if (d != 0.0f)
+        {
+            transform._11 = b._22 / d;
+            transform._21 = -b._21 / d;
+            transform._31 = (b._21 * b._32 - b._31 * b._22) / d;
+            transform._12 = -b._12 / d;
+            transform._22 = b._11 / d;
+            transform._32 = -(b._11 * b._32 - b._31 * b._12) / d;
+        }
+        transform.pad1 = brush->opacity;
+
+        buffer_desc.ByteWidth = sizeof(transform);
+        buffer_data.pSysMem = &transform;
+    }
+    else
+    {
+        FIXME("Unhandled brush type %#x.\n", brush->type);
+        return E_NOTIMPL;
+    }
+
+    if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->device, &buffer_desc, &buffer_data, ps_cb)))
+        ERR("Failed to create constant buffer, hr %#x.\n", hr);
+
+    return hr;
+}
+
+void d2d_brush_bind_resources(struct d2d_brush *brush, struct d2d_d3d_render_target *render_target,
+        enum d2d_shape_type shape_type)
+{
+    static const float blend_factor[] = {1.0f, 1.0f, 1.0f, 1.0f};
+    ID3D10Device *device = render_target->device;
+    ID3D10PixelShader *ps;
+    HRESULT hr;
+
+    ID3D10Device_OMSetBlendState(device, render_target->bs, blend_factor, D3D10_DEFAULT_SAMPLE_MASK);
+    if (!(ps = render_target->shape_resources[shape_type].ps[brush->type]))
+        FIXME("No pixel shader for shape type %#x and brush type %#x.\n", shape_type, brush->type);
+    ID3D10Device_PSSetShader(device, ps);
 
     if (brush->type == D2D_BRUSH_TYPE_BITMAP)
     {
@@ -742,5 +838,9 @@ void d2d_brush_bind_resources(struct d2d_brush *brush, ID3D10Device *device)
                 ERR("Failed to create sampler state, hr %#x.\n", hr);
         }
         ID3D10Device_PSSetSamplers(device, 0, 1, &brush->u.bitmap.sampler_state);
+    }
+    else if (brush->type != D2D_BRUSH_TYPE_SOLID)
+    {
+        FIXME("Unhandled brush type %#x.\n", brush->type);
     }
 }
