@@ -92,6 +92,13 @@ static inline const char *debugstr_range(const DWRITE_TEXT_RANGE *range)
     return wine_dbg_sprintf("%u:%u", range->startPosition, range->length);
 }
 
+static inline const char *debugstr_matrix(const DWRITE_MATRIX *m)
+{
+    if (!m) return "(null)";
+    return wine_dbg_sprintf("{%.2f,%.2f,%.2f,%.2f,%.2f,%.2f}", m->m11, m->m12, m->m21, m->m22,
+        m->dx, m->dy);
+}
+
 static inline unsigned short get_table_entry(const unsigned short *table, WCHAR ch)
 {
     return table[table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
@@ -140,6 +147,15 @@ extern void opentype_get_font_metrics(IDWriteFontFileStream*,DWRITE_FONT_FACE_TY
 extern HRESULT opentype_get_font_strings_from_id(const void*,DWRITE_INFORMATIONAL_STRING_ID,IDWriteLocalizedStrings**) DECLSPEC_HIDDEN;
 extern HRESULT opentype_get_typographic_features(IDWriteFontFace*,UINT32,UINT32,UINT32,UINT32*,DWRITE_FONT_FEATURE_TAG*) DECLSPEC_HIDDEN;
 extern BOOL opentype_get_vdmx_size(const void*,INT,UINT16*,UINT16*) DECLSPEC_HIDDEN;
+
+enum gasp_flags {
+    GASP_GRIDFIT             = 0x0001,
+    GASP_DOGRAY              = 0x0002,
+    GASP_SYMMETRIC_GRIDFIT   = 0x0004,
+    GASP_SYMMETRIC_SMOOTHING = 0x0008,
+};
+
+extern WORD opentype_get_gasp_flags(const WORD*,UINT32,INT) DECLSPEC_HIDDEN;
 
 /* BiDi helpers */
 extern HRESULT bidi_computelevels(const WCHAR*,UINT32,UINT8,UINT8*,UINT8*) DECLSPEC_HIDDEN;

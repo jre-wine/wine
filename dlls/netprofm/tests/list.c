@@ -67,6 +67,7 @@ static void test_INetworkListManager( void )
     if (hr == S_OK)
     {
         DWORD cost;
+        NLM_DATAPLAN_STATUS status;
 
         hr = INetworkCostManager_GetCost( cost_mgr, NULL, NULL );
         ok( hr == E_POINTER, "got %08x\n", hr );
@@ -75,6 +76,12 @@ static void test_INetworkListManager( void )
         hr = INetworkCostManager_GetCost( cost_mgr, &cost, NULL );
         ok( hr == S_OK, "got %08x\n", hr );
         ok( cost != 0xdeadbeef, "cost not set\n" );
+
+        hr = INetworkCostManager_GetDataPlanStatus( cost_mgr, NULL, NULL );
+        ok( hr == E_POINTER, "got %08x\n", hr );
+
+        hr = INetworkCostManager_GetDataPlanStatus( cost_mgr, &status, NULL );
+        ok( hr == S_OK, "got %08x\n", hr );
 
         INetworkCostManager_Release( cost_mgr );
     }
@@ -103,8 +110,12 @@ static void test_INetworkListManager( void )
     ok( hr == S_OK, "got %08x\n", hr );
     ok( !memcmp( &iid, &IID_INetworkListManagerEvents, sizeof(iid) ),
         "Expected iid to be IID_INetworkListManagerEvents\n" );
-
     IConnectionPoint_Release( pt );
+
+    hr = IConnectionPointContainer_FindConnectionPoint( cpc, &IID_INetworkCostManagerEvents, &pt );
+    ok( hr == S_OK || hr == CO_E_FAILEDTOIMPERSONATE, "got %08x\n", hr );
+    if (hr == S_OK) IConnectionPoint_Release( pt );
+
     IConnectionPointContainer_Release( cpc );
     INetworkListManager_Release( mgr );
 }

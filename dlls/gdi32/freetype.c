@@ -2240,6 +2240,27 @@ static void DumpFontList(void)
     }
 }
 
+static BOOL map_font_family(const WCHAR *orig, const WCHAR *repl)
+{
+    Family *family = find_family_from_any_name(repl);
+    if (family != NULL)
+    {
+        Family *new_family = HeapAlloc(GetProcessHeap(), 0, sizeof(*new_family));
+        if (new_family != NULL)
+        {
+            TRACE("mapping %s to %s\n", debugstr_w(repl), debugstr_w(orig));
+            new_family->FamilyName = strdupW(orig);
+            new_family->EnglishName = NULL;
+            list_init(&new_family->faces);
+            new_family->replacement = &family->faces;
+            list_add_tail(&font_list, &new_family->entry);
+            return TRUE;
+        }
+    }
+    TRACE("%s is not available. Skip this replacement.\n", debugstr_w(repl));
+    return FALSE;
+}
+
 /***********************************************************
  * The replacement list is a way to map an entire font
  * family onto another family.  For example adding
@@ -2271,35 +2292,27 @@ static void LoadReplaceList(void)
 
 	dlen = datalen;
 	vlen = valuelen;
-	while(RegEnumValueW(hkey, i++, value, &vlen, NULL, &type, data,
-			    &dlen) == ERROR_SUCCESS) {
-	    TRACE("Got %s=%s\n", debugstr_w(value), debugstr_w(data));
+        while(RegEnumValueW(hkey, i++, value, &vlen, NULL, &type, data, &dlen) == ERROR_SUCCESS)
+        {
             /* "NewName"="Oldname" */
             if(!find_family_from_any_name(value))
             {
-                Family * const family = find_family_from_any_name(data);
-                if (family != NULL)
+                if (type == REG_MULTI_SZ)
                 {
-                    Family * const new_family = HeapAlloc(GetProcessHeap(), 0, sizeof(*new_family));
-                    if (new_family != NULL)
+                    WCHAR *replace = data;
+                    while(*replace)
                     {
-                        TRACE("mapping %s to %s\n", debugstr_w(data), debugstr_w(value));
-                        new_family->FamilyName = strdupW(value);
-                        new_family->EnglishName = NULL;
-                        list_init(&new_family->faces);
-                        new_family->replacement = &family->faces;
-                        list_add_tail(&font_list, &new_family->entry);
+                        if (map_font_family(value, replace))
+                            break;
+                        replace += strlenW(replace) + 1;
                     }
                 }
                 else
-                {
-	            TRACE("%s is not available. Skip this replacement.\n", debugstr_w(data));
-                }
+                    map_font_family(value, data);
             }
             else
-            {
 	        TRACE("%s is available. Skip this replacement.\n", debugstr_w(value));
-            }
+
 	    /* reset dlen and vlen */
 	    dlen = datalen;
 	    vlen = valuelen;
@@ -5761,7 +5774,7 @@ static BOOL face_matches(const WCHAR *family_name, Face *face, const WCHAR *face
 }
 
 static BOOL enum_face_charsets(const Family *family, Face *face, struct enum_charset_list *list,
-                               FONTENUMPROCW proc, LPARAM lparam)
+                               FONTENUMPROCW proc, LPARAM lparam, const WCHAR *subst)
 {
     ENUMLOGFONTEXW elf;
     NEWTEXTMETRICEXW ntm;
@@ -5795,6 +5808,8 @@ static BOOL enum_face_charsets(const Family *family, Face *face, struct enum_cha
             else
                 strcpyW(elf.elfFullName, family->FamilyName);
         }
+        if (subst)
+            strcpyW(elf.elfLogFont.lfFaceName, subst);
         TRACE("enuming face %s full %s style %s charset = %d type %d script %s it %d weight %d ntmflags %08x\n",
               debugstr_w(elf.elfLogFont.lfFaceName),
               debugstr_w(elf.elfFullName), debugstr_w(elf.elfStyle),
@@ -5849,14 +5864,14 @@ static BOOL freetype_EnumFonts( PHYSDEV dev, LPLOGFONTW plf, FONTENUMPROCW proc,
             face_list = get_face_list_from_family(family);
             LIST_FOR_EACH_ENTRY( face, face_list, Face, entry ) {
                 if (!face_matches(family->FamilyName, face, face_name)) continue;
-                if (!enum_face_charsets(family, face, &enum_charsets, proc, lparam)) return FALSE;
+                if (!enum_face_charsets(family, face, &enum_charsets, proc, lparam, psub ? psub->from.name : NULL)) return FALSE;
 	    }
 	}
     } else {
         LIST_FOR_EACH_ENTRY( family, &font_list, Family, entry ) {
             face_list = get_face_list_from_family(family);
             face = LIST_ENTRY(list_head(face_list), Face, entry);
-            if (!enum_face_charsets(family, face, &enum_charsets, proc, lparam)) return FALSE;
+            if (!enum_face_charsets(family, face, &enum_charsets, proc, lparam, NULL)) return FALSE;
 	}
     }
     LeaveCriticalSection( &freetype_cs );
@@ -7707,7 +7722,7 @@ static UINT freetype_GetOutlineTextMetrics( PHYSDEV dev, UINT cbSize, OUTLINETEX
 
     if (physdev->font->potm || get_outline_text_metrics( physdev->font ))
     {
-        if(cbSize >= physdev->font->potm->otmSize)
+        if(potm && cbSize >= physdev->font->potm->otmSize)
         {
 	    memcpy(potm, physdev->font->potm, physdev->font->potm->otmSize);
             scale_outline_font_metrics(physdev->font, potm);

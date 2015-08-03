@@ -2633,9 +2633,8 @@ static inline REGSAM get_registry_view( const MSICOMPONENT *comp )
     return view;
 }
 
-static HKEY open_key( const MSICOMPONENT *comp, HKEY root, const WCHAR *path, BOOL create )
+static HKEY open_key( const MSICOMPONENT *comp, HKEY root, const WCHAR *path, BOOL create, REGSAM access )
 {
-    REGSAM access = KEY_ALL_ACCESS;
     WCHAR *subkey, *p, *q;
     HKEY hkey, ret = NULL;
     LONG res;
@@ -2657,7 +2656,7 @@ static HKEY open_key( const MSICOMPONENT *comp, HKEY root, const WCHAR *path, BO
     }
     if (q && q[1])
     {
-        ret = open_key( comp, hkey, q + 1, create );
+        ret = open_key( comp, hkey, q + 1, create, access );
         RegCloseKey( hkey );
     }
     else ret = hkey;
@@ -2882,7 +2881,7 @@ static UINT ITERATE_WriteRegistryValues(MSIRECORD *row, LPVOID param)
     strcpyW(uikey,szRoot);
     strcatW(uikey,deformated);
 
-    if (!(hkey = open_key( comp, root_key, deformated, TRUE )))
+    if (!(hkey = open_key( comp, root_key, deformated, TRUE, KEY_QUERY_VALUE | KEY_SET_VALUE )))
     {
         ERR("Could not create key %s\n", debugstr_w(deformated));
         msi_free(uikey);
@@ -2973,13 +2972,17 @@ static void delete_key( const MSICOMPONENT *comp, HKEY root, const WCHAR *path )
     access |= get_registry_view( comp );
 
     if (!(subkey = strdupW( path ))) return;
-    for (;;)
+    do
     {
-        if ((p = strrchrW( subkey, '\\' ))) *p = 0;
-        hkey = open_key( comp, root, subkey, FALSE );
-        if (!hkey) break;
-        if (p && p[1])
+        if ((p = strrchrW( subkey, '\\' )))
+        {
+            *p = 0;
+            if (!p[1]) continue; /* trailing backslash */
+            hkey = open_key( comp, root, subkey, FALSE, access );
+            if (!hkey) break;
             res = RegDeleteKeyExW( hkey, p + 1, access, 0 );
+            RegCloseKey( hkey );
+        }
         else
             res = RegDeleteKeyExW( root, subkey, access, 0 );
         if (res)
@@ -2987,9 +2990,7 @@ static void delete_key( const MSICOMPONENT *comp, HKEY root, const WCHAR *path )
             TRACE("failed to delete key %s (%d)\n", debugstr_w(subkey), res);
             break;
         }
-        if (p && p[1]) RegCloseKey( hkey );
-        else break;
-    }
+    } while (p);
     msi_free( subkey );
 }
 
@@ -2999,7 +3000,7 @@ static void delete_value( const MSICOMPONENT *comp, HKEY root, const WCHAR *path
     HKEY hkey;
     DWORD num_subkeys, num_values;
 
-    if ((hkey = open_key( comp, root, path, FALSE )))
+    if ((hkey = open_key( comp, root, path, FALSE, KEY_SET_VALUE | KEY_QUERY_VALUE )))
     {
         if ((res = RegDeleteValueW( hkey, value )))
             TRACE("failed to delete value %s (%d)\n", debugstr_w(value), res);
@@ -3020,7 +3021,7 @@ static void delete_tree( const MSICOMPONENT *comp, HKEY root, const WCHAR *path 
     LONG res;
     HKEY hkey;
 
-    if (!(hkey = open_key( comp, root, path, FALSE ))) return;
+    if (!(hkey = open_key( comp, root, path, FALSE, KEY_ALL_ACCESS ))) return;
     res = RegDeleteTreeW( hkey, NULL );
     if (res) TRACE("failed to delete subtree of %s (%d)\n", debugstr_w(path), res);
     delete_key( comp, root, path );
@@ -3553,7 +3554,9 @@ static UINT ACTION_ProcessComponents(MSIPACKAGE *package)
                 if (!comp->KeyPath || !(file = msi_get_loaded_file(package, comp->KeyPath)))
                     continue;
 
-                row = MSI_QueryGetRecord(package->db, query, file->Sequence);
+                if (!(row = MSI_QueryGetRecord(package->db, query, file->Sequence)))
+                    return ERROR_FUNCTION_FAILED;
+
                 sprintfW(source, fmt, MSI_RecordGetInteger(row, 1));
                 ptr2 = strrchrW(source, '\\') + 1;
                 msiobj_release(&row->hdr);
@@ -5873,8 +5876,8 @@ static UINT ITERATE_InstallService(MSIRECORD *rec, LPVOID param)
 
     if (image_path != file->TargetPath) msi_free(image_path);
 done:
-    CloseServiceHandle(service);
-    CloseServiceHandle(hscm);
+    if (service) CloseServiceHandle(service);
+    if (hscm) CloseServiceHandle(hscm);
     msi_free(name);
     msi_free(disp);
     msi_free(sd.lpDescription);
@@ -6048,8 +6051,8 @@ done:
     msi_ui_actiondata( package, szStartServices, uirow );
     msiobj_release( &uirow->hdr );
 
-    CloseServiceHandle(service);
-    CloseServiceHandle(scm);
+    if (service) CloseServiceHandle(service);
+    if (scm) CloseServiceHandle(scm);
 
     msi_free(name);
     msi_free(args);
@@ -6158,8 +6161,8 @@ static UINT stop_service( LPCWSTR name )
         WARN("Failed to stop service (%s): %d\n", debugstr_w(name), GetLastError());
 
 done:
-    CloseServiceHandle(service);
-    CloseServiceHandle(scm);
+    if (service) CloseServiceHandle(service);
+    if (scm) CloseServiceHandle(scm);
 
     return ERROR_SUCCESS;
 }
@@ -6296,8 +6299,8 @@ done:
     msi_ui_actiondata( package, szDeleteServices, uirow );
     msiobj_release( &uirow->hdr );
 
-    CloseServiceHandle( service );
-    CloseServiceHandle( scm );
+    if (service) CloseServiceHandle( service );
+    if (scm) CloseServiceHandle( scm );
     msi_free( name );
     msi_free( display_name );
 

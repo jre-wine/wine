@@ -452,7 +452,7 @@ static inline BOOL IsConformanceOrVariancePresent(PFORMAT_STRING pFormat)
 
 static inline PFORMAT_STRING SkipConformance(const PMIDL_STUB_MESSAGE pStubMsg, const PFORMAT_STRING pFormat)
 {
-    return pStubMsg->fHasNewCorrDesc ? pFormat + 6 : pFormat + 4;
+    return pFormat + 4 + pStubMsg->CorrDespIncrement;
 }
 
 static PFORMAT_STRING ReadConformance(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
@@ -7206,7 +7206,11 @@ NDR_SCONTEXT WINAPI NdrServerContextNewUnmarshall(PMIDL_STUB_MESSAGE pStubMsg,
  */
 void WINAPI NdrCorrelationInitialize(PMIDL_STUB_MESSAGE pStubMsg, void *pMemory, ULONG CacheSize, ULONG Flags)
 {
-    FIXME("(%p, %p, %d, 0x%x): stub\n", pStubMsg, pMemory, CacheSize, Flags);
+    FIXME("(%p, %p, %d, 0x%x): semi-stub\n", pStubMsg, pMemory, CacheSize, Flags);
+
+    if (pStubMsg->CorrDespIncrement == 0)
+        pStubMsg->CorrDespIncrement = 2; /* size of the normal (non-range) /robust payload */
+
     pStubMsg->fHasNewCorrDesc = TRUE;
 }
 

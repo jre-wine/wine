@@ -736,6 +736,8 @@ LONG_PTR CDECL ndr_client_call( PMIDL_STUB_DESC pStubDesc, PFORMAT_STRING pForma
     {
         /* initialize extra correlation package */
         NdrCorrelationInitialize(&stubMsg, NdrCorrCache, sizeof(NdrCorrCache), 0);
+        if (ext_flags.Unused & 0x2) /* has range on conformance */
+            stubMsg.CorrDespIncrement = 12;
     }
 
     /* order of phases:
@@ -1344,8 +1346,9 @@ LONG WINAPI NdrStubCall2(
         if (ext_flags.HasNewCorrDesc)
         {
             /* initialize extra correlation package */
-            FIXME("new correlation description not implemented\n");
-            stubMsg.fHasNewCorrDesc = TRUE;
+            NdrCorrelationInitialize(&stubMsg, NdrCorrCache, sizeof(NdrCorrCache), 0);
+            if (ext_flags.Unused & 0x2) /* has range on conformance */
+                stubMsg.CorrDespIncrement = 12;
         }
     }
     else
@@ -1432,7 +1435,7 @@ LONG WINAPI NdrStubCall2(
     if (ext_flags.HasNewCorrDesc)
     {
         /* free extra correlation package */
-        /* NdrCorrelationFree(&stubMsg); */
+        NdrCorrelationFree(&stubMsg);
     }
 
     if (Oif_flags.HasPipes)
@@ -1619,6 +1622,8 @@ LONG_PTR CDECL ndr_async_client_call( PMIDL_STUB_DESC pStubDesc, PFORMAT_STRING 
     {
         /* initialize extra correlation package */
         NdrCorrelationInitialize(pStubMsg, async_call_data->NdrCorrCache, sizeof(async_call_data->NdrCorrCache), 0);
+        if (ext_flags.Unused & 0x2) /* has range on conformance */
+            pStubMsg->CorrDespIncrement = 12;
     }
 
     /* order of phases:

@@ -68,6 +68,7 @@ static void (WINAPI *pRtlReleasePebLock)(void);
 static PVOID    (WINAPI *pResolveDelayLoadedAPI)(PVOID, PCIMAGE_DELAYLOAD_DESCRIPTOR,
                                                  PDELAYLOAD_FAILURE_DLL_CALLBACK, PVOID,
                                                  PIMAGE_THUNK_DATA ThunkAddress,ULONG);
+static PVOID (WINAPI *pRtlImageDirectoryEntryToData)(HMODULE,BOOL,WORD,ULONG *);
 
 static PVOID RVAToAddr(DWORD_PTR rva, HMODULE module)
 {
@@ -374,6 +375,16 @@ static void test_Loader(void)
           1,
           0,
           { ERROR_SUCCESS, ERROR_BAD_EXE_FORMAT } /* vista is more strict */
+        },
+        /* Minimal PE image that Windows7 is able to load: 268 bytes */
+        { 0x04,
+          0, 0xf0, /* optional header size just forces 0xf0 bytes to be written,
+                      0 or another number don't change the behaviour, what really
+                      matters is file size regardless of values in the headers */
+          0x04 /* also serves as e_lfanew in the truncated MZ header */, 0x04,
+          0x40, /* minimal image size that Windows7 accepts */
+          0,
+          { ERROR_SUCCESS }
         }
     };
     int i;
@@ -2703,7 +2714,7 @@ static void test_ResolveDelayLoadedAPI(void)
         return;
     }
 
-    delaydir = RtlImageDirectoryEntryToData(hlib, TRUE, IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT, &file_size);
+    delaydir = pRtlImageDirectoryEntryToData(hlib, TRUE, IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT, &file_size);
     if (!delaydir)
     {
         skip("haven't found section for delay import directory.\n");
@@ -2783,6 +2794,7 @@ START_TEST(loader)
     pLdrUnlockLoaderLock = (void *)GetProcAddress(ntdll, "LdrUnlockLoaderLock");
     pRtlAcquirePebLock = (void *)GetProcAddress(ntdll, "RtlAcquirePebLock");
     pRtlReleasePebLock = (void *)GetProcAddress(ntdll, "RtlReleasePebLock");
+    pRtlImageDirectoryEntryToData = (void *)GetProcAddress(ntdll, "RtlImageDirectoryEntryToData");
     pResolveDelayLoadedAPI = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "ResolveDelayLoadedAPI");
 
     GetSystemInfo( &si );

@@ -98,6 +98,8 @@ static void session_destroy( object_header_t *hdr )
 
     TRACE("%p\n", session);
 
+    if (session->unload_event) SetEvent( session->unload_event );
+
     LIST_FOR_EACH_SAFE( item, next, &session->cookie_cache )
     {
         domain = LIST_ENTRY( item, domain_t, entry );
@@ -198,6 +200,10 @@ static BOOL session_set_option( object_header_t *hdr, DWORD option, LPVOID buffe
         return TRUE;
     case WINHTTP_OPTION_CONFIGURE_PASSPORT_AUTH:
         FIXME("WINHTTP_OPTION_CONFIGURE_PASSPORT_AUTH: 0x%x\n", *(DWORD *)buffer);
+        return TRUE;
+    case WINHTTP_OPTION_UNLOAD_NOTIFY_EVENT:
+        TRACE("WINHTTP_OPTION_UNLOAD_NOTIFY_EVENT: %p\n", *(HANDLE *)buffer);
+        session->unload_event = *(HANDLE *)buffer;
         return TRUE;
     default:
         FIXME("unimplemented option %u\n", option);
@@ -561,13 +567,13 @@ static void request_destroy( object_header_t *hdr )
 
     if (request->task_thread)
     {
+        /* Signal to the task proc to quit.  It will call
+           this again when it does. */
+        HANDLE thread = request->task_thread;
+        request->task_thread = 0;
         SetEvent( request->task_cancel );
-        WaitForSingleObject( request->task_thread, INFINITE );
-        CloseHandle( request->task_thread );
-        CloseHandle( request->task_cancel );
-        CloseHandle( request->task_wait );
-        request->task_cs.DebugInfo->Spare[0] = 0;
-        DeleteCriticalSection( &request->task_cs );
+        CloseHandle( thread );
+        return;
     }
     release_object( &request->connect->hdr );
 
@@ -2038,8 +2044,6 @@ BOOL WINAPI WinHttpSetTimeouts( HINTERNET handle, int resolve, int connect, int 
                 if (netconn_set_timeout( &request->netconn, TRUE, send )) ret = FALSE;
                 if (netconn_set_timeout( &request->netconn, FALSE, receive )) ret = FALSE;
             }
-
-            release_object( &request->hdr );
             break;
 
         case WINHTTP_HANDLE_TYPE_SESSION:
@@ -2057,10 +2061,10 @@ BOOL WINAPI WinHttpSetTimeouts( HINTERNET handle, int resolve, int connect, int 
             break;
 
         default:
-            release_object( hdr );
             set_last_error( ERROR_WINHTTP_INCORRECT_HANDLE_TYPE );
-            return FALSE;
+            ret = FALSE;
     }
+    release_object( hdr );
     return ret;
 }
 

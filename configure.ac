@@ -1797,7 +1797,7 @@ then
   for(i=0; i<4 - 1; i++) L[[i]] = L[[i + 1]];
   L[[i]] = 4;
   return (Array[[1]] != -2 || L[[2]] != 3)]])],
-    [ac_cv_c_gcc_strength_bug="no"],[ac_cv_c_gcc_strength_bug="yes"],[ac_cv_c_gcc_strength_bug="yes"]) )
+    [ac_cv_c_gcc_strength_bug="no"],[ac_cv_c_gcc_strength_bug="yes"],[ac_cv_c_gcc_strength_bug="no"]) )
   if test "$ac_cv_c_gcc_strength_bug" = "yes"
   then
     EXTRACFLAGS="$EXTRACFLAGS -fno-strength-reduce"
@@ -3322,6 +3322,7 @@ WINE_CONFIG_TEST(dlls/uxtheme/tests)
 WINE_CONFIG_DLL(vbscript,,[clean])
 WINE_CONFIG_TEST(dlls/vbscript/tests,[clean])
 WINE_CONFIG_DLL(vcomp)
+WINE_CONFIG_TEST(dlls/vcomp/tests)
 WINE_CONFIG_DLL(vcomp100)
 WINE_CONFIG_DLL(vcomp90)
 WINE_CONFIG_DLL(vdhcp.vxd,enable_win16)

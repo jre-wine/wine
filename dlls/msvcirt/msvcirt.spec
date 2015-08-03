@@ -399,7 +399,7 @@
 @ thiscall -arch=win32 ??_Gstreambuf@@UAEPAXI@Z(ptr long) streambuf_scalar_dtor
 @ stub -arch=win32 ??_Gstrstream@@UAEPAXI@Z  # virtual void * __thiscall strstream::`scalar deleting destructor'(unsigned int)
 @ stub -arch=win32 ??_Gstrstreambuf@@UAEPAXI@Z  # virtual void * __thiscall strstreambuf::`scalar deleting destructor'(unsigned int)
-# @ extern ?adjustfield@ios@@2JB  # static long const ios::adjustfield
+@ extern ?adjustfield@ios@@2JB ios_adjustfield
 @ thiscall -arch=win32 ?allocate@streambuf@@IAEHXZ(ptr) streambuf_allocate
 @ cdecl -arch=win64 ?allocate@streambuf@@IEAAHXZ(ptr) streambuf_allocate
 @ stub -arch=win32 ?attach@filebuf@@QAEPAV1@H@Z  # class filebuf * __thiscall filebuf::attach(int)
@@ -414,7 +414,7 @@
 @ cdecl -arch=win64 ?bad@ios@@QEBAHXZ(ptr) ios_bad
 @ thiscall -arch=win32 ?base@streambuf@@IBEPADXZ(ptr) streambuf_base
 @ cdecl -arch=win64 ?base@streambuf@@IEBAPEADXZ(ptr) streambuf_base
-# @ extern ?basefield@ios@@2JB  # static long const ios::basefield
+@ extern ?basefield@ios@@2JB ios_basefield
 # @ extern ?binary@filebuf@@2HB  # static int const filebuf::binary
 @ cdecl ?bitalloc@ios@@SAJXZ() ios_bitalloc
 @ thiscall -arch=win32 ?blen@streambuf@@IBEHXZ(ptr) streambuf_blen
@@ -465,7 +465,7 @@
 @ cdecl -arch=win64 ?eof@ios@@QEBAHXZ(ptr) ios_eof
 @ thiscall -arch=win32 ?epptr@streambuf@@IBEPADXZ(ptr) streambuf_epptr
 @ cdecl -arch=win64 ?epptr@streambuf@@IEBAPEADXZ(ptr) streambuf_epptr
-# @ extern ?fLockcInit@ios@@0HA  # static int ios::fLockcInit
+@ extern ?fLockcInit@ios@@0HA ios_fLockcInit
 @ thiscall -arch=win32 ?fail@ios@@QBEHXZ(ptr) ios_fail
 @ cdecl -arch=win64 ?fail@ios@@QEBAHXZ(ptr) ios_fail
 @ stub -arch=win32 ?fd@filebuf@@QBEHXZ  # int __thiscall filebuf::fd(void)const 
@@ -484,7 +484,7 @@
 @ cdecl -arch=win64 ?flags@ios@@QEAAJJ@Z(ptr long) ios_flags_set
 @ thiscall -arch=win32 ?flags@ios@@QBEJXZ(ptr) ios_flags_get
 @ cdecl -arch=win64 ?flags@ios@@QEBAJXZ(ptr) ios_flags_get
-# @ extern ?floatfield@ios@@2JB  # static long const ios::floatfield
+@ extern ?floatfield@ios@@2JB ios_floatfield
 @ stub -arch=win32 ?flush@@YAAAVostream@@AAV1@@Z  # class ostream & __cdecl flush(class ostream &)
 @ stub -arch=win64 ?flush@@YAAEAVostream@@AEAV1@@Z
 @ stub -arch=win32 ?flush@ostream@@QAEAAV1@XZ  # class ostream & __thiscall ostream::flush(void)
@@ -776,10 +776,10 @@
 @ stub -arch=win64 ?writepad@ostream@@AEAAAEAV1@PEBD0@Z
 @ stub -arch=win32 ?ws@@YAAAVistream@@AAV1@@Z  # class istream & __cdecl ws(class istream &)
 @ stub -arch=win64 ?ws@@YAAEAVistream@@AEAV1@@Z
-# @ extern ?x_curindex@ios@@0HA  # static int ios::x_curindex
-# @ extern ?x_lockc@ios@@0U_CRT_CRITICAL_SECTION@@A  # static struct _CRT_CRITICAL_SECTION ios::x_lockc
-# @ extern ?x_maxbit@ios@@0JA  # static long ios::x_maxbit
-# @ extern ?x_statebuf@ios@@0PAJA  # static long * ios::x_statebuf
+@ extern ?x_curindex@ios@@0HA ios_curindex
+@ extern ?x_lockc@ios@@0U_CRT_CRITICAL_SECTION@@A ios_static_lock
+@ extern ?x_maxbit@ios@@0JA ios_maxbit
+@ extern ?x_statebuf@ios@@0PAJA ios_statebuf
 @ cdecl ?xalloc@ios@@SAHXZ() ios_xalloc
 @ thiscall -arch=win32 ?xsgetn@streambuf@@UAEHPADH@Z(ptr ptr long) streambuf_xsgetn
 @ cdecl -arch=win64 ?xsgetn@streambuf@@UEAAHPEADH@Z(ptr ptr long) streambuf_xsgetn
