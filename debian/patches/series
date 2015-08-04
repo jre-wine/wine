@@ -15,7 +15,6 @@ addons-path.patch
 
 glu32-link.patch
 
-debian-gnutls.patch
 opengl.patch
 
 kfreebsd-include.patch
