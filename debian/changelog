@@ -1,3 +1,15 @@
+wine-development (1.7.48-1) unstable; urgency=medium
+
+  * New upstream release 1.7.48, released Jul 28, 2015.
+    - Fleshed out OpenMP implementation.
+    - I/O stream support in the MSVCIRT C++ runtime.
+    - Support for pixel snapping in DirectWrite.
+    - More support for OpenGL core contexts.
+    - Various bug fixes.
+  * Update debian/watch to use the new winehq ftp server.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 03 Aug 2015 00:21:42 +0000
+
 wine-development (1.7.47-1) unstable; urgency=medium
 
   * New upstream release 1.7.47, released Jul 10, 2015.
