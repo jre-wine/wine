@@ -1070,16 +1070,17 @@ static HRESULT WINAPI dwritefactory_CreateNumberSubstitution(IDWriteFactory2 *if
     return create_numbersubstitution(method, locale, ignore_user_override, substitution);
 }
 
-static HRESULT WINAPI dwritefactory_CreateGlyphRunAnalysis(IDWriteFactory2 *iface, DWRITE_GLYPH_RUN const *glyph_run,
-    FLOAT pixels_per_dip, DWRITE_MATRIX const* transform, DWRITE_RENDERING_MODE rendering_mode,
-    DWRITE_MEASURING_MODE measuring_mode, FLOAT baseline_x, FLOAT baseline_y, IDWriteGlyphRunAnalysis **analysis)
+static HRESULT WINAPI dwritefactory_CreateGlyphRunAnalysis(IDWriteFactory2 *iface, DWRITE_GLYPH_RUN const *run,
+    FLOAT ppdip, DWRITE_MATRIX const* transform, DWRITE_RENDERING_MODE rendering_mode,
+    DWRITE_MEASURING_MODE measuring_mode, FLOAT originX, FLOAT originY, IDWriteGlyphRunAnalysis **analysis)
 {
     struct dwritefactory *This = impl_from_IDWriteFactory2(iface);
 
-    TRACE("(%p)->(%p %f %p %d %d %f %f %p)\n", This, glyph_run, pixels_per_dip, transform, rendering_mode,
-        measuring_mode, baseline_x, baseline_y, analysis);
+    TRACE("(%p)->(%p %.2f %p %d %d %.2f %.2f %p)\n", This, run, ppdip, transform, rendering_mode,
+        measuring_mode, originX, originY, analysis);
 
-    return create_glyphrunanalysis(rendering_mode, analysis);
+    return create_glyphrunanalysis(rendering_mode, measuring_mode, run, 1.0f, DWRITE_GRID_FIT_MODE_DEFAULT,
+        DWRITE_TEXT_ANTIALIAS_MODE_CLEARTYPE, originX, originY, analysis);
 }
 
 static HRESULT WINAPI dwritefactory1_GetEudcFontCollection(IDWriteFactory2 *iface, IDWriteFontCollection **collection,
@@ -1136,12 +1137,12 @@ static HRESULT WINAPI dwritefactory2_CreateFontFallbackBuilder(IDWriteFactory2 *
 
 static HRESULT WINAPI dwritefactory2_TranslateColorGlyphRun(IDWriteFactory2 *iface, FLOAT originX, FLOAT originY,
     const DWRITE_GLYPH_RUN *run, const DWRITE_GLYPH_RUN_DESCRIPTION *rundescr, DWRITE_MEASURING_MODE mode,
-    const DWRITE_MATRIX *transform, UINT32 palette_index, IDWriteColorGlyphRunEnumerator **colorlayers)
+    const DWRITE_MATRIX *transform, UINT32 palette, IDWriteColorGlyphRunEnumerator **colorlayers)
 {
     struct dwritefactory *This = impl_from_IDWriteFactory2(iface);
-    FIXME("(%p)->(%.2f %.2f %p %p %d %p %u %p): stub\n", This, originX, originY, run, rundescr, mode,
-        transform, palette_index, colorlayers);
-    return E_NOTIMPL;
+    TRACE("(%p)->(%.2f %.2f %p %p %d %p %u %p)\n", This, originX, originY, run, rundescr, mode,
+        transform, palette, colorlayers);
+    return create_colorglyphenum(originX, originY, run, rundescr, mode, transform, palette, colorlayers);
 }
 
 static HRESULT WINAPI dwritefactory2_CreateCustomRenderingParams(IDWriteFactory2 *iface, FLOAT gamma, FLOAT contrast,
@@ -1155,14 +1156,16 @@ static HRESULT WINAPI dwritefactory2_CreateCustomRenderingParams(IDWriteFactory2
 }
 
 static HRESULT WINAPI dwritefactory2_CreateGlyphRunAnalysis(IDWriteFactory2 *iface, const DWRITE_GLYPH_RUN *run,
-    const DWRITE_MATRIX *transform, DWRITE_RENDERING_MODE renderingMode, DWRITE_MEASURING_MODE measuringMode,
-    DWRITE_GRID_FIT_MODE gridFitMode, DWRITE_TEXT_ANTIALIAS_MODE antialiasMode, FLOAT originX, FLOAT originY,
+    const DWRITE_MATRIX *transform, DWRITE_RENDERING_MODE rendering_mode, DWRITE_MEASURING_MODE measuring_mode,
+    DWRITE_GRID_FIT_MODE gridfit_mode, DWRITE_TEXT_ANTIALIAS_MODE aa_mode, FLOAT originX, FLOAT originY,
     IDWriteGlyphRunAnalysis **analysis)
 {
     struct dwritefactory *This = impl_from_IDWriteFactory2(iface);
-    FIXME("(%p)->(%p %p %d %d %d %d %.2f %.2f %p): stub\n", This, run, transform, renderingMode, measuringMode,
-        gridFitMode, antialiasMode, originX, originY, analysis);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p %p %d %d %d %d %.2f %.2f %p)\n", This, run, transform, rendering_mode, measuring_mode,
+        gridfit_mode, aa_mode, originX, originY, analysis);
+
+    return create_glyphrunanalysis(rendering_mode, measuring_mode, run, 1.0f, gridfit_mode, aa_mode, originX, originY, analysis);
 }
 
 static const struct IDWriteFactory2Vtbl dwritefactoryvtbl = {

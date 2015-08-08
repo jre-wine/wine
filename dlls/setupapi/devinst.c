@@ -535,7 +535,7 @@ static void SETUPDI_FreeDeviceInfo(struct DeviceInfo *devInfo)
  */
 static BOOL SETUPDI_AddDeviceToSet(struct DeviceInfoSet *set,
         const GUID *guid,
-        DWORD devInst,
+        DWORD dev_inst,
         LPCWSTR instanceId,
         BOOL phantom,
         SP_DEVINFO_DATA **dev)
@@ -544,7 +544,7 @@ static BOOL SETUPDI_AddDeviceToSet(struct DeviceInfoSet *set,
     struct DeviceInfo *devInfo = SETUPDI_AllocateDeviceInfo(set, set->cDevices,
             instanceId, phantom);
 
-    TRACE("%p, %s, %d, %s, %d\n", set, debugstr_guid(guid), devInst,
+    TRACE("%p, %s, %d, %s, %d\n", set, debugstr_guid(guid), dev_inst,
             debugstr_w(instanceId), phantom);
 
     if (devInfo)
@@ -2340,7 +2340,7 @@ HDEVINFO WINAPI SetupDiGetClassDevsExW(const GUID *class, PCWSTR enumstr, HWND p
     if (!(flags & DIGCF_ALLCLASSES) && !class)
     {
         SetLastError(ERROR_INVALID_PARAMETER);
-        return NULL;
+        return INVALID_HANDLE_VALUE;
     }
     if (flags & unsupportedFlags)
         WARN("unsupported flags %08x\n", flags & unsupportedFlags);
@@ -2348,7 +2348,7 @@ HDEVINFO WINAPI SetupDiGetClassDevsExW(const GUID *class, PCWSTR enumstr, HWND p
         set = deviceset;
     else
         set = SetupDiCreateDeviceInfoListExW(class, parent, machine, reserved);
-    if (set)
+    if (set != INVALID_HANDLE_VALUE)
     {
         if (machine && *machine)
             FIXME("%s: unimplemented for remote machines\n",

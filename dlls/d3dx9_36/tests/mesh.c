@@ -65,6 +65,11 @@ static BOOL compare_vec3(D3DXVECTOR3 u, D3DXVECTOR3 v)
     return ( compare(u.x, v.x) && compare(u.y, v.y) && compare(u.z, v.z) );
 }
 
+static BOOL compare_vec4(D3DXVECTOR4 u, D3DXVECTOR4 v)
+{
+    return compare(u.x, v.x) && compare(u.y, v.y) && compare(u.z, v.z) && compare(u.w, v.w);
+}
+
 #define check_floats(got, exp, dim) check_floats_(__LINE__, "", got, exp, dim)
 static void check_floats_(int line, const char *prefix, const float *got, const float *exp, int dim)
 {
@@ -1147,15 +1152,13 @@ static void D3DXIntersectTriTest(void)
 static void D3DXCreateMeshTest(void)
 {
     HRESULT hr;
-    HWND wnd;
-    IDirect3D9 *d3d;
     IDirect3DDevice9 *device, *test_device;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh *d3dxmesh;
     int i, size;
     D3DVERTEXELEMENT9 test_decl[MAX_FVF_DECL_SIZE];
     DWORD options;
     struct mesh mesh;
+    struct test_context *test_context;
 
     static const D3DVERTEXELEMENT9 decl1[3] = {
         {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
@@ -1185,31 +1188,13 @@ static void D3DXCreateMeshTest(void)
     hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, decl1, NULL, &d3dxmesh);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_OVERLAPPEDWINDOW, 0, 0,
-            640, 480, NULL, NULL, NULL, NULL)))
+    test_context = new_test_context();
+    if (!test_context)
     {
-        skip("Couldn't create application window\n");
+        skip("Couldn't create test context\n");
         return;
     }
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    if (!d3d)
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        DestroyWindow(wnd);
-        return;
-    }
-
-    ZeroMemory(&d3dpp, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        IDirect3D9_Release(d3d);
-        DestroyWindow(wnd);
-        return;
-    }
+    device = test_context->device;
 
     hr = D3DXCreateMesh(0, 3, D3DXMESH_MANAGED, decl1, device, &d3dxmesh);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
@@ -1363,23 +1348,19 @@ static void D3DXCreateMeshTest(void)
     hr = D3DXCreateMesh(1, 3, D3DXMESH_MANAGED, decl3, device, &d3dxmesh);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
-    IDirect3DDevice9_Release(device);
-    IDirect3D9_Release(d3d);
-    DestroyWindow(wnd);
+    free_test_context(test_context);
 }
 
 static void D3DXCreateMeshFVFTest(void)
 {
     HRESULT hr;
-    HWND wnd;
-    IDirect3D9 *d3d;
     IDirect3DDevice9 *device, *test_device;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh *d3dxmesh;
     int i, size;
     D3DVERTEXELEMENT9 test_decl[MAX_FVF_DECL_SIZE];
     DWORD options;
     struct mesh mesh;
+    struct test_context *test_context;
 
     static const D3DVERTEXELEMENT9 decl[3] = {
         {0, 0, D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
@@ -1392,31 +1373,13 @@ static void D3DXCreateMeshFVFTest(void)
     hr = D3DXCreateMeshFVF(1, 3, D3DXMESH_MANAGED, D3DFVF_XYZ | D3DFVF_NORMAL, NULL, &d3dxmesh);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_OVERLAPPEDWINDOW, 0, 0,
-            640, 480, NULL, NULL, NULL, NULL)))
+    test_context = new_test_context();
+    if (!test_context)
     {
-        skip("Couldn't create application window\n");
+        skip("Couldn't create test context\n");
         return;
     }
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    if (!d3d)
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        DestroyWindow(wnd);
-        return;
-    }
-
-    ZeroMemory(&d3dpp, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        IDirect3D9_Release(d3d);
-        DestroyWindow(wnd);
-        return;
-    }
+    device = test_context->device;
 
     hr = D3DXCreateMeshFVF(0, 3, D3DXMESH_MANAGED, D3DFVF_XYZ | D3DFVF_NORMAL, device, &d3dxmesh);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
@@ -1502,9 +1465,7 @@ static void D3DXCreateMeshFVFTest(void)
         d3dxmesh->lpVtbl->Release(d3dxmesh);
     }
 
-    IDirect3DDevice9_Release(device);
-    IDirect3D9_Release(d3d);
-    DestroyWindow(wnd);
+    free_test_context(test_context);
 }
 
 #define check_vertex_buffer(mesh, vertices, num_vertices, fvf) \
@@ -2259,35 +2220,18 @@ static void D3DXLoadMeshTest(void)
         }
     };
     HRESULT hr;
-    HWND wnd = NULL;
-    IDirect3D9 *d3d = NULL;
     IDirect3DDevice9 *device = NULL;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh *mesh = NULL;
     D3DXFRAME *frame_hier = NULL;
     D3DXMATRIX transform;
+    struct test_context *test_context;
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_POPUP, 0, 0, 1000, 1000, NULL, NULL, NULL, NULL)))
+    if (!(test_context = new_test_context()))
     {
-        skip("Couldn't create application window\n");
+        skip("Couldn't create test context\n");
         return;
     }
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    if (!d3d)
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        goto cleanup;
-    }
-
-    ZeroMemory(&d3dpp, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        goto cleanup;
-    }
+    device = test_context->device;
 
     hr = D3DXLoadMeshHierarchyFromXInMemory(NULL, sizeof(simple_xfile) - 1,
             D3DXMESH_MANAGED, device, &alloc_hier, NULL, &frame_hier, NULL);
@@ -2427,10 +2371,7 @@ static void D3DXLoadMeshTest(void)
     test_LoadMeshFromX(device, box_xfile, box_vertex_buffer, box_fvf, box_index_buffer, box_materials, TRUE);
     test_LoadMeshFromX(device, framed_xfile, merged_vertex_buffer, framed_fvf, merged_index_buffer, default_materials, FALSE);
 
-cleanup:
-    if (device) IDirect3DDevice9_Release(device);
-    if (d3d) IDirect3D9_Release(d3d);
-    if (wnd) DestroyWindow(wnd);
+    free_test_context(test_context);
 }
 
 static BOOL compute_box(struct mesh *mesh, float width, float height, float depth)
@@ -2515,11 +2456,7 @@ static void test_box(IDirect3DDevice9 *device, float width, float height, float 
 static void D3DXCreateBoxTest(void)
 {
     HRESULT hr;
-    HWND wnd;
-    WNDCLASSA wc = {0};
-    IDirect3D9* d3d;
     IDirect3DDevice9* device;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh* box;
     ID3DXBuffer* ppBuffer;
     DWORD *buffer;
@@ -2531,43 +2468,14 @@ static void D3DXCreateBoxTest(void)
          7, 4, 9, 2, 0, 8,
          1, 3, 11, 5, 6, 10};
     unsigned int i;
+    struct test_context *test_context;
 
-    wc.lpfnWndProc = DefWindowProcA;
-    wc.lpszClassName = "d3dx9_test_wc";
-    if (!RegisterClassA(&wc))
+    if (!(test_context = new_test_context()))
     {
-        skip("RegisterClass failed\n");
+        skip("Couldn't create test context\n");
         return;
     }
-
-    wnd = CreateWindowA("d3dx9_test_wc", "d3dx9_test", WS_OVERLAPPEDWINDOW,
-            0, 0, 640, 480, 0, 0, 0, 0);
-    ok(wnd != NULL, "Expected to have a window, received NULL\n");
-    if (!wnd)
-    {
-        skip("Couldn't create application window\n");
-        return;
-    }
-
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    if (!d3d)
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        DestroyWindow(wnd);
-        return;
-    }
-
-    memset(&d3dpp, 0, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        IDirect3D9_Release(d3d);
-        DestroyWindow(wnd);
-        return;
-    }
+    device = test_context->device;
 
     hr = D3DXCreateBox(device,2.0f,20.0f,4.9f,NULL, &ppBuffer);
     ok(hr==D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
@@ -2597,9 +2505,7 @@ static void D3DXCreateBoxTest(void)
 
     test_box(device, 10.9f, 20.0f, 4.9f);
 
-    IDirect3DDevice9_Release(device);
-    IDirect3D9_Release(d3d);
-    DestroyWindow(wnd);
+    free_test_context(test_context);
 }
 
 static BOOL compute_polygon(struct mesh *mesh, float length, unsigned int sides)
@@ -2673,40 +2579,19 @@ static void test_polygon(IDirect3DDevice9 *device, float length, unsigned int si
 static void D3DXCreatePolygonTest(void)
 {
     HRESULT hr;
-    HWND wnd;
-    IDirect3D9 *d3d;
     IDirect3DDevice9 *device;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh *polygon;
     ID3DXBuffer *adjacency;
     DWORD (*buffer)[3], buffer_size;
     unsigned int i;
+    struct test_context *test_context;
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_OVERLAPPEDWINDOW, 0, 0,
-            640, 480, NULL, NULL, NULL, NULL)))
+    if (!(test_context = new_test_context()))
     {
-        skip("Couldn't create application window\n");
+        skip("Couldn't create test context\n");
         return;
     }
-    if (!(d3d = Direct3DCreate9(D3D_SDK_VERSION)))
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        DestroyWindow(wnd);
-        return;
-    }
-
-    memset(&d3dpp, 0, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd,
-            D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        IDirect3D9_Release(d3d);
-        DestroyWindow(wnd);
-        return;
-    }
+    device = test_context->device;
 
     hr = D3DXCreatePolygon(device, 2.0f, 11, NULL, &adjacency);
     ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, received %#x\n", hr);
@@ -2751,9 +2636,7 @@ static void D3DXCreatePolygonTest(void)
     test_polygon(device, 10.0f, 10);
     test_polygon(device, 20.0f, 10);
 
-    IDirect3DDevice9_Release(device);
-    IDirect3D9_Release(d3d);
-    DestroyWindow(wnd);
+    free_test_context(test_context);
 }
 
 struct sincos_table
@@ -2972,11 +2855,9 @@ static void test_sphere(IDirect3DDevice9 *device, FLOAT radius, UINT slices, UIN
 static void D3DXCreateSphereTest(void)
 {
     HRESULT hr;
-    HWND wnd;
-    IDirect3D9* d3d;
     IDirect3DDevice9* device;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh* sphere = NULL;
+    struct test_context *test_context;
 
     hr = D3DXCreateSphere(NULL, 0.0f, 0, 0, NULL, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
@@ -2990,30 +2871,12 @@ static void D3DXCreateSphereTest(void)
     hr = D3DXCreateSphere(NULL, 0.0f, 0, 1, NULL, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_OVERLAPPEDWINDOW, 0, 0,
-            640, 480, NULL, NULL, NULL, NULL)))
+    if (!(test_context = new_test_context()))
     {
-        skip("Couldn't create application window\n");
+        skip("Couldn't create test context\n");
         return;
     }
-    if (!(d3d = Direct3DCreate9(D3D_SDK_VERSION)))
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        DestroyWindow(wnd);
-        return;
-    }
-
-    ZeroMemory(&d3dpp, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        IDirect3D9_Release(d3d);
-        DestroyWindow(wnd);
-        return;
-    }
+    device = test_context->device;
 
     hr = D3DXCreateSphere(device, 1.0f, 1, 1, &sphere, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
@@ -3035,9 +2898,7 @@ static void D3DXCreateSphereTest(void)
     test_sphere(device, 5.0f, 6, 7);
     test_sphere(device, 10.0f, 11, 12);
 
-    IDirect3DDevice9_Release(device);
-    IDirect3D9_Release(d3d);
-    DestroyWindow(wnd);
+    free_test_context(test_context);
 }
 
 static BOOL compute_cylinder(struct mesh *mesh, FLOAT radius1, FLOAT radius2, FLOAT length, UINT slices, UINT stacks)
@@ -3221,11 +3082,9 @@ static void test_cylinder(IDirect3DDevice9 *device, FLOAT radius1, FLOAT radius2
 static void D3DXCreateCylinderTest(void)
 {
     HRESULT hr;
-    HWND wnd;
-    IDirect3D9* d3d;
     IDirect3DDevice9* device;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh* cylinder = NULL;
+    struct test_context *test_context;
 
     hr = D3DXCreateCylinder(NULL, 0.0f, 0.0f, 0.0f, 0, 0, NULL, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
@@ -3233,30 +3092,12 @@ static void D3DXCreateCylinderTest(void)
     hr = D3DXCreateCylinder(NULL, 1.0f, 1.0f, 1.0f, 2, 1, &cylinder, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_OVERLAPPEDWINDOW, 0, 0,
-            640, 480, NULL, NULL, NULL, NULL)))
+    if (!(test_context = new_test_context()))
     {
-        skip("Couldn't create application window\n");
+        skip("Couldn't create test context\n");
         return;
     }
-    if (!(d3d = Direct3DCreate9(D3D_SDK_VERSION)))
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        DestroyWindow(wnd);
-        return;
-    }
-
-    ZeroMemory(&d3dpp, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        IDirect3D9_Release(d3d);
-        DestroyWindow(wnd);
-        return;
-    }
+    device = test_context->device;
 
     hr = D3DXCreateCylinder(device, -0.1f, 1.0f, 1.0f, 2, 1, &cylinder, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got result %x, expected %x (D3DERR_INVALIDCALL)\n",hr,D3DERR_INVALIDCALL);
@@ -3308,9 +3149,7 @@ static void D3DXCreateCylinderTest(void)
     test_cylinder(device, 2.0f, 3.0f, 4.0f, 3, 4);
     test_cylinder(device, 3.0f, 4.0f, 5.0f, 11, 20);
 
-    IDirect3DDevice9_Release(device);
-    IDirect3D9_Release(d3d);
-    DestroyWindow(wnd);
+    free_test_context(test_context);
 }
 
 static BOOL compute_torus(struct mesh *mesh, float innerradius, float outerradius, UINT sides, UINT rings)
@@ -3406,39 +3245,17 @@ static void test_torus(IDirect3DDevice9 *device, float innerradius, float outerr
 
 static void D3DXCreateTorusTest(void)
 {
-
     HRESULT hr;
-    HWND wnd;
-    IDirect3D9* d3d;
     IDirect3DDevice9* device;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh* torus = NULL;
+    struct test_context *test_context;
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_OVERLAPPEDWINDOW, 0, 0,
-            640, 480, NULL, NULL, NULL, NULL)))
+    if (!(test_context = new_test_context()))
     {
-        skip("Couldn't create application window\n");
+        skip("Couldn't create test context\n");
         return;
     }
-
-    if (!(d3d = Direct3DCreate9(D3D_SDK_VERSION)))
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        DestroyWindow(wnd);
-        return;
-    }
-
-    ZeroMemory(&d3dpp, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        IDirect3D9_Release(d3d);
-        DestroyWindow(wnd);
-        return;
-    }
+    device = test_context->device;
 
     hr = D3DXCreateTorus(NULL, 0.0f, 0.0f, 3, 3, &torus, NULL);
     ok(hr == D3DERR_INVALIDCALL, "Got result %#x, expected %#x (D3DERR_INVALIDCALL)\n", hr, D3DERR_INVALIDCALL);
@@ -3467,9 +3284,7 @@ static void D3DXCreateTorusTest(void)
     test_torus(device, 0.2f, 1.0f, 60, 3);
     test_torus(device, 0.2f, 1.0f, 8, 70);
 
-    IDirect3DDevice9_Release(device);
-    IDirect3D9_Release(d3d);
-    DestroyWindow(wnd);
+    free_test_context(test_context);
 }
 
 struct dynamic_array
@@ -3802,57 +3617,17 @@ static HRESULT create_outline(struct glyphinfo *glyph, void *raw_outline, int da
     return S_OK;
 }
 
-static BOOL compute_text_mesh(struct mesh *mesh, HDC hdc, const char *text,
-        float deviation, float extrusion, float otmEMSquare)
+static BOOL compute_text_mesh(struct mesh *mesh, const char *text,
+        float deviation, float extrusion, float otmEMSquare, const struct glyphinfo *glyphs)
 {
-    HRESULT hr = E_FAIL;
     DWORD nb_vertices, nb_faces;
     DWORD nb_corners, nb_outline_points;
     int textlen = 0;
-    float offset_x;
-    char *raw_outline = NULL;
-    struct glyphinfo *glyphs = NULL;
-    GLYPHMETRICS gm;
     int i;
     struct vertex *vertex_ptr;
     face *face_ptr;
 
-    if (deviation == 0.0f)
-        deviation = 1.0f / otmEMSquare;
-
     textlen = strlen(text);
-    glyphs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, textlen * sizeof(*glyphs));
-    if (!glyphs) {
-        hr = E_OUTOFMEMORY;
-        goto error;
-    }
-
-    offset_x = 0.0f;
-    for (i = 0; i < textlen; i++)
-    {
-        /* get outline points from data returned from GetGlyphOutline */
-        const MAT2 identity = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
-        int datasize;
-
-        glyphs[i].offset_x = offset_x;
-
-        datasize = GetGlyphOutlineA(hdc, text[i], GGO_NATIVE, &gm, 0, NULL, &identity);
-        if (datasize < 0) {
-            hr = E_FAIL;
-            goto error;
-        }
-        HeapFree(GetProcessHeap(), 0, raw_outline);
-        raw_outline = HeapAlloc(GetProcessHeap(), 0, datasize);
-        if (!raw_outline) {
-            hr = E_OUTOFMEMORY;
-            goto error;
-        }
-        datasize = GetGlyphOutlineA(hdc, text[i], GGO_NATIVE, &gm, datasize, raw_outline, &identity);
-
-        create_outline(&glyphs[i], raw_outline, datasize, deviation, otmEMSquare);
-
-        offset_x += gm.gmCellIncX / (float)otmEMSquare;
-    }
 
     /* corner points need an extra vertex for the different side faces normals */
     nb_corners = 0;
@@ -3876,7 +3651,7 @@ static BOOL compute_text_mesh(struct mesh *mesh, HDC hdc, const char *text,
     nb_faces = nb_outline_points * 2;
 
     if (!new_mesh(mesh, nb_vertices, nb_faces))
-        goto error;
+        return FALSE;
 
     /* convert 2D vertices and faces into 3D mesh */
     vertex_ptr = mesh->vertices;
@@ -3986,24 +3761,11 @@ static BOOL compute_text_mesh(struct mesh *mesh, HDC hdc, const char *text,
         vertex_ptr++;
     }
 
-    hr = D3D_OK;
-error:
-    if (glyphs) {
-        for (i = 0; i < textlen; i++)
-        {
-            int j;
-            for (j = 0; j < glyphs[i].outlines.count; j++)
-                HeapFree(GetProcessHeap(), 0, glyphs[i].outlines.items[j].items);
-            HeapFree(GetProcessHeap(), 0, glyphs[i].outlines.items);
-        }
-        HeapFree(GetProcessHeap(), 0, glyphs);
-    }
-    HeapFree(GetProcessHeap(), 0, raw_outline);
-
-    return hr == D3D_OK;
+    return TRUE;
 }
 
-static void compare_text_outline_mesh(const char *name, ID3DXMesh *d3dxmesh, struct mesh *mesh, int textlen, float extrusion)
+static void compare_text_outline_mesh(const char *name, ID3DXMesh *d3dxmesh, struct mesh *mesh,
+        size_t textlen, float extrusion, const struct glyphinfo *glyphs)
 {
     HRESULT hr;
     DWORD number_of_vertices, number_of_faces;
@@ -4121,13 +3883,20 @@ static void compare_text_outline_mesh(const char *name, ID3DXMesh *d3dxmesh, str
 
         first_vtx1 = vtx_idx1;
         first_vtx2 = vtx_idx2;
-        for (; vtx_idx1 < number_of_vertices; vtx_idx1++) {
-            if (vertices[vtx_idx1].normal.z != 0)
-                break;
-        }
-        for (; vtx_idx2 < mesh->number_of_vertices; vtx_idx2++) {
-            if (mesh->vertices[vtx_idx2].normal.z != 0)
-                break;
+        /* Glyphs without outlines do not generate any vertices. */
+        if (glyphs[i].outlines.count > 0)
+        {
+            for (; vtx_idx1 < number_of_vertices; vtx_idx1++)
+            {
+                if (vertices[vtx_idx1].normal.z != 0)
+                    break;
+            }
+
+            for (; vtx_idx2 < mesh->number_of_vertices; vtx_idx2++)
+            {
+                if (mesh->vertices[vtx_idx2].normal.z != 0)
+                    break;
+            }
         }
         nb_outline_vertices1 = vtx_idx1 - first_vtx1;
         nb_outline_vertices2 = vtx_idx2 - first_vtx2;
@@ -4309,15 +4078,19 @@ error:
 static void test_createtext(IDirect3DDevice9 *device, HDC hdc, const char *text, float deviation, float extrusion)
 {
     HRESULT hr;
-    ID3DXMesh *d3dxmesh;
-    struct mesh mesh;
+    ID3DXMesh *d3dxmesh = NULL;
+    struct mesh mesh = {0};
     char name[256];
     OUTLINETEXTMETRICA otm;
     GLYPHMETRICS gm;
+    struct glyphinfo *glyphs = NULL;
     GLYPHMETRICSFLOAT *glyphmetrics_float = HeapAlloc(GetProcessHeap(), 0, sizeof(GLYPHMETRICSFLOAT) * strlen(text));
     int i;
     LOGFONTA lf;
+    float offset_x;
+    size_t textlen;
     HFONT font = NULL, oldfont = NULL;
+    char *raw_outline = NULL;
 
     sprintf(name, "text ('%s', %f, %f)", text, deviation, extrusion);
 
@@ -4326,7 +4099,7 @@ static void test_createtext(IDirect3DDevice9 *device, HDC hdc, const char *text,
     if (hr != D3D_OK)
     {
         skip("Couldn't create text with D3DXCreateText\n");
-        return;
+        goto error;
     }
 
     /* must select a modified font having lfHeight = otm.otmEMSquare before
@@ -4334,21 +4107,25 @@ static void test_createtext(IDirect3DDevice9 *device, HDC hdc, const char *text,
     if (!GetObjectA(GetCurrentObject(hdc, OBJ_FONT), sizeof(lf), &lf)
             || !GetOutlineTextMetricsA(hdc, sizeof(otm), &otm))
     {
-        d3dxmesh->lpVtbl->Release(d3dxmesh);
         skip("Couldn't get text outline\n");
-        return;
+        goto error;
     }
     lf.lfHeight = otm.otmEMSquare;
     lf.lfWidth = 0;
     if (!(font = CreateFontIndirectA(&lf)))
     {
-        d3dxmesh->lpVtbl->Release(d3dxmesh);
         skip("Couldn't create the modified font\n");
-        return;
+        goto error;
     }
+
+    textlen = strlen(text);
+    glyphs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, textlen * sizeof(*glyphs));
+    if (!glyphs)
+        goto error;
+
     oldfont = SelectObject(hdc, font);
 
-    for (i = 0; i < strlen(text); i++)
+    for (i = 0; i < textlen; i++)
     {
         const MAT2 identity = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
         GetGlyphOutlineA(hdc, text[i], GGO_NATIVE, &gm, 0, NULL, &identity);
@@ -4360,8 +4137,42 @@ static void test_createtext(IDirect3DDevice9 *device, HDC hdc, const char *text,
         compare_float(glyphmetrics_float[i].gmfCellIncY, gm.gmCellIncY / (float)otm.otmEMSquare);
     }
 
+    if (deviation == 0.0f)
+        deviation = 1.0f / otm.otmEMSquare;
+
+    offset_x = 0.0f;
+    for (i = 0; i < textlen; i++)
+    {
+        /* get outline points from data returned from GetGlyphOutline */
+        const MAT2 identity = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
+        int datasize;
+
+        glyphs[i].offset_x = offset_x;
+
+        datasize = GetGlyphOutlineA(hdc, text[i], GGO_NATIVE, &gm, 0, NULL, &identity);
+        if (datasize < 0)
+        {
+            SelectObject(hdc, oldfont);
+            goto error;
+        }
+        HeapFree(GetProcessHeap(), 0, raw_outline);
+        raw_outline = HeapAlloc(GetProcessHeap(), 0, datasize);
+        if (!raw_outline)
+        {
+            SelectObject(hdc, oldfont);
+            goto error;
+        }
+        datasize = GetGlyphOutlineA(hdc, text[i], GGO_NATIVE, &gm, datasize, raw_outline, &identity);
+
+        create_outline(&glyphs[i], raw_outline, datasize, deviation, otm.otmEMSquare);
+
+        offset_x += gm.gmCellIncX / (float)otm.otmEMSquare;
+    }
+
+    SelectObject(hdc, oldfont);
+
     ZeroMemory(&mesh, sizeof(mesh));
-    if (!compute_text_mesh(&mesh, hdc, text, deviation, extrusion, otm.otmEMSquare))
+    if (!compute_text_mesh(&mesh, text, deviation, extrusion, otm.otmEMSquare, glyphs))
     {
         skip("Couldn't create mesh\n");
         d3dxmesh->lpVtbl->Release(d3dxmesh);
@@ -4369,52 +4180,47 @@ static void test_createtext(IDirect3DDevice9 *device, HDC hdc, const char *text,
     }
     mesh.fvf = D3DFVF_XYZ | D3DFVF_NORMAL;
 
-    compare_text_outline_mesh(name, d3dxmesh, &mesh, strlen(text), extrusion);
+    compare_text_outline_mesh(name, d3dxmesh, &mesh, textlen, extrusion, glyphs);
 
+error:
     free_mesh(&mesh);
 
-    d3dxmesh->lpVtbl->Release(d3dxmesh);
-    SelectObject(hdc, oldfont);
+    if (d3dxmesh) d3dxmesh->lpVtbl->Release(d3dxmesh);
+    if (font) DeleteObject(font);
     HeapFree(GetProcessHeap(), 0, glyphmetrics_float);
+
+    if (glyphs)
+    {
+        for (i = 0; i < textlen; i++)
+        {
+            int j;
+            for (j = 0; j < glyphs[i].outlines.count; j++)
+                HeapFree(GetProcessHeap(), 0, glyphs[i].outlines.items[j].items);
+            HeapFree(GetProcessHeap(), 0, glyphs[i].outlines.items);
+        }
+        HeapFree(GetProcessHeap(), 0, glyphs);
+    }
+    HeapFree(GetProcessHeap(), 0, raw_outline);
 }
 
 static void D3DXCreateTextTest(void)
 {
     HRESULT hr;
-    HWND wnd;
     HDC hdc;
-    IDirect3D9* d3d;
     IDirect3DDevice9* device;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh* d3dxmesh = NULL;
     HFONT hFont;
     OUTLINETEXTMETRICA otm;
     int number_of_vertices;
     int number_of_faces;
+    struct test_context *test_context;
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_POPUP, 0, 0, 1000, 1000, NULL, NULL, NULL, NULL)))
+    if (!(test_context = new_test_context()))
     {
-        skip("Couldn't create application window\n");
+        skip("Couldn't create test context\n");
         return;
     }
-    if (!(d3d = Direct3DCreate9(D3D_SDK_VERSION)))
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        DestroyWindow(wnd);
-        return;
-    }
-
-    ZeroMemory(&d3dpp, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        IDirect3D9_Release(d3d);
-        DestroyWindow(wnd);
-        return;
-    }
+    device = test_context->device;
 
     hdc = CreateCompatibleDC(NULL);
 
@@ -4485,12 +4291,14 @@ if (0)
     test_createtext(device, hdc, "wine", 0.001f, 0.0f);
     test_createtext(device, hdc, "wine", 0.001f, FLT_MAX);
     test_createtext(device, hdc, "wine", 0.0f, 1.0f);
+    test_createtext(device, hdc, " wine", 1.0f, 0.0f);
+    test_createtext(device, hdc, "wine ", 1.0f, 0.0f);
+    test_createtext(device, hdc, "wi ne", 1.0f, 0.0f);
 
     DeleteDC(hdc);
+    DeleteObject(hFont);
 
-    IDirect3DDevice9_Release(device);
-    IDirect3D9_Release(d3d);
-    DestroyWindow(wnd);
+    free_test_context(test_context);
 }
 
 static void test_get_decl_length(void)
@@ -4618,10 +4426,7 @@ static void test_get_decl_vertex_size(void)
 static void D3DXGenerateAdjacencyTest(void)
 {
     HRESULT hr;
-    HWND wnd;
-    IDirect3D9 *d3d;
     IDirect3DDevice9 *device;
-    D3DPRESENT_PARAMETERS d3dpp;
     ID3DXMesh *d3dxmesh = NULL;
     D3DXVECTOR3 *vertices = NULL;
     WORD *indices = NULL;
@@ -4683,32 +4488,14 @@ static void D3DXGenerateAdjacencyTest(void)
             {-1, -1, -1,  -1, -1, -1},
         },
     };
+    struct test_context *test_context;
 
-    if (!(wnd = CreateWindowA("static", "d3dx9_test", WS_OVERLAPPEDWINDOW, 0, 0,
-            640, 480, NULL, NULL, NULL, NULL)))
+    if (!(test_context = new_test_context()))
     {
-        skip("Couldn't create application window\n");
+        skip("Couldn't create test context\n");
         return;
     }
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
-    if (!d3d)
-    {
-        skip("Couldn't create IDirect3D9 object\n");
-        DestroyWindow(wnd);
-        return;
-    }
-
-    ZeroMemory(&d3dpp, sizeof(d3dpp));
-    d3dpp.Windowed = TRUE;
-    d3dpp.SwapEffect = D3DSWAPEFFECT_DISCARD;
-    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, wnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &device);
-    if (FAILED(hr))
-    {
-        skip("Failed to create IDirect3DDevice9 object %#x\n", hr);
-        IDirect3D9_Release(d3d);
-        DestroyWindow(wnd);
-        return;
-    }
+    device = test_context->device;
 
     for (i = 0; i < ARRAY_SIZE(test_data); i++)
     {
@@ -4748,6 +4535,8 @@ static void D3DXGenerateAdjacencyTest(void)
                adjacency[j], test_data[i].adjacency[j]);
     }
     if (d3dxmesh) d3dxmesh->lpVtbl->Release(d3dxmesh);
+
+    free_test_context(test_context);
 }
 
 static void test_update_semantics(void)
@@ -10603,6 +10392,573 @@ static void test_optimize_faces(void)
     "faces when using 16-bit indices. Got %x\n, expected D3DERR_INVALIDCALL\n", hr);
 }
 
+static HRESULT clear_normals(ID3DXMesh *mesh)
+{
+    HRESULT hr;
+    BYTE *vertices;
+    size_t normal_size;
+    DWORD i, num_vertices, vertex_stride;
+    const D3DXVECTOR4 normal = {NAN, NAN, NAN, NAN};
+    D3DVERTEXELEMENT9 *normal_declaration = NULL;
+    D3DVERTEXELEMENT9 declaration[MAX_FVF_DECL_SIZE] = {D3DDECL_END()};
+
+    if (FAILED(hr = mesh->lpVtbl->GetDeclaration(mesh, declaration)))
+        return hr;
+
+    for (i = 0; declaration[i].Stream != 0xff; i++)
+    {
+        if (declaration[i].Usage == D3DDECLUSAGE_NORMAL && !declaration[i].UsageIndex)
+        {
+            normal_declaration = &declaration[i];
+            break;
+        }
+    }
+
+    if (!normal_declaration)
+        return D3DERR_INVALIDCALL;
+
+    if (normal_declaration->Type == D3DDECLTYPE_FLOAT3)
+    {
+        normal_size = sizeof(D3DXVECTOR3);
+    }
+    else if (normal_declaration->Type == D3DDECLTYPE_FLOAT4)
+    {
+        normal_size = sizeof(D3DXVECTOR4);
+    }
+    else
+    {
+        trace("Cannot clear normals\n");
+        return E_NOTIMPL;
+    }
+
+    num_vertices = mesh->lpVtbl->GetNumVertices(mesh);
+    vertex_stride = mesh->lpVtbl->GetNumBytesPerVertex(mesh);
+
+    if (FAILED(hr = mesh->lpVtbl->LockVertexBuffer(mesh, 0, (void **)&vertices)))
+        return hr;
+
+    vertices += normal_declaration->Offset;
+
+    for (i = 0; i < num_vertices; i++, vertices += vertex_stride)
+        memcpy(vertices, &normal, normal_size);
+
+    return mesh->lpVtbl->UnlockVertexBuffer(mesh);
+}
+
+static void compare_normals(unsigned int line, const char *test_name,
+        ID3DXMesh *mesh, const D3DXVECTOR3 *normals, unsigned int num_normals)
+{
+    unsigned int i;
+    BYTE *vertices;
+    DWORD num_vertices, vertex_stride;
+    D3DVERTEXELEMENT9 *normal_declaration = NULL;
+    D3DVERTEXELEMENT9 declaration[MAX_FVF_DECL_SIZE] = {D3DDECL_END()};
+
+    if (FAILED(mesh->lpVtbl->GetDeclaration(mesh, declaration)))
+    {
+        ok_(__FILE__, line)(0, "%s: Failed to get declaration\n", test_name);
+        return;
+    }
+
+    for (i = 0; declaration[i].Stream != 0xff; i++)
+    {
+        if (declaration[i].Usage == D3DDECLUSAGE_NORMAL && !declaration[i].UsageIndex)
+        {
+            normal_declaration = &declaration[i];
+            break;
+        }
+    }
+
+    if (!normal_declaration)
+    {
+        ok_(__FILE__, line)(0, "%s: Mesh has no normals\n", test_name);
+        return;
+    }
+
+    if (normal_declaration->Type != D3DDECLTYPE_FLOAT3 && normal_declaration->Type != D3DDECLTYPE_FLOAT4)
+    {
+        ok_(__FILE__, line)(0, "%s: Mesh has invalid normals type\n", test_name);
+        return;
+    }
+
+    num_vertices = mesh->lpVtbl->GetNumVertices(mesh);
+    vertex_stride = mesh->lpVtbl->GetNumBytesPerVertex(mesh);
+
+    ok_(__FILE__, line)(num_vertices == num_normals, "%s: Expected %u vertices, got %u\n", test_name,
+            num_normals, num_vertices);
+
+    if (FAILED(mesh->lpVtbl->LockVertexBuffer(mesh, 0, (void **)&vertices)))
+    {
+        ok_(__FILE__, line)(0, "%s: Failed to compare normals\n", test_name);
+        return;
+    }
+
+    vertices += normal_declaration->Offset;
+
+    for (i = 0; i < min(num_vertices, num_normals); i++, vertices += vertex_stride)
+    {
+        if (normal_declaration->Type == D3DDECLTYPE_FLOAT3)
+        {
+            const D3DXVECTOR3 *n = (D3DXVECTOR3 *)vertices;
+            ok_(__FILE__, line)(compare_vec3(*n, normals[i]),
+                    "%s: normal %2u, expected (%f, %f, %f), got (%f, %f, %f)\n",
+                    test_name, i, normals[i].x, normals[i].y, normals[i].z, n->x, n->y, n->z);
+        }
+        else
+        {
+            const D3DXVECTOR4 *n = (D3DXVECTOR4 *)vertices;
+            const D3DXVECTOR4 normal = {normals[i].x, normals[i].y, normals[i].z, 1.0f};
+            ok_(__FILE__, line)(compare_vec4(*n, normal),
+                    "%s: normal %2u, expected (%f, %f, %f, %f), got (%f, %f, %f, %f)\n",
+                    test_name, i, normals[i].x, normals[i].y, normals[i].z, 1.0f,
+                    n->x, n->y, n->z, n->w);
+        }
+    }
+
+    mesh->lpVtbl->UnlockVertexBuffer(mesh);
+}
+
+static HRESULT compute_normals_D3DXComputeNormals(ID3DXMesh *mesh, const DWORD *adjacency)
+{
+    return D3DXComputeNormals((ID3DXBaseMesh *)mesh, adjacency);
+}
+
+static HRESULT compute_normals_D3DXComputeTangentFrameEx(ID3DXMesh *mesh, const DWORD *adjacency)
+{
+    return D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS,
+            adjacency, -1.01f, -0.01f, -1.01f, NULL, NULL);
+}
+
+static void test_compute_normals(void)
+{
+    HRESULT hr;
+    ULONG refcount;
+    ID3DXMesh *mesh, *cloned_mesh;
+    ID3DXBuffer *adjacency;
+    IDirect3DDevice9 *device;
+    struct test_context *test_context;
+    unsigned int i;
+
+    static const struct compute_normals_func
+    {
+        const char *name;
+        HRESULT (*apply)(ID3DXMesh *mesh, const DWORD *adjacency);
+    }
+    compute_normals_funcs[] =
+    {
+        {"D3DXComputeNormals",        compute_normals_D3DXComputeNormals       },
+        {"D3DXComputeTangentFrameEx", compute_normals_D3DXComputeTangentFrameEx}
+    };
+
+    static const D3DXVECTOR3 box_normals[24] =
+    {
+        {-1.0f, 0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f},
+        { 0.0f, 1.0f, 0.0f}, { 0.0f, 1.0f, 0.0f}, { 0.0f, 1.0f, 0.0f}, { 0.0f, 1.0f, 0.0f},
+        { 1.0f, 0.0f, 0.0f}, { 1.0f, 0.0f, 0.0f}, { 1.0f, 0.0f, 0.0f}, { 1.0f, 0.0f, 0.0f},
+        { 0.0f,-1.0f, 0.0f}, { 0.0f,-1.0f, 0.0f}, { 0.0f,-1.0f, 0.0f}, { 0.0f,-1.0f, 0.0f},
+        { 0.0f, 0.0f, 1.0f}, { 0.0f, 0.0f, 1.0f}, { 0.0f, 0.0f, 1.0f}, { 0.0f, 0.0f, 1.0f},
+        { 0.0f, 0.0f,-1.0f}, { 0.0f, 0.0f,-1.0f}, { 0.0f, 0.0f,-1.0f}, { 0.0f, 0.0f,-1.0f}
+    };
+    const float box_normal_component = 1.0f / sqrtf(3.0f);
+    const D3DXVECTOR3 box_normals_adjacency[24] =
+    {
+        {-box_normal_component, -box_normal_component, -box_normal_component},
+        {-box_normal_component, -box_normal_component,  box_normal_component},
+        {-box_normal_component,  box_normal_component,  box_normal_component},
+        {-box_normal_component,  box_normal_component, -box_normal_component},
+        {-box_normal_component,  box_normal_component, -box_normal_component},
+        {-box_normal_component,  box_normal_component,  box_normal_component},
+        { box_normal_component,  box_normal_component,  box_normal_component},
+        { box_normal_component,  box_normal_component, -box_normal_component},
+        { box_normal_component,  box_normal_component, -box_normal_component},
+        { box_normal_component,  box_normal_component,  box_normal_component},
+        { box_normal_component, -box_normal_component,  box_normal_component},
+        { box_normal_component, -box_normal_component, -box_normal_component},
+        {-box_normal_component, -box_normal_component,  box_normal_component},
+        {-box_normal_component, -box_normal_component, -box_normal_component},
+        { box_normal_component, -box_normal_component, -box_normal_component},
+        { box_normal_component, -box_normal_component,  box_normal_component},
+        {-box_normal_component, -box_normal_component,  box_normal_component},
+        { box_normal_component, -box_normal_component,  box_normal_component},
+        { box_normal_component,  box_normal_component,  box_normal_component},
+        {-box_normal_component,  box_normal_component,  box_normal_component},
+        {-box_normal_component, -box_normal_component, -box_normal_component},
+        {-box_normal_component,  box_normal_component, -box_normal_component},
+        { box_normal_component,  box_normal_component, -box_normal_component},
+        { box_normal_component, -box_normal_component, -box_normal_component}
+    };
+    static const D3DXVECTOR3 box_normals_adjacency_area[24] =
+    {
+        {-0.666667f, -0.333333f, -0.666667f}, {-0.333333f, -0.666667f,  0.666667f},
+        {-0.816496f,  0.408248f,  0.408248f}, {-0.408248f,  0.816496f, -0.408248f},
+        {-0.408248f,  0.816496f, -0.408248f}, {-0.816496f,  0.408248f,  0.408248f},
+        { 0.333333f,  0.666667f,  0.666667f}, { 0.666667f,  0.333333f, -0.666667f},
+        { 0.666667f,  0.333333f, -0.666667f}, { 0.333333f,  0.666667f,  0.666667f},
+        { 0.816496f, -0.408248f,  0.408248f}, { 0.408248f, -0.816496f, -0.408248f},
+        {-0.333333f, -0.666667f,  0.666667f}, {-0.666667f, -0.333333f, -0.666667f},
+        { 0.408248f, -0.816496f, -0.408248f}, { 0.816496f, -0.408248f,  0.408248f},
+        {-0.333333f, -0.666667f,  0.666667f}, { 0.816497f, -0.408248f,  0.408248f},
+        { 0.333333f,  0.666667f,  0.666667f}, {-0.816497f,  0.408248f,  0.408248f},
+        {-0.666667f, -0.333333f, -0.666667f}, {-0.408248f,  0.816497f, -0.408248f},
+        { 0.666667f,  0.333333f, -0.666667f}, { 0.408248f, -0.816496f, -0.408248f}
+    };
+    static const D3DXVECTOR3 box_normals_position1f[24] = {{0}};
+    static const D3DXVECTOR3 box_normals_position2f[24] =
+    {
+        {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f,  1.0f}, {0.0f, 0.0f,  1.0f},
+        {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f,  1.0f},
+        {0.0f, 0.0f,  1.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f},
+        {0.0f, 0.0f,  1.0f}, {0.0f, 0.0f,  1.0f}, {0.0f, 0.0f, -1.0f},
+        {0.0f, 0.0f,  1.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f},
+        {0.0f, 0.0f,  1.0f}, {0.0f, 0.0f,  1.0f}, {0.0f, 0.0f,  1.0f},
+        {0.0f, 0.0f,  1.0f}, {0.0f, 0.0f,  1.0f}, {0.0f, 0.0f, -1.0f},
+        {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f}
+    };
+
+    static const D3DXVECTOR3 sphere_normals[22] =
+    {
+        { 0.000000f, -0.000000f,  1.000000f}, { 0.000000f,  0.582244f,  0.813014f},
+        { 0.582244f, -0.000000f,  0.813014f}, {-0.000000f, -0.582244f,  0.813014f},
+        {-0.582244f,  0.000000f,  0.813014f}, {-0.000000f,  0.890608f,  0.454772f},
+        { 0.890608f,  0.000000f,  0.454772f}, { 0.000000f, -0.890608f,  0.454772f},
+        {-0.890608f, -0.000000f,  0.454772f}, { 0.000000f,  1.000000f, -0.000000f},
+        { 1.000000f, -0.000000f, -0.000000f}, {-0.000000f, -1.000000f, -0.000000f},
+        {-1.000000f,  0.000000f, -0.000000f}, { 0.000000f,  0.890608f, -0.454773f},
+        { 0.890608f, -0.000000f, -0.454772f}, {-0.000000f, -0.890608f, -0.454773f},
+        {-0.890608f,  0.000000f, -0.454773f}, { 0.000000f,  0.582244f, -0.813015f},
+        { 0.582244f, -0.000000f, -0.813015f}, { 0.000000f, -0.582244f, -0.813015f},
+        {-0.582243f,  0.000000f, -0.813015f}, { 0.000000f,  0.000000f, -1.000000f}
+    };
+    static const D3DXVECTOR3 sphere_normals_area[22] =
+    {
+        { 0.000000f, -0.000000f,  1.000000f}, {-0.215311f,  0.554931f,  0.803550f},
+        { 0.554931f,  0.215311f,  0.803550f}, { 0.215311f, -0.554931f,  0.803550f},
+        {-0.554931f, -0.215311f,  0.803550f}, {-0.126638f,  0.872121f,  0.472618f},
+        { 0.872121f,  0.126638f,  0.472618f}, { 0.126638f, -0.872121f,  0.472618f},
+        {-0.872121f, -0.126637f,  0.472618f}, { 0.000000f,  1.000000f, -0.000000f},
+        { 1.000000f, -0.000000f, -0.000000f}, {-0.000000f, -1.000000f, -0.000000f},
+        {-1.000000f,  0.000000f, -0.000000f}, { 0.126638f,  0.872121f, -0.472618f},
+        { 0.872121f, -0.126638f, -0.472618f}, {-0.126638f, -0.872121f, -0.472618f},
+        {-0.872121f,  0.126638f, -0.472618f}, { 0.215311f,  0.554931f, -0.803550f},
+        { 0.554931f, -0.215311f, -0.803550f}, {-0.215311f, -0.554931f, -0.803550f},
+        {-0.554931f,  0.215311f, -0.803550f}, { 0.000000f,  0.000000f, -1.000000f}
+    };
+    static const D3DXVECTOR3 sphere_normals_equal[22] =
+    {
+        { 0.000000f, -0.000000f,  1.000000f}, {-0.134974f,  0.522078f,  0.842150f},
+        { 0.522078f,  0.134974f,  0.842150f}, { 0.134974f, -0.522078f,  0.842150f},
+        {-0.522078f, -0.134974f,  0.842150f}, {-0.026367f,  0.857121f,  0.514440f},
+        { 0.857121f,  0.026367f,  0.514440f}, { 0.026367f, -0.857121f,  0.514440f},
+        {-0.857121f, -0.026367f,  0.514440f}, { 0.000000f,  1.000000f, -0.000000f},
+        { 1.000000f, -0.000000f, -0.000000f}, {-0.000000f, -1.000000f, -0.000000f},
+        {-1.000000f,  0.000000f, -0.000000f}, { 0.026367f,  0.857121f, -0.514440f},
+        { 0.857121f, -0.026367f, -0.514440f}, {-0.026367f, -0.857121f, -0.514440f},
+        {-0.857121f,  0.026367f, -0.514440f}, { 0.134975f,  0.522078f, -0.842150f},
+        { 0.522078f, -0.134975f, -0.842150f}, {-0.134974f, -0.522078f, -0.842150f},
+        {-0.522078f,  0.134974f, -0.842150f}, { 0.000000f,  0.000000f, -1.000000f}
+    };
+
+    static const D3DVERTEXELEMENT9 position3f_normal1f_declaration[] =
+    {
+        {0, 0,                   D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, sizeof(D3DXVECTOR3), D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL,   0},
+        D3DDECL_END()
+    };
+    static const D3DVERTEXELEMENT9 position3f_normal2f_declaration[] =
+    {
+        {0, 0,                   D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, sizeof(D3DXVECTOR3), D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL,   0},
+        D3DDECL_END()
+    };
+    static const D3DVERTEXELEMENT9 normal4f_position3f_declaration[] =
+    {
+        {0, 0,                   D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL,   0},
+        {0, sizeof(D3DXVECTOR4), D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        D3DDECL_END()
+    };
+    static const D3DVERTEXELEMENT9 position1f_normal3f_declaration[] =
+    {
+        {0, 0,                   D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, sizeof(float),       D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL,   0},
+        D3DDECL_END()
+    };
+    static const D3DVERTEXELEMENT9 position2f_normal3f_declaration[] =
+    {
+        {0, 0,                   D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, sizeof(D3DXVECTOR2), D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL,   0},
+        D3DDECL_END()
+    };
+    static const D3DVERTEXELEMENT9 position4f_normal3f_declaration[] =
+    {
+        {0, 0,                   D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+        {0, sizeof(D3DXVECTOR4), D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL,   0},
+        D3DDECL_END()
+    };
+
+    for (i = 0; i < ARRAY_SIZE(compute_normals_funcs); i++)
+    {
+        hr = compute_normals_funcs[i].apply(NULL, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "%s returned %#x, expected D3DERR_INVALIDCALL\n", compute_normals_funcs[i].name, hr);
+    }
+
+    if (!(test_context = new_test_context()))
+    {
+        skip("Couldn't create test context\n");
+        return;
+    }
+    device = test_context->device;
+
+    hr = D3DXCreateBox(device, 1.0f, 1.0f, 1.0f, &mesh, &adjacency);
+    ok(SUCCEEDED(hr), "D3DXCreateBox failed %#x\n", hr);
+
+    /* Check wrong input */
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE, NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    todo_wine ok(hr == D3DERR_INVALIDCALL, "D3DXComputeTangentFrameEx returned %#x, expected D3DERR_INVALIDCALL\n", hr);
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DDECLUSAGE_NORMAL, 0,
+            D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS | D3DXTANGENT_WEIGHT_BY_AREA | D3DXTANGENT_WEIGHT_EQUAL,
+            NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXComputeTangentFrameEx returned %#x, expected D3DERR_INVALIDCALL\n", hr);
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, 0, NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    todo_wine ok(hr == D3DERR_INVALIDCALL, "D3DXComputeTangentFrameEx returned %#x, expected D3DERR_INVALIDCALL\n", hr);
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 1, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS,
+            NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXComputeTangentFrameEx returned %#x, expected D3DERR_INVALIDCALL\n", hr);
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DX_DEFAULT, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS,
+            NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "D3DXComputeTangentFrameEx returned %#x, expected D3DERR_INVALIDCALL\n", hr);
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_CALCULATE_NORMALS,
+            NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    todo_wine ok(hr == D3DERR_INVALIDCALL, "D3DXComputeTangentFrameEx returned %#x, expected D3DERR_INVALIDCALL\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(compute_normals_funcs); i++)
+    {
+        const struct compute_normals_func *func = &compute_normals_funcs[i];
+
+        /* Mesh without normals */
+        hr = mesh->lpVtbl->CloneMeshFVF(mesh, 0, D3DFVF_XYZ, device, &cloned_mesh);
+        ok(SUCCEEDED(hr), "CloneMeshFVF failed %#x\n", hr);
+
+        hr = func->apply(cloned_mesh, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "%s returned %#x, expected D3DERR_INVALIDCALL\n", func->name, hr);
+
+        refcount = cloned_mesh->lpVtbl->Release(cloned_mesh);
+        ok(!refcount, "Mesh has %u references left\n", refcount);
+
+        /* Mesh without positions */
+        hr = mesh->lpVtbl->CloneMeshFVF(mesh, 0, D3DFVF_NORMAL, device, &cloned_mesh);
+        ok(SUCCEEDED(hr), "CloneMeshFVF failed %#x\n", hr);
+
+        hr = func->apply(cloned_mesh, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "%s returned %#x, expected D3DERR_INVALIDCALL\n", func->name, hr);
+
+        refcount = cloned_mesh->lpVtbl->Release(cloned_mesh);
+        ok(!refcount, "Mesh has %u references left\n", refcount);
+
+        /* Mesh with D3DDECLTYPE_FLOAT1 normals */
+        hr = mesh->lpVtbl->CloneMesh(mesh, 0, position3f_normal1f_declaration, device, &cloned_mesh);
+        ok(SUCCEEDED(hr), "CloneMesh failed %#x\n", hr);
+
+        hr = func->apply(cloned_mesh, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "%s returned %#x, expected D3DERR_INVALIDCALL\n", func->name, hr);
+
+        refcount = cloned_mesh->lpVtbl->Release(cloned_mesh);
+        ok(!refcount, "Mesh has %u references left\n", refcount);
+
+        /* Mesh with D3DDECLTYPE_FLOAT2 normals */
+        hr = mesh->lpVtbl->CloneMesh(mesh, 0, position3f_normal2f_declaration, device, &cloned_mesh);
+        ok(SUCCEEDED(hr), "CloneMesh failed %#x\n", hr);
+
+        hr = func->apply(cloned_mesh, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "%s returned %#x, expected D3DERR_INVALIDCALL\n", func->name, hr);
+
+        refcount = cloned_mesh->lpVtbl->Release(cloned_mesh);
+        ok(!refcount, "Mesh has %u references left\n", refcount);
+
+        /* Mesh without adjacency data */
+        hr = clear_normals(mesh);
+        ok(SUCCEEDED(hr), "Failed to clear normals, returned %#x\n", hr);
+
+        hr = func->apply(mesh, NULL);
+        ok(hr == D3D_OK, "%s returned %#x, expected D3D_OK\n", func->name, hr);
+
+        compare_normals(__LINE__, func->name, mesh, box_normals, ARRAY_SIZE(box_normals));
+
+        /* Mesh with adjacency data */
+        hr = clear_normals(mesh);
+        ok(SUCCEEDED(hr), "Failed to clear normals, returned %#x\n", hr);
+
+        hr = func->apply(mesh, ID3DXBuffer_GetBufferPointer(adjacency));
+        ok(hr == D3D_OK, "%s returned %#x, expected D3D_OK\n", func->name, hr);
+
+        compare_normals(__LINE__, func->name, mesh, box_normals_adjacency, ARRAY_SIZE(box_normals_adjacency));
+
+        /* Mesh with custom vertex format, D3DDECLTYPE_FLOAT4 normals and adjacency */
+        hr = mesh->lpVtbl->CloneMesh(mesh, 0, normal4f_position3f_declaration, device, &cloned_mesh);
+        ok(SUCCEEDED(hr), "CloneMesh failed %#x\n", hr);
+
+        hr = clear_normals(cloned_mesh);
+        ok(SUCCEEDED(hr), "Failed to clear normals, returned %#x\n", hr);
+
+        hr = func->apply(cloned_mesh, ID3DXBuffer_GetBufferPointer(adjacency));
+        ok(hr == D3D_OK, "%s returned %#x, expected D3D_OK\n", func->name, hr);
+
+        compare_normals(__LINE__, func->name, cloned_mesh, box_normals_adjacency, ARRAY_SIZE(box_normals_adjacency));
+
+        refcount = cloned_mesh->lpVtbl->Release(cloned_mesh);
+        ok(!refcount, "Mesh has %u references left\n", refcount);
+
+        /* Mesh with D3DDECLTYPE_FLOAT1 positions and D3DDECLTYPE_FLOAT3 normals */
+        hr = mesh->lpVtbl->CloneMesh(mesh, 0, position1f_normal3f_declaration, device, &cloned_mesh);
+        ok(SUCCEEDED(hr), "CloneMesh failed %#x\n", hr);
+
+        hr = clear_normals(cloned_mesh);
+        ok(SUCCEEDED(hr), "Failed to clear normals, returned %#x\n", hr);
+
+        hr = func->apply(cloned_mesh, ID3DXBuffer_GetBufferPointer(adjacency));
+        ok(hr == D3D_OK, "%s returned %#x, expected D3D_OK\n", func->name, hr);
+
+        compare_normals(__LINE__, func->name, cloned_mesh, box_normals_position1f, ARRAY_SIZE(box_normals_position1f));
+
+        refcount = cloned_mesh->lpVtbl->Release(cloned_mesh);
+        ok(!refcount, "Mesh has %u references left\n", refcount);
+
+        /* Mesh with D3DDECLTYPE_FLOAT2 positions and D3DDECLTYPE_FLOAT3 normals */
+        hr = mesh->lpVtbl->CloneMesh(mesh, 0, position2f_normal3f_declaration, device, &cloned_mesh);
+        ok(SUCCEEDED(hr), "CloneMesh failed %#x\n", hr);
+
+        hr = clear_normals(cloned_mesh);
+        ok(SUCCEEDED(hr), "Failed to clear normals, returned %#x\n", hr);
+
+        hr = func->apply(cloned_mesh, ID3DXBuffer_GetBufferPointer(adjacency));
+        ok(hr == D3D_OK, "%s returned %#x, expected D3D_OK\n", func->name, hr);
+
+        compare_normals(__LINE__, func->name, cloned_mesh, box_normals_position2f, ARRAY_SIZE(box_normals_position2f));
+
+        refcount = cloned_mesh->lpVtbl->Release(cloned_mesh);
+        ok(!refcount, "Mesh has %u references left\n", refcount);
+
+        /* Mesh with D3DDECLTYPE_FLOAT4 positions and D3DDECLTYPE_FLOAT3 normals */
+        hr = mesh->lpVtbl->CloneMesh(mesh, 0, position4f_normal3f_declaration, device, &cloned_mesh);
+        ok(SUCCEEDED(hr), "CloneMesh failed %#x\n", hr);
+
+        hr = clear_normals(cloned_mesh);
+        ok(SUCCEEDED(hr), "Failed to clear normals, returned %#x\n", hr);
+
+        hr = func->apply(cloned_mesh, ID3DXBuffer_GetBufferPointer(adjacency));
+        ok(hr == D3D_OK, "%s returned %#x, expected D3D_OK\n", func->name, hr);
+
+        compare_normals(__LINE__, func->name, cloned_mesh, box_normals_adjacency, ARRAY_SIZE(box_normals_adjacency));
+
+        refcount = cloned_mesh->lpVtbl->Release(cloned_mesh);
+        ok(!refcount, "Mesh has %u references left\n", refcount);
+    }
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS | D3DXTANGENT_WEIGHT_BY_AREA,
+            NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXComputeTangentFrameEx returned %#x, expected D3D_OK\n", hr);
+
+    compare_normals(__LINE__, "D3DXComputeTangentFrameEx", mesh, box_normals, ARRAY_SIZE(box_normals));
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS | D3DXTANGENT_WEIGHT_BY_AREA,
+            ID3DXBuffer_GetBufferPointer(adjacency), -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXComputeTangentFrameEx returned %#x, expected D3D_OK\n", hr);
+
+    compare_normals(__LINE__, "D3DXComputeTangentFrameEx", mesh, box_normals_adjacency_area, ARRAY_SIZE(box_normals_adjacency_area));
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS | D3DXTANGENT_WEIGHT_EQUAL,
+            NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXComputeTangentFrameEx returned %#x, expected D3D_OK\n", hr);
+
+    compare_normals(__LINE__, "D3DXComputeTangentFrameEx", mesh, box_normals, ARRAY_SIZE(box_normals));
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS | D3DXTANGENT_WEIGHT_EQUAL,
+            ID3DXBuffer_GetBufferPointer(adjacency), -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXComputeTangentFrameEx returned %#x, expected D3D_OK\n", hr);
+
+    compare_normals(__LINE__, "D3DXComputeTangentFrameEx", mesh, box_normals_adjacency_area, ARRAY_SIZE(box_normals_adjacency_area));
+
+    refcount = mesh->lpVtbl->Release(mesh);
+    ok(!refcount, "Mesh has %u references left\n", refcount);
+    refcount = ID3DXBuffer_Release(adjacency);
+    ok(!refcount, "Buffer has %u references left\n", refcount);
+
+    hr = D3DXCreateSphere(device, 1.0f, 4, 6, &mesh, &adjacency);
+    ok(SUCCEEDED(hr), "D3DXCreateSphere failed %#x\n", hr);
+
+    for (i = 0; i < ARRAY_SIZE(compute_normals_funcs); i++)
+    {
+        const struct compute_normals_func *func = &compute_normals_funcs[i];
+
+        /* Sphere without adjacency data */
+        hr = clear_normals(mesh);
+        ok(SUCCEEDED(hr), "Failed to clear normals, returned %#x\n", hr);
+
+        hr = func->apply(mesh, NULL);
+        ok(hr == D3D_OK, "%s returned %#x, expected D3D_OK\n", func->name, hr);
+
+        compare_normals(__LINE__, func->name, mesh, sphere_normals, ARRAY_SIZE(sphere_normals));
+
+        /* Sphere with adjacency data */
+        hr = clear_normals(mesh);
+        ok(SUCCEEDED(hr), "Failed to clear normals, returned %#x\n", hr);
+
+        hr = func->apply(mesh, ID3DXBuffer_GetBufferPointer(adjacency));
+        ok(hr == D3D_OK, "%s returned %#x, expected D3D_OK\n", func->name, hr);
+
+        compare_normals(__LINE__, func->name, mesh, sphere_normals, ARRAY_SIZE(sphere_normals));
+    }
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS | D3DXTANGENT_WEIGHT_BY_AREA,
+            NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXComputeTangentFrameEx returned %#x, expected D3D_OK\n", hr);
+
+    compare_normals(__LINE__, "D3DXComputeTangentFrameEx", mesh, sphere_normals_area, ARRAY_SIZE(sphere_normals_area));
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS | D3DXTANGENT_WEIGHT_BY_AREA,
+            ID3DXBuffer_GetBufferPointer(adjacency), -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXComputeTangentFrameEx returned %#x, expected D3D_OK\n", hr);
+
+    compare_normals(__LINE__, "D3DXComputeTangentFrameEx", mesh, sphere_normals_area, ARRAY_SIZE(sphere_normals_area));
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS | D3DXTANGENT_WEIGHT_EQUAL,
+            NULL, -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXComputeTangentFrameEx returned %#x, expected D3D_OK\n", hr);
+
+    compare_normals(__LINE__, "D3DXComputeTangentFrameEx", mesh, sphere_normals_equal, ARRAY_SIZE(sphere_normals_equal));
+
+    hr = D3DXComputeTangentFrameEx(mesh, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0, D3DX_DEFAULT, 0,
+            D3DDECLUSAGE_NORMAL, 0, D3DXTANGENT_GENERATE_IN_PLACE | D3DXTANGENT_CALCULATE_NORMALS | D3DXTANGENT_WEIGHT_EQUAL,
+            ID3DXBuffer_GetBufferPointer(adjacency), -1.01f, -0.01f, -1.01f, NULL, NULL);
+    ok(hr == D3D_OK, "D3DXComputeTangentFrameEx returned %#x, expected D3D_OK\n", hr);
+
+    compare_normals(__LINE__, "D3DXComputeTangentFrameEx", mesh, sphere_normals_equal, ARRAY_SIZE(sphere_normals_equal));
+
+    refcount = mesh->lpVtbl->Release(mesh);
+    ok(!refcount, "Mesh has %u references left\n", refcount);
+    refcount = ID3DXBuffer_Release(adjacency);
+    ok(!refcount, "Buffer has %u references left\n", refcount);
+
+    free_test_context(test_context);
+}
+
 START_TEST(mesh)
 {
     D3DXBoundProbeTest();
@@ -10631,4 +10987,5 @@ START_TEST(mesh)
     test_clone_mesh();
     test_valid_mesh();
     test_optimize_faces();
+    test_compute_normals();
 }

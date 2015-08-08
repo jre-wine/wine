@@ -65,6 +65,7 @@ PUBLIC_IDL_H_SRCS = \
 	inspectable.idl \
 	mediaobj.idl \
 	metahost.idl \
+	mfobjects.idl \
 	mimeinfo.idl \
 	mimeole.idl \
 	mlang.idl \
@@ -132,6 +133,7 @@ PUBLIC_IDL_H_SRCS = \
 	wia_xp.idl \
 	wincodec.idl \
 	wincodecsdk.idl \
+	windows.foundation.idl \
 	wine/itss.idl \
 	wine/svcctl.idl \
 	winsxs.idl \
@@ -599,6 +601,7 @@ SRCDIR_INCLUDES = \
 	vsstyle.h \
 	vssym32.h \
 	vswriter.h \
+	wct.h \
 	webservices.h \
 	werapi.h \
 	wfext.h \
