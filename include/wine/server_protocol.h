@@ -892,13 +892,26 @@ struct get_thread_info_reply
     process_id_t pid;
     thread_id_t  tid;
     client_ptr_t teb;
+    client_ptr_t entry_point;
     affinity_t   affinity;
-    timeout_t    creation_time;
-    timeout_t    exit_time;
     int          exit_code;
     int          priority;
     int          last;
-    char __pad_60[4];
+    char __pad_52[4];
+};
+
+
+
+struct get_thread_times_request
+{
+    struct request_header __header;
+    obj_handle_t handle;
+};
+struct get_thread_times_reply
+{
+    struct reply_header __header;
+    timeout_t    creation_time;
+    timeout_t    exit_time;
 };
 
 
@@ -910,16 +923,18 @@ struct set_thread_info_request
     int          mask;
     int          priority;
     affinity_t   affinity;
+    client_ptr_t entry_point;
     obj_handle_t token;
-    char __pad_36[4];
+    char __pad_44[4];
 };
 struct set_thread_info_reply
 {
     struct reply_header __header;
 };
-#define SET_THREAD_INFO_PRIORITY 0x01
-#define SET_THREAD_INFO_AFFINITY 0x02
-#define SET_THREAD_INFO_TOKEN    0x04
+#define SET_THREAD_INFO_PRIORITY   0x01
+#define SET_THREAD_INFO_AFFINITY   0x02
+#define SET_THREAD_INFO_TOKEN      0x04
+#define SET_THREAD_INFO_ENTRYPOINT 0x08
 
 
 
@@ -5295,6 +5310,7 @@ enum request
     REQ_get_process_info,
     REQ_set_process_info,
     REQ_get_thread_info,
+    REQ_get_thread_times,
     REQ_set_thread_info,
     REQ_get_dll_info,
     REQ_suspend_thread,
@@ -5568,6 +5584,7 @@ union generic_request
     struct get_process_info_request get_process_info_request;
     struct set_process_info_request set_process_info_request;
     struct get_thread_info_request get_thread_info_request;
+    struct get_thread_times_request get_thread_times_request;
     struct set_thread_info_request set_thread_info_request;
     struct get_dll_info_request get_dll_info_request;
     struct suspend_thread_request suspend_thread_request;
@@ -5839,6 +5856,7 @@ union generic_reply
     struct get_process_info_reply get_process_info_reply;
     struct set_process_info_reply set_process_info_reply;
     struct get_thread_info_reply get_thread_info_reply;
+    struct get_thread_times_reply get_thread_times_reply;
     struct set_thread_info_reply set_thread_info_reply;
     struct get_dll_info_reply get_dll_info_reply;
     struct suspend_thread_reply suspend_thread_reply;
@@ -6096,6 +6114,6 @@ union generic_reply
     struct terminate_job_reply terminate_job_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 481
+#define SERVER_PROTOCOL_VERSION 484
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */

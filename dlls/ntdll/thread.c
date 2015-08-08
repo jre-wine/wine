@@ -962,12 +962,10 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
     case ThreadTimes:
         {
             KERNEL_USER_TIMES   kusrt;
-            /* We need to do a server call to get the creation time or exit time */
-            /* This works on any thread */
-            SERVER_START_REQ( get_thread_info )
+
+            SERVER_START_REQ( get_thread_times )
             {
                 req->handle = wine_server_obj_handle( handle );
-                req->tid_in = 0;
                 status = wine_server_call( req );
                 if (status == STATUS_SUCCESS)
                 {
@@ -1088,12 +1086,28 @@ NTSTATUS WINAPI NtQueryInformationThread( HANDLE handle, THREADINFOCLASS class,
             SERVER_END_REQ;
             return status;
         }
+    case ThreadQuerySetWin32StartAddress:
+        {
+            SERVER_START_REQ( get_thread_info )
+            {
+                req->handle = wine_server_obj_handle( handle );
+                req->tid_in = 0;
+                status = wine_server_call( req );
+                if (status == STATUS_SUCCESS)
+                {
+                    PRTL_THREAD_START_ROUTINE entry = wine_server_get_ptr( reply->entry_point );
+                    if (data) memcpy( data, &entry, min( length, sizeof(entry) ) );
+                    if (ret_len) *ret_len = min( length, sizeof(entry) );
+                }
+            }
+            SERVER_END_REQ;
+            return status;
+        }
     case ThreadPriority:
     case ThreadBasePriority:
     case ThreadImpersonationToken:
     case ThreadEnableAlignmentFaultFixup:
     case ThreadEventPair_Reusable:
-    case ThreadQuerySetWin32StartAddress:
     case ThreadZeroTlsCell:
     case ThreadPerformanceCount:
     case ThreadIdealProcessor:
@@ -1205,14 +1219,26 @@ NTSTATUS WINAPI NtSetInformationThread( HANDLE handle, THREADINFOCLASS class,
     case ThreadHideFromDebugger:
         /* pretend the call succeeded to satisfy some code protectors */
         return STATUS_SUCCESS;
-
+    case ThreadQuerySetWin32StartAddress:
+        {
+            const PRTL_THREAD_START_ROUTINE *entry = data;
+            if (length != sizeof(PRTL_THREAD_START_ROUTINE)) return STATUS_INVALID_PARAMETER;
+            SERVER_START_REQ( set_thread_info )
+            {
+                req->handle   = wine_server_obj_handle( handle );
+                req->mask     = SET_THREAD_INFO_ENTRYPOINT;
+                req->entry_point = wine_server_client_ptr( *entry );
+                status = wine_server_call( req );
+            }
+            SERVER_END_REQ;
+        }
+        return status;
     case ThreadBasicInformation:
     case ThreadTimes:
     case ThreadPriority:
     case ThreadDescriptorTableEntry:
     case ThreadEnableAlignmentFaultFixup:
     case ThreadEventPair_Reusable:
-    case ThreadQuerySetWin32StartAddress:
     case ThreadPerformanceCount:
     case ThreadAmILastThread:
     case ThreadIdealProcessor:

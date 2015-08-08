@@ -104,6 +104,11 @@ static inline unsigned short get_table_entry(const unsigned short *table, WCHAR 
     return table[table[table[ch >> 8] + ((ch >> 4) & 0x0f)] + (ch & 0xf)];
 }
 
+static inline FLOAT get_scaled_advance_width(INT32 advance, FLOAT emSize, const DWRITE_FONT_METRICS *metrics)
+{
+    return (FLOAT)advance * emSize / (FLOAT)metrics->designUnitsPerEm;
+}
+
 extern HRESULT convert_fontface_to_logfont(IDWriteFontFace*, LOGFONTW*) DECLSPEC_HIDDEN;
 extern HRESULT create_numbersubstitution(DWRITE_NUMBER_SUBSTITUTION_METHOD,const WCHAR *locale,BOOL,IDWriteNumberSubstitution**) DECLSPEC_HIDDEN;
 extern HRESULT create_textformat(const WCHAR*,IDWriteFontCollection*,DWRITE_FONT_WEIGHT,DWRITE_FONT_STYLE,DWRITE_FONT_STRETCH,
@@ -124,12 +129,15 @@ extern HRESULT create_font_file(IDWriteFontFileLoader *loader, const void *refer
 extern HRESULT create_localfontfileloader(IDWriteLocalFontFileLoader** iface) DECLSPEC_HIDDEN;
 extern HRESULT create_fontface(DWRITE_FONT_FACE_TYPE,UINT32,IDWriteFontFile* const*,UINT32,DWRITE_FONT_SIMULATIONS,IDWriteFontFace2**) DECLSPEC_HIDDEN;
 extern HRESULT create_font_collection(IDWriteFactory2*,IDWriteFontFileEnumerator*,BOOL,IDWriteFontCollection**) DECLSPEC_HIDDEN;
-extern HRESULT create_glyphrunanalysis(DWRITE_RENDERING_MODE,IDWriteGlyphRunAnalysis**) DECLSPEC_HIDDEN;
+extern HRESULT create_glyphrunanalysis(DWRITE_RENDERING_MODE,DWRITE_MEASURING_MODE,DWRITE_GLYPH_RUN const*,FLOAT,DWRITE_GRID_FIT_MODE,
+    DWRITE_TEXT_ANTIALIAS_MODE,FLOAT,FLOAT,IDWriteGlyphRunAnalysis**) DECLSPEC_HIDDEN;
 extern BOOL    is_system_collection(IDWriteFontCollection*) DECLSPEC_HIDDEN;
 extern HRESULT get_local_refkey(const WCHAR*,const FILETIME*,void**,UINT32*) DECLSPEC_HIDDEN;
 extern HRESULT get_filestream_from_file(IDWriteFontFile*,IDWriteFontFileStream**) DECLSPEC_HIDDEN;
 extern BOOL    is_face_type_supported(DWRITE_FONT_FACE_TYPE) DECLSPEC_HIDDEN;
 extern HRESULT get_family_names_from_stream(IDWriteFontFileStream*,UINT32,DWRITE_FONT_FACE_TYPE,IDWriteLocalizedStrings**) DECLSPEC_HIDDEN;
+extern HRESULT create_colorglyphenum(FLOAT,FLOAT,const DWRITE_GLYPH_RUN*,const DWRITE_GLYPH_RUN_DESCRIPTION*,DWRITE_MEASURING_MODE,
+    const DWRITE_MATRIX*,UINT32,IDWriteColorGlyphRunEnumerator**) DECLSPEC_HIDDEN;
 
 /* Opentype font table functions */
 struct dwrite_font_props {
@@ -147,6 +155,9 @@ extern void opentype_get_font_metrics(IDWriteFontFileStream*,DWRITE_FONT_FACE_TY
 extern HRESULT opentype_get_font_strings_from_id(const void*,DWRITE_INFORMATIONAL_STRING_ID,IDWriteLocalizedStrings**) DECLSPEC_HIDDEN;
 extern HRESULT opentype_get_typographic_features(IDWriteFontFace*,UINT32,UINT32,UINT32,UINT32*,DWRITE_FONT_FEATURE_TAG*) DECLSPEC_HIDDEN;
 extern BOOL opentype_get_vdmx_size(const void*,INT,UINT16*,UINT16*) DECLSPEC_HIDDEN;
+extern UINT32 opentype_get_cpal_palettecount(const void*) DECLSPEC_HIDDEN;
+extern UINT32 opentype_get_cpal_paletteentrycount(const void*) DECLSPEC_HIDDEN;
+extern HRESULT opentype_get_cpal_entries(const void*,UINT32,UINT32,UINT32,DWRITE_COLOR_F*) DECLSPEC_HIDDEN;
 
 enum gasp_flags {
     GASP_GRIDFIT             = 0x0001,
@@ -185,9 +196,12 @@ extern void freetype_notify_cacheremove(IDWriteFontFace2*) DECLSPEC_HIDDEN;
 extern BOOL freetype_is_monospaced(IDWriteFontFace2*) DECLSPEC_HIDDEN;
 extern HRESULT freetype_get_glyph_outline(IDWriteFontFace2*,FLOAT,UINT16,USHORT,struct glyph_outline**) DECLSPEC_HIDDEN;
 extern UINT16 freetype_get_glyphcount(IDWriteFontFace2*) DECLSPEC_HIDDEN;
-extern UINT16 freetype_get_glyphindex(IDWriteFontFace2*,UINT32) DECLSPEC_HIDDEN;
+extern UINT16 freetype_get_glyphindex(IDWriteFontFace2*,UINT32,INT) DECLSPEC_HIDDEN;
 extern BOOL freetype_has_kerning_pairs(IDWriteFontFace2*) DECLSPEC_HIDDEN;
 extern INT32 freetype_get_kerning_pair_adjustment(IDWriteFontFace2*,UINT16,UINT16) DECLSPEC_HIDDEN;
+extern void freetype_get_glyph_bbox(IDWriteFontFace2*,FLOAT,UINT16,BOOL,RECT*) DECLSPEC_HIDDEN;
+extern void freetype_get_glyph_bitmap(IDWriteFontFace2*,FLOAT,UINT16,const RECT*,BYTE*) DECLSPEC_HIDDEN;
+extern INT freetype_get_charmap_index(IDWriteFontFace2*,BOOL*) DECLSPEC_HIDDEN;
 
 /* Glyph shaping */
 enum SCRIPT_JUSTIFY

@@ -668,6 +668,33 @@ static const UINT16 dwriteid_to_opentypeid[DWRITE_INFORMATIONAL_STRING_POSTSCRIP
     OPENTYPE_STRING_POSTSCRIPT_CID_NAME
 };
 
+/* CPAL table */
+struct CPAL_Header_0
+{
+    USHORT version;
+    USHORT numPaletteEntries;
+    USHORT numPalette;
+    USHORT numColorRecords;
+    ULONG  offsetFirstColorRecord;
+    USHORT colorRecordIndices[1];
+};
+
+/* for version == 1, this comes after full CPAL_Header_0 */
+struct CPAL_SubHeader_1
+{
+    ULONG  offsetPaletteTypeArray;
+    ULONG  offsetPaletteLabelArray;
+    ULONG  offsetPaletteEntryLabelArray;
+};
+
+struct CPAL_ColorRecord
+{
+    BYTE blue;
+    BYTE green;
+    BYTE red;
+    BYTE alpha;
+};
+
 BOOL is_face_type_supported(DWRITE_FONT_FACE_TYPE type)
 {
     return (type == DWRITE_FONT_FACE_TYPE_CFF) ||
@@ -1402,4 +1429,46 @@ WORD opentype_get_gasp_flags(const WORD *ptr, UINT32 size, INT emsize)
 
 done:
     return flags;
+}
+
+UINT32 opentype_get_cpal_palettecount(const void *cpal)
+{
+    const struct CPAL_Header_0 *header = (const struct CPAL_Header_0*)cpal;
+    return header ? GET_BE_WORD(header->numPalette) : 0;
+}
+
+UINT32 opentype_get_cpal_paletteentrycount(const void *cpal)
+{
+    const struct CPAL_Header_0 *header = (const struct CPAL_Header_0*)cpal;
+    return header ? GET_BE_WORD(header->numPaletteEntries) : 0;
+}
+
+HRESULT opentype_get_cpal_entries(const void *cpal, UINT32 palette, UINT32 first_entry_index, UINT32 entry_count,
+    DWRITE_COLOR_F *entries)
+{
+    const struct CPAL_Header_0 *header = (const struct CPAL_Header_0*)cpal;
+    const struct CPAL_ColorRecord *records;
+    UINT32 palettecount, entrycount, i;
+
+    if (!header) return DWRITE_E_NOCOLOR;
+
+    palettecount = GET_BE_WORD(header->numPalette);
+    if (palette >= palettecount)
+        return DWRITE_E_NOCOLOR;
+
+    entrycount = GET_BE_WORD(header->numPaletteEntries);
+    if (first_entry_index + entry_count > entrycount)
+        return E_INVALIDARG;
+
+    records = (const struct CPAL_ColorRecord*)((BYTE*)cpal + GET_BE_DWORD(header->offsetFirstColorRecord));
+    first_entry_index += GET_BE_WORD(header->colorRecordIndices[palette]);
+
+    for (i = 0; i < entry_count; i++) {
+        entries[i].r = records[first_entry_index + i].red   / 255.0f;
+        entries[i].g = records[first_entry_index + i].green / 255.0f;
+        entries[i].b = records[first_entry_index + i].blue  / 255.0f;
+        entries[i].a = records[first_entry_index + i].alpha / 255.0f;
+    }
+
+    return S_OK;
 }

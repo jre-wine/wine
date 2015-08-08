@@ -28,6 +28,8 @@ struct d2d_factory
 {
     ID2D1Factory ID2D1Factory_iface;
     LONG refcount;
+
+    ID3D10Device1 *wic_device;
 };
 
 static inline struct d2d_factory *impl_from_ID2D1Factory(ID2D1Factory *iface)
@@ -71,7 +73,11 @@ static ULONG STDMETHODCALLTYPE d2d_factory_Release(ID2D1Factory *iface)
     TRACE("%p decreasing refcount to %u.\n", iface, refcount);
 
     if (!refcount)
+    {
+        if (factory->wic_device)
+            ID3D10Device1_Release(factory->wic_device);
         HeapFree(GetProcessHeap(), 0, factory);
+    }
 
     return refcount;
 }
@@ -102,7 +108,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_CreateRectangleGeometry(ID2D1Factor
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = d2d_rectangle_geometry_init(object, rect)))
+    if (FAILED(hr = d2d_rectangle_geometry_init(object, iface, rect)))
     {
         WARN("Failed to initialize rectangle geometry, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
@@ -159,7 +165,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_CreatePathGeometry(ID2D1Factory *if
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    d2d_path_geometry_init(object);
+    d2d_path_geometry_init(object, iface);
 
     TRACE("Created path geometry %p.\n", object);
     *geometry = (ID2D1PathGeometry *)&object->ID2D1Geometry_iface;
@@ -199,7 +205,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_CreateDrawingStateBlock(ID2D1Factor
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    d2d_state_block_init(object, desc, text_rendering_params);
+    d2d_state_block_init(object, iface, desc, text_rendering_params);
 
     TRACE("Created state block %p.\n", object);
     *state_block = &object->ID2D1DrawingStateBlock_iface;
@@ -210,6 +216,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_CreateDrawingStateBlock(ID2D1Factor
 static HRESULT STDMETHODCALLTYPE d2d_factory_CreateWicBitmapRenderTarget(ID2D1Factory *iface,
         IWICBitmap *target, const D2D1_RENDER_TARGET_PROPERTIES *desc, ID2D1RenderTarget **render_target)
 {
+    struct d2d_factory *factory = impl_from_ID2D1Factory(iface);
     struct d2d_wic_render_target *object;
     HRESULT hr;
 
@@ -218,7 +225,14 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_CreateWicBitmapRenderTarget(ID2D1Fa
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = d2d_wic_render_target_init(object, iface, target, desc)))
+    if (!factory->wic_device && FAILED(hr = D3D10CreateDevice1(NULL, D3D10_DRIVER_TYPE_HARDWARE, NULL,
+            D3D10_CREATE_DEVICE_BGRA_SUPPORT, D3D10_FEATURE_LEVEL_10_0, D3D10_1_SDK_VERSION, &factory->wic_device)))
+    {
+        WARN("Failed to create device, hr %#x.\n", hr);
+        return hr;
+    }
+
+    if (FAILED(hr = d2d_wic_render_target_init(object, iface, factory->wic_device, target, desc)))
     {
         WARN("Failed to initialize render target, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);

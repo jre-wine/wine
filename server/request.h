@@ -117,6 +117,7 @@ DECL_HANDLER(terminate_thread);
 DECL_HANDLER(get_process_info);
 DECL_HANDLER(set_process_info);
 DECL_HANDLER(get_thread_info);
+DECL_HANDLER(get_thread_times);
 DECL_HANDLER(set_thread_info);
 DECL_HANDLER(get_dll_info);
 DECL_HANDLER(suspend_thread);
@@ -389,6 +390,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_process_info,
     (req_handler)req_set_process_info,
     (req_handler)req_get_thread_info,
+    (req_handler)req_get_thread_times,
     (req_handler)req_set_thread_info,
     (req_handler)req_get_dll_info,
     (req_handler)req_suspend_thread,
@@ -766,19 +768,24 @@ C_ASSERT( sizeof(struct get_thread_info_request) == 24 );
 C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, pid) == 8 );
 C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, tid) == 12 );
 C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, teb) == 16 );
-C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, affinity) == 24 );
-C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, creation_time) == 32 );
-C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, exit_time) == 40 );
-C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, exit_code) == 48 );
-C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, priority) == 52 );
-C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, last) == 56 );
-C_ASSERT( sizeof(struct get_thread_info_reply) == 64 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, entry_point) == 24 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, affinity) == 32 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, exit_code) == 40 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, priority) == 44 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_info_reply, last) == 48 );
+C_ASSERT( sizeof(struct get_thread_info_reply) == 56 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_times_request, handle) == 12 );
+C_ASSERT( sizeof(struct get_thread_times_request) == 16 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_times_reply, creation_time) == 8 );
+C_ASSERT( FIELD_OFFSET(struct get_thread_times_reply, exit_time) == 16 );
+C_ASSERT( sizeof(struct get_thread_times_reply) == 24 );
 C_ASSERT( FIELD_OFFSET(struct set_thread_info_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct set_thread_info_request, mask) == 16 );
 C_ASSERT( FIELD_OFFSET(struct set_thread_info_request, priority) == 20 );
 C_ASSERT( FIELD_OFFSET(struct set_thread_info_request, affinity) == 24 );
-C_ASSERT( FIELD_OFFSET(struct set_thread_info_request, token) == 32 );
-C_ASSERT( sizeof(struct set_thread_info_request) == 40 );
+C_ASSERT( FIELD_OFFSET(struct set_thread_info_request, entry_point) == 32 );
+C_ASSERT( FIELD_OFFSET(struct set_thread_info_request, token) == 40 );
+C_ASSERT( sizeof(struct set_thread_info_request) == 48 );
 C_ASSERT( FIELD_OFFSET(struct get_dll_info_request, handle) == 12 );
 C_ASSERT( FIELD_OFFSET(struct get_dll_info_request, base_address) == 16 );
 C_ASSERT( sizeof(struct get_dll_info_request) == 24 );

@@ -68,6 +68,7 @@ static ULONG STDMETHODCALLTYPE d2d_gradient_Release(ID2D1GradientStopCollection 
     if (!refcount)
     {
         HeapFree(GetProcessHeap(), 0, gradient->stops);
+        ID2D1Factory_Release(gradient->factory);
         HeapFree(GetProcessHeap(), 0, gradient);
     }
 
@@ -76,9 +77,11 @@ static ULONG STDMETHODCALLTYPE d2d_gradient_Release(ID2D1GradientStopCollection 
 
 static void STDMETHODCALLTYPE d2d_gradient_GetFactory(ID2D1GradientStopCollection *iface, ID2D1Factory **factory)
 {
-    FIXME("iface %p, factory %p stub!\n", iface, factory);
+    struct d2d_gradient *gradient = impl_from_ID2D1GradientStopCollection(iface);
 
-    *factory = NULL;
+    TRACE("iface %p, factory %p.\n", iface, factory);
+
+    ID2D1Factory_AddRef(*factory = gradient->factory);
 }
 
 static UINT32 STDMETHODCALLTYPE d2d_gradient_GetGradientStopCount(ID2D1GradientStopCollection *iface)
@@ -128,13 +131,14 @@ static const struct ID2D1GradientStopCollectionVtbl d2d_gradient_vtbl =
     d2d_gradient_GetExtendMode,
 };
 
-HRESULT d2d_gradient_init(struct d2d_gradient *gradient, ID2D1RenderTarget *render_target,
+HRESULT d2d_gradient_init(struct d2d_gradient *gradient, ID2D1Factory *factory,
         const D2D1_GRADIENT_STOP *stops, UINT32 stop_count, D2D1_GAMMA gamma, D2D1_EXTEND_MODE extend_mode)
 {
     FIXME("Ignoring gradient properties.\n");
 
     gradient->ID2D1GradientStopCollection_iface.lpVtbl = &d2d_gradient_vtbl;
     gradient->refcount = 1;
+    ID2D1Factory_AddRef(gradient->factory = factory);
 
     gradient->stop_count = stop_count;
     if (!(gradient->stops = HeapAlloc(GetProcessHeap(), 0, stop_count * sizeof(*stops))))
@@ -144,7 +148,13 @@ HRESULT d2d_gradient_init(struct d2d_gradient *gradient, ID2D1RenderTarget *rend
     return S_OK;
 }
 
-static void d2d_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *render_target,
+static void d2d_brush_destroy(struct d2d_brush *brush)
+{
+    ID2D1Factory_Release(brush->factory);
+    HeapFree(GetProcessHeap(), 0, brush);
+}
+
+static void d2d_brush_init(struct d2d_brush *brush, ID2D1Factory *factory,
         enum d2d_brush_type type, const D2D1_BRUSH_PROPERTIES *desc, const struct ID2D1BrushVtbl *vtbl)
 {
     static const D2D1_MATRIX_3X2_F identity =
@@ -156,6 +166,7 @@ static void d2d_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *render_ta
 
     brush->ID2D1Brush_iface.lpVtbl = vtbl;
     brush->refcount = 1;
+    ID2D1Factory_AddRef(brush->factory = factory);
     brush->opacity = desc ? desc->opacity : 1.0f;
     brush->transform = desc ? desc->transform : identity;
     brush->type = type;
@@ -205,16 +216,18 @@ static ULONG STDMETHODCALLTYPE d2d_solid_color_brush_Release(ID2D1SolidColorBrus
     TRACE("%p decreasing refcount to %u.\n", iface, refcount);
 
     if (!refcount)
-        HeapFree(GetProcessHeap(), 0, brush);
+        d2d_brush_destroy(brush);
 
     return refcount;
 }
 
 static void STDMETHODCALLTYPE d2d_solid_color_brush_GetFactory(ID2D1SolidColorBrush *iface, ID2D1Factory **factory)
 {
-    FIXME("iface %p, factory %p stub!\n", iface, factory);
+    struct d2d_brush *brush = impl_from_ID2D1SolidColorBrush(iface);
 
-    *factory = NULL;
+    TRACE("iface %p, factory %p.\n", iface, factory);
+
+    ID2D1Factory_AddRef(*factory = brush->factory);
 }
 
 static void STDMETHODCALLTYPE d2d_solid_color_brush_SetOpacity(ID2D1SolidColorBrush *iface, float opacity)
@@ -288,12 +301,12 @@ static const struct ID2D1SolidColorBrushVtbl d2d_solid_color_brush_vtbl =
     d2d_solid_color_brush_GetColor,
 };
 
-void d2d_solid_color_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *render_target,
+void d2d_solid_color_brush_init(struct d2d_brush *brush, ID2D1Factory *factory,
         const D2D1_COLOR_F *color, const D2D1_BRUSH_PROPERTIES *desc)
 {
     FIXME("Ignoring brush properties.\n");
 
-    d2d_brush_init(brush, render_target, D2D_BRUSH_TYPE_SOLID, desc,
+    d2d_brush_init(brush, factory, D2D_BRUSH_TYPE_SOLID, desc,
             (ID2D1BrushVtbl *)&d2d_solid_color_brush_vtbl);
     brush->u.solid.color = *color;
 }
@@ -342,7 +355,7 @@ static ULONG STDMETHODCALLTYPE d2d_linear_gradient_brush_Release(ID2D1LinearGrad
     TRACE("%p decreasing refcount to %u.\n", iface, refcount);
 
     if (!refcount)
-        HeapFree(GetProcessHeap(), 0, brush);
+        d2d_brush_destroy(brush);
 
     return refcount;
 }
@@ -350,9 +363,11 @@ static ULONG STDMETHODCALLTYPE d2d_linear_gradient_brush_Release(ID2D1LinearGrad
 static void STDMETHODCALLTYPE d2d_linear_gradient_brush_GetFactory(ID2D1LinearGradientBrush *iface,
         ID2D1Factory **factory)
 {
-    FIXME("iface %p, factory %p stub!\n", iface, factory);
+    struct d2d_brush *brush = impl_from_ID2D1LinearGradientBrush(iface);
 
-    *factory = NULL;
+    TRACE("iface %p, factory %p.\n", iface, factory);
+
+    ID2D1Factory_AddRef(*factory = brush->factory);
 }
 
 static void STDMETHODCALLTYPE d2d_linear_gradient_brush_SetOpacity(ID2D1LinearGradientBrush *iface, float opacity)
@@ -444,13 +459,13 @@ static const struct ID2D1LinearGradientBrushVtbl d2d_linear_gradient_brush_vtbl 
     d2d_linear_gradient_brush_GetGradientStopCollection,
 };
 
-void d2d_linear_gradient_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *render_target,
+void d2d_linear_gradient_brush_init(struct d2d_brush *brush, ID2D1Factory *factory,
         const D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES *gradient_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc,
         ID2D1GradientStopCollection *gradient)
 {
     FIXME("Ignoring brush properties.\n");
 
-    d2d_brush_init(brush, render_target, D2D_BRUSH_TYPE_LINEAR, brush_desc,
+    d2d_brush_init(brush, factory, D2D_BRUSH_TYPE_LINEAR, brush_desc,
             (ID2D1BrushVtbl *)&d2d_linear_gradient_brush_vtbl);
 }
 
@@ -501,7 +516,9 @@ static ULONG STDMETHODCALLTYPE d2d_bitmap_brush_Release(ID2D1BitmapBrush *iface)
     {
         if (brush->u.bitmap.sampler_state)
             ID3D10SamplerState_Release(brush->u.bitmap.sampler_state);
-        HeapFree(GetProcessHeap(), 0, brush);
+        if (brush->u.bitmap.bitmap)
+            ID2D1Bitmap_Release(&brush->u.bitmap.bitmap->ID2D1Bitmap_iface);
+        d2d_brush_destroy(brush);
     }
 
     return refcount;
@@ -510,9 +527,11 @@ static ULONG STDMETHODCALLTYPE d2d_bitmap_brush_Release(ID2D1BitmapBrush *iface)
 static void STDMETHODCALLTYPE d2d_bitmap_brush_GetFactory(ID2D1BitmapBrush *iface,
         ID2D1Factory **factory)
 {
-    FIXME("iface %p, factory %p stub!\n", iface, factory);
+    struct d2d_brush *brush = impl_from_ID2D1BitmapBrush(iface);
 
-    *factory = NULL;
+    TRACE("iface %p, factory %p.\n", iface, factory);
+
+    ID2D1Factory_AddRef(*factory = brush->factory);
 }
 
 static void STDMETHODCALLTYPE d2d_bitmap_brush_SetOpacity(ID2D1BitmapBrush *iface, float opacity)
@@ -598,7 +617,15 @@ static void STDMETHODCALLTYPE d2d_bitmap_brush_SetInterpolationMode(ID2D1BitmapB
 
 static void STDMETHODCALLTYPE d2d_bitmap_brush_SetBitmap(ID2D1BitmapBrush *iface, ID2D1Bitmap *bitmap)
 {
-    FIXME("iface %p, bitmap %p stub!\n", iface, bitmap);
+    struct d2d_brush *brush = impl_from_ID2D1BitmapBrush(iface);
+
+    TRACE("iface %p, bitmap %p.\n", iface, bitmap);
+
+    if (bitmap)
+        ID2D1Bitmap_AddRef(bitmap);
+    if (brush->u.bitmap.bitmap)
+        ID2D1Bitmap_Release(&brush->u.bitmap.bitmap->ID2D1Bitmap_iface);
+    brush->u.bitmap.bitmap = unsafe_impl_from_ID2D1Bitmap(bitmap);
 }
 
 static D2D1_EXTEND_MODE STDMETHODCALLTYPE d2d_bitmap_brush_GetExtendModeX(ID2D1BitmapBrush *iface)
@@ -658,15 +685,16 @@ static const struct ID2D1BitmapBrushVtbl d2d_bitmap_brush_vtbl =
     d2d_bitmap_brush_GetBitmap,
 };
 
-HRESULT d2d_bitmap_brush_init(struct d2d_brush *brush, struct d2d_d3d_render_target *render_target, ID2D1Bitmap *bitmap,
+HRESULT d2d_bitmap_brush_init(struct d2d_brush *brush, ID2D1Factory *factory, ID2D1Bitmap *bitmap,
         const D2D1_BITMAP_BRUSH_PROPERTIES *bitmap_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc)
 {
 
     FIXME("Ignoring brush properties.\n");
 
-    d2d_brush_init(brush, &render_target->ID2D1RenderTarget_iface, D2D_BRUSH_TYPE_BITMAP,
+    d2d_brush_init(brush, factory, D2D_BRUSH_TYPE_BITMAP,
             brush_desc, (ID2D1BrushVtbl *)&d2d_bitmap_brush_vtbl);
-    brush->u.bitmap.bitmap = unsafe_impl_from_ID2D1Bitmap(bitmap);
+    if ((brush->u.bitmap.bitmap = unsafe_impl_from_ID2D1Bitmap(bitmap)))
+        ID2D1Bitmap_AddRef(&brush->u.bitmap.bitmap->ID2D1Bitmap_iface);
     if (bitmap_brush_desc)
     {
         brush->u.bitmap.extend_mode_x = bitmap_brush_desc->extendModeX;
@@ -693,7 +721,7 @@ struct d2d_brush *unsafe_impl_from_ID2D1Brush(ID2D1Brush *iface)
     return CONTAINING_RECORD(iface, struct d2d_brush, ID2D1Brush_iface);
 }
 
-static D3D10_TEXTURE_ADDRESS_MODE texture_addres_mode_from_extend_mode(D2D1_EXTEND_MODE mode)
+static D3D10_TEXTURE_ADDRESS_MODE texture_address_mode_from_extend_mode(D2D1_EXTEND_MODE mode)
 {
     switch (mode)
     {
@@ -717,8 +745,9 @@ HRESULT d2d_brush_get_ps_cb(struct d2d_brush *brush, struct d2d_d3d_render_targe
     struct
     {
         float _11, _21, _31, pad0;
-        float _12, _22, _32, pad1;
-    } transform;
+        float _12, _22, _32, opacity;
+        BOOL ignore_alpha;
+    } bitmap_brush_cb;
     D2D1_COLOR_F color;
     HRESULT hr;
 
@@ -734,6 +763,9 @@ HRESULT d2d_brush_get_ps_cb(struct d2d_brush *brush, struct d2d_d3d_render_targe
     {
         color = brush->u.solid.color;
         color.a *= brush->opacity;
+        color.r *= color.a;
+        color.g *= color.a;
+        color.b *= color.a;
 
         buffer_desc.ByteWidth = sizeof(color);
         buffer_data.pSysMem = &color;
@@ -772,17 +804,18 @@ HRESULT d2d_brush_get_ps_cb(struct d2d_brush *brush, struct d2d_d3d_render_targe
         d = b._11 * b._22 - b._21 * b._12;
         if (d != 0.0f)
         {
-            transform._11 = b._22 / d;
-            transform._21 = -b._21 / d;
-            transform._31 = (b._21 * b._32 - b._31 * b._22) / d;
-            transform._12 = -b._12 / d;
-            transform._22 = b._11 / d;
-            transform._32 = -(b._11 * b._32 - b._31 * b._12) / d;
+            bitmap_brush_cb._11 = b._22 / d;
+            bitmap_brush_cb._21 = -b._21 / d;
+            bitmap_brush_cb._31 = (b._21 * b._32 - b._31 * b._22) / d;
+            bitmap_brush_cb._12 = -b._12 / d;
+            bitmap_brush_cb._22 = b._11 / d;
+            bitmap_brush_cb._32 = -(b._11 * b._32 - b._31 * b._12) / d;
         }
-        transform.pad1 = brush->opacity;
+        bitmap_brush_cb.opacity = brush->opacity;
+        bitmap_brush_cb.ignore_alpha = bitmap->format.alphaMode == D2D1_ALPHA_MODE_IGNORE;
 
-        buffer_desc.ByteWidth = sizeof(transform);
-        buffer_data.pSysMem = &transform;
+        buffer_desc.ByteWidth = sizeof(bitmap_brush_cb);
+        buffer_data.pSysMem = &bitmap_brush_cb;
     }
     else
     {
@@ -820,8 +853,8 @@ void d2d_brush_bind_resources(struct d2d_brush *brush, struct d2d_d3d_render_tar
                 sampler_desc.Filter = D3D10_FILTER_MIN_MAG_MIP_POINT;
             else
                 sampler_desc.Filter = D3D10_FILTER_MIN_MAG_MIP_LINEAR;
-            sampler_desc.AddressU = texture_addres_mode_from_extend_mode(brush->u.bitmap.extend_mode_x);
-            sampler_desc.AddressV = texture_addres_mode_from_extend_mode(brush->u.bitmap.extend_mode_y);
+            sampler_desc.AddressU = texture_address_mode_from_extend_mode(brush->u.bitmap.extend_mode_x);
+            sampler_desc.AddressV = texture_address_mode_from_extend_mode(brush->u.bitmap.extend_mode_y);
             sampler_desc.AddressW = D3D10_TEXTURE_ADDRESS_CLAMP;
             sampler_desc.MipLODBias = 0.0f;
             sampler_desc.MaxAnisotropy = 0;

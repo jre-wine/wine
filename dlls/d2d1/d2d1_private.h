@@ -105,18 +105,19 @@ struct d2d_wic_render_target
 };
 
 HRESULT d2d_wic_render_target_init(struct d2d_wic_render_target *render_target, ID2D1Factory *factory,
-        IWICBitmap *bitmap, const D2D1_RENDER_TARGET_PROPERTIES *desc) DECLSPEC_HIDDEN;
+        ID3D10Device1 *device, IWICBitmap *bitmap, const D2D1_RENDER_TARGET_PROPERTIES *desc) DECLSPEC_HIDDEN;
 
 struct d2d_gradient
 {
     ID2D1GradientStopCollection ID2D1GradientStopCollection_iface;
     LONG refcount;
 
+    ID2D1Factory *factory;
     D2D1_GRADIENT_STOP *stops;
     UINT32 stop_count;
 };
 
-HRESULT d2d_gradient_init(struct d2d_gradient *gradient, ID2D1RenderTarget *render_target,
+HRESULT d2d_gradient_init(struct d2d_gradient *gradient, ID2D1Factory *factory,
         const D2D1_GRADIENT_STOP *stops, UINT32 stop_count, D2D1_GAMMA gamma,
         D2D1_EXTEND_MODE extend_mode) DECLSPEC_HIDDEN;
 
@@ -125,6 +126,7 @@ struct d2d_brush
     ID2D1Brush ID2D1Brush_iface;
     LONG refcount;
 
+    ID2D1Factory *factory;
     float opacity;
     D2D1_MATRIX_3X2_F transform;
 
@@ -146,12 +148,12 @@ struct d2d_brush
     } u;
 };
 
-void d2d_solid_color_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *render_target,
+void d2d_solid_color_brush_init(struct d2d_brush *brush, ID2D1Factory *factory,
         const D2D1_COLOR_F *color, const D2D1_BRUSH_PROPERTIES *desc) DECLSPEC_HIDDEN;
-void d2d_linear_gradient_brush_init(struct d2d_brush *brush, ID2D1RenderTarget *render_target,
+void d2d_linear_gradient_brush_init(struct d2d_brush *brush, ID2D1Factory *factory,
         const D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES *gradient_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc,
         ID2D1GradientStopCollection *gradient) DECLSPEC_HIDDEN;
-HRESULT d2d_bitmap_brush_init(struct d2d_brush *brush, struct d2d_d3d_render_target *render_target,
+HRESULT d2d_bitmap_brush_init(struct d2d_brush *brush, ID2D1Factory *factory,
         ID2D1Bitmap *bitmap, const D2D1_BITMAP_BRUSH_PROPERTIES *bitmap_brush_desc,
         const D2D1_BRUSH_PROPERTIES *brush_desc) DECLSPEC_HIDDEN;
 void d2d_brush_bind_resources(struct d2d_brush *brush, struct d2d_d3d_render_target *render_target,
@@ -164,6 +166,8 @@ struct d2d_stroke_style
 {
     ID2D1StrokeStyle ID2D1StrokeStyle_iface;
     LONG refcount;
+
+    ID2D1Factory *factory;
 };
 
 void d2d_stroke_style_init(struct d2d_stroke_style *style, ID2D1Factory *factory,
@@ -173,23 +177,29 @@ struct d2d_mesh
 {
     ID2D1Mesh ID2D1Mesh_iface;
     LONG refcount;
+
+    ID2D1Factory *factory;
 };
 
-void d2d_mesh_init(struct d2d_mesh *mesh) DECLSPEC_HIDDEN;
+void d2d_mesh_init(struct d2d_mesh *mesh, ID2D1Factory *factory) DECLSPEC_HIDDEN;
 
 struct d2d_bitmap
 {
     ID2D1Bitmap ID2D1Bitmap_iface;
     LONG refcount;
 
+    ID2D1Factory *factory;
     ID3D10ShaderResourceView *view;
     D2D1_SIZE_U pixel_size;
+    D2D1_PIXEL_FORMAT format;
     float dpi_x;
     float dpi_y;
 };
 
-HRESULT d2d_bitmap_init(struct d2d_bitmap *bitmap, struct d2d_d3d_render_target *render_target,
+HRESULT d2d_bitmap_init_memory(struct d2d_bitmap *bitmap, struct d2d_d3d_render_target *render_target,
         D2D1_SIZE_U size, const void *src_data, UINT32 pitch, const D2D1_BITMAP_PROPERTIES *desc) DECLSPEC_HIDDEN;
+HRESULT d2d_bitmap_init_shared(struct d2d_bitmap *bitmap, struct d2d_d3d_render_target *render_target,
+        REFIID iid, void *data, const D2D1_BITMAP_PROPERTIES *desc) DECLSPEC_HIDDEN;
 struct d2d_bitmap *unsafe_impl_from_ID2D1Bitmap(ID2D1Bitmap *iface) DECLSPEC_HIDDEN;
 
 struct d2d_state_block
@@ -197,12 +207,13 @@ struct d2d_state_block
     ID2D1DrawingStateBlock ID2D1DrawingStateBlock_iface;
     LONG refcount;
 
+    ID2D1Factory *factory;
     D2D1_DRAWING_STATE_DESCRIPTION drawing_state;
     IDWriteRenderingParams *text_rendering_params;
 };
 
-void d2d_state_block_init(struct d2d_state_block *state_block, const D2D1_DRAWING_STATE_DESCRIPTION *desc,
-        IDWriteRenderingParams *text_rendering_params) DECLSPEC_HIDDEN;
+void d2d_state_block_init(struct d2d_state_block *state_block, ID2D1Factory *factory,
+        const D2D1_DRAWING_STATE_DESCRIPTION *desc, IDWriteRenderingParams *text_rendering_params) DECLSPEC_HIDDEN;
 struct d2d_state_block *unsafe_impl_from_ID2D1DrawingStateBlock(ID2D1DrawingStateBlock *iface) DECLSPEC_HIDDEN;
 
 enum d2d_geometry_state
@@ -236,6 +247,8 @@ struct d2d_geometry
     ID2D1Geometry ID2D1Geometry_iface;
     LONG refcount;
 
+    ID2D1Factory *factory;
+
     D2D1_POINT_2F *vertices;
     size_t vertex_count;
 
@@ -267,8 +280,9 @@ struct d2d_geometry
     } u;
 };
 
-void d2d_path_geometry_init(struct d2d_geometry *geometry) DECLSPEC_HIDDEN;
-HRESULT d2d_rectangle_geometry_init(struct d2d_geometry *geometry, const D2D1_RECT_F *rect) DECLSPEC_HIDDEN;
+void d2d_path_geometry_init(struct d2d_geometry *geometry, ID2D1Factory *factory) DECLSPEC_HIDDEN;
+HRESULT d2d_rectangle_geometry_init(struct d2d_geometry *geometry,
+        ID2D1Factory *factory, const D2D1_RECT_F *rect) DECLSPEC_HIDDEN;
 struct d2d_geometry *unsafe_impl_from_ID2D1Geometry(ID2D1Geometry *iface) DECLSPEC_HIDDEN;
 
 static inline void d2d_matrix_multiply(D2D_MATRIX_3X2_F *a, const D2D_MATRIX_3X2_F *b)

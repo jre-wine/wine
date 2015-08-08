@@ -243,11 +243,26 @@ static void STDMETHODCALLTYPE d3d10_texture2d_Unmap(ID3D10Texture2D *iface, UINT
 
 static void STDMETHODCALLTYPE d3d10_texture2d_GetDesc(ID3D10Texture2D *iface, D3D10_TEXTURE2D_DESC *desc)
 {
-    struct d3d10_texture2d *This = impl_from_ID3D10Texture2D(iface);
+    struct d3d10_texture2d *texture = impl_from_ID3D10Texture2D(iface);
+    struct wined3d_resource_desc wined3d_desc;
 
     TRACE("iface %p, desc %p\n", iface, desc);
 
-    *desc = This->desc;
+    *desc = texture->desc;
+
+    wined3d_mutex_lock();
+    wined3d_resource_get_desc(wined3d_texture_get_resource(texture->wined3d_texture), &wined3d_desc);
+    wined3d_mutex_unlock();
+
+    /* FIXME: Resizing swapchain buffers can cause these to change. We'd like
+     * to get everything from wined3d, but e.g. bind flags don't exist as such
+     * there (yet). */
+    desc->Width = wined3d_desc.width;
+    desc->Height = wined3d_desc.height;
+    desc->Format = dxgi_format_from_wined3dformat(wined3d_desc.format);
+    desc->SampleDesc.Count = wined3d_desc.multisample_type == WINED3D_MULTISAMPLE_NONE
+            ? 1 : wined3d_desc.multisample_type;
+    desc->SampleDesc.Quality = wined3d_desc.multisample_quality;
 }
 
 static const struct ID3D10Texture2DVtbl d3d10_texture2d_vtbl =
@@ -296,35 +311,6 @@ HRESULT d3d10_texture2d_init(struct d3d10_texture2d *texture, struct d3d10_devic
     wined3d_private_store_init(&texture->private_store);
     texture->desc = *desc;
 
-    if (desc->MipLevels == 1 && desc->ArraySize == 1)
-    {
-        DXGI_SURFACE_DESC surface_desc;
-        IWineDXGIDevice *wine_device;
-
-        if (FAILED(hr = ID3D10Device1_QueryInterface(&device->ID3D10Device1_iface, &IID_IWineDXGIDevice,
-                (void **)&wine_device)))
-        {
-            ERR("Device should implement IWineDXGIDevice.\n");
-            wined3d_private_store_cleanup(&texture->private_store);
-            return E_FAIL;
-        }
-
-        surface_desc.Width = desc->Width;
-        surface_desc.Height = desc->Height;
-        surface_desc.Format = desc->Format;
-        surface_desc.SampleDesc = desc->SampleDesc;
-
-        hr = IWineDXGIDevice_create_surface(wine_device, &surface_desc, 0, NULL,
-                (IUnknown *)&texture->ID3D10Texture2D_iface, (void **)&texture->dxgi_surface);
-        IWineDXGIDevice_Release(wine_device);
-        if (FAILED(hr))
-        {
-            ERR("Failed to create DXGI surface, returning %#x\n", hr);
-            wined3d_private_store_cleanup(&texture->private_store);
-            return hr;
-        }
-    }
-
     if (desc->ArraySize != 1)
         FIXME("Array textures not implemented.\n");
     if (desc->SampleDesc.Count > 1)
@@ -348,12 +334,34 @@ HRESULT d3d10_texture2d_init(struct d3d10_texture2d *texture, struct d3d10_devic
             &d3d10_texture2d_wined3d_parent_ops, &texture->wined3d_texture)))
     {
         WARN("Failed to create wined3d texture, hr %#x.\n", hr);
-        if (texture->dxgi_surface)
-            IUnknown_Release(texture->dxgi_surface);
         wined3d_private_store_cleanup(&texture->private_store);
         return hr;
     }
     texture->desc.MipLevels = levels;
+
+    if (desc->MipLevels == 1 && desc->ArraySize == 1)
+    {
+        IWineDXGIDevice *wine_device;
+
+        if (FAILED(hr = ID3D10Device1_QueryInterface(&device->ID3D10Device1_iface, &IID_IWineDXGIDevice,
+                (void **)&wine_device)))
+        {
+            ERR("Device should implement IWineDXGIDevice.\n");
+            wined3d_texture_decref(texture->wined3d_texture);
+            return E_FAIL;
+        }
+
+        hr = IWineDXGIDevice_create_surface(wine_device, wined3d_texture_get_resource(texture->wined3d_texture),
+                0, NULL, (IUnknown *)&texture->ID3D10Texture2D_iface, (void **)&texture->dxgi_surface);
+        IWineDXGIDevice_Release(wine_device);
+        if (FAILED(hr))
+        {
+            ERR("Failed to create DXGI surface, returning %#x\n", hr);
+            texture->dxgi_surface = NULL;
+            wined3d_texture_decref(texture->wined3d_texture);
+            return hr;
+        }
+    }
 
     texture->device = &device->ID3D10Device1_iface;
     ID3D10Device1_AddRef(texture->device);
