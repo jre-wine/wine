@@ -1,3 +1,14 @@
+wine-development (1.7.49-1) unstable; urgency=medium
+
+  * New upstream release 1.7.49, released Aug 7, 2015.
+    - DirectWrite is now good enough for rendering text in Steam.
+    - A number of Direct2D improvements.
+    - Some more OpenMP functions.
+    - Support for namespaces in the IDL compiler.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 08 Aug 2015 21:16:18 +0000
+
 wine-development (1.7.48-1~bpo8+1) jessie-backports; urgency=medium
 
   * Rebuild for jessie-backports (closes: 793551).

@@ -44,9 +44,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qcap);
 
-#define ICOM_THIS_MULTI(impl,field,iface) \
-    impl* const This=(impl*)((char*)(iface) - offsetof(impl,field))
-
 static const IBaseFilterVtbl VfwCapture_Vtbl;
 static const IAMStreamConfigVtbl IAMStreamConfig_VTable;
 static const IAMVideoProcAmpVtbl IAMVideoProcAmp_VTable;
@@ -103,9 +100,8 @@ static inline VfwCapture *impl_from_IPersistPropertyBag(IPersistPropertyBag *ifa
 typedef struct VfwPinImpl
 {
     BaseOutputPin pin;
-    Capture *driver_info;
+    IKsPropertySet IKsPropertySet_iface;
     VfwCapture *parent;
-    const IKsPropertySetVtbl * KSP_VT;
 } VfwPinImpl;
 
 
@@ -554,7 +550,6 @@ PPB_Load( IPersistPropertyBag * iface, IPropertyBag *pPropBag,
         if (This->driver_info)
         {
             pin = (VfwPinImpl *)This->pOutputPin;
-            pin->driver_info = This->driver_info;
             pin->parent = This;
             This->init = TRUE;
             hr = S_OK;
@@ -587,37 +582,30 @@ static const IPersistPropertyBagVtbl IPersistPropertyBag_VTable =
 };
 
 /* IKsPropertySet interface */
-static HRESULT WINAPI
-KSP_QueryInterface( IKsPropertySet * iface, REFIID riid, LPVOID * ppv )
+static inline VfwPinImpl *impl_from_IKsPropertySet(IKsPropertySet *iface)
 {
-    if (IsEqualIID(riid, &IID_IUnknown) ||
-        IsEqualIID(riid, &IID_IKsPropertySet))
-    {
-        *ppv = iface;
-        IKsPropertySet_AddRef( iface );
-        return S_OK;
-    }
+    return CONTAINING_RECORD(iface, VfwPinImpl, IKsPropertySet_iface);
+}
 
-    FIXME("No interface for iid %s\n", debugstr_guid(riid));
-    return E_NOINTERFACE;
+static HRESULT WINAPI KSP_QueryInterface(IKsPropertySet * iface, REFIID riid, void **ret_iface)
+{
+    VfwPinImpl *This = impl_from_IKsPropertySet(iface);
+
+    return IPin_QueryInterface(&This->pin.pin.IPin_iface, riid, ret_iface);
 }
 
 static ULONG WINAPI KSP_AddRef(IKsPropertySet * iface)
 {
-    ICOM_THIS_MULTI(VfwPinImpl, KSP_VT, iface);
+    VfwPinImpl *This = impl_from_IKsPropertySet(iface);
 
-    TRACE("%p --> Forwarding to VfwPin (%p)\n", iface, This);
-
-    return IUnknown_AddRef((IUnknown *)This);
+    return IPin_AddRef(&This->pin.pin.IPin_iface);
 }
 
 static ULONG WINAPI KSP_Release(IKsPropertySet * iface)
 {
-    ICOM_THIS_MULTI(VfwPinImpl, KSP_VT, iface);
+    VfwPinImpl *This = impl_from_IKsPropertySet(iface);
 
-    TRACE("%p --> Forwarding to VfwPin (%p)\n", iface, This);
-
-    return IUnknown_Release((IUnknown *)This);
+    return IPin_Release(&This->pin.pin.IPin_iface);
 }
 
 static HRESULT WINAPI
@@ -662,7 +650,7 @@ KSP_QuerySupported( IKsPropertySet * iface, REFGUID guidPropSet,
    return E_NOTIMPL;
 }
 
-static const IKsPropertySetVtbl KSP_VTable =
+static const IKsPropertySetVtbl IKsPropertySet_VTable =
 {
    KSP_QueryInterface,
    KSP_AddRef,
@@ -672,9 +660,14 @@ static const IKsPropertySetVtbl KSP_VTable =
    KSP_QuerySupported
 };
 
-static HRESULT WINAPI VfwPin_GetMediaType(BasePin *iface, int iPosition, AM_MEDIA_TYPE *pmt)
+static inline VfwPinImpl *impl_from_BasePin(BasePin *pin)
 {
-    VfwPinImpl *This = (VfwPinImpl *)iface;
+    return CONTAINING_RECORD(pin, VfwPinImpl, pin.pin);
+}
+
+static HRESULT WINAPI VfwPin_GetMediaType(BasePin *pin, int iPosition, AM_MEDIA_TYPE *pmt)
+{
+    VfwPinImpl *This = impl_from_BasePin(pin);
     AM_MEDIA_TYPE *vfw_pmt;
     HRESULT hr;
 
@@ -683,7 +676,7 @@ static HRESULT WINAPI VfwPin_GetMediaType(BasePin *iface, int iPosition, AM_MEDI
     if (iPosition > 0)
         return VFW_S_NO_MORE_ITEMS;
 
-    hr = qcap_driver_get_format(This->driver_info, &vfw_pmt);
+    hr = qcap_driver_get_format(This->parent->driver_info, &vfw_pmt);
     if (SUCCEEDED(hr)) {
         CopyMediaType(pmt, vfw_pmt);
         DeleteMediaType(vfw_pmt);
@@ -743,16 +736,21 @@ VfwPin_Construct( IBaseFilter * pBaseFilter, LPCRITICAL_SECTION pCritSec,
     if (SUCCEEDED(hr))
     {
         VfwPinImpl *pPinImpl = (VfwPinImpl*)*ppPin;
-        pPinImpl->KSP_VT = &KSP_VTable;
+        pPinImpl->IKsPropertySet_iface.lpVtbl = &IKsPropertySet_VTable;
         ObjectRefCount(TRUE);
     }
 
     return hr;
 }
 
+static inline VfwPinImpl *impl_from_IPin(IPin *iface)
+{
+    return CONTAINING_RECORD(iface, VfwPinImpl, pin.pin.IPin_iface);
+}
+
 static HRESULT WINAPI VfwPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * ppv)
 {
-    VfwPinImpl *This = (VfwPinImpl *)iface;
+    VfwPinImpl *This = impl_from_IPin(iface);
 
     TRACE("%s %p\n", debugstr_guid(riid), ppv);
 
@@ -760,7 +758,7 @@ static HRESULT WINAPI VfwPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * 
     if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IPin))
         *ppv = This;
     else if (IsEqualIID(riid, &IID_IKsPropertySet))
-        *ppv = &(This->KSP_VT);
+        *ppv = &This->IKsPropertySet_iface;
     else if (IsEqualIID(riid, &IID_IAMStreamConfig))
         return IUnknown_QueryInterface((IUnknown *)This->parent, riid, ppv);
 
@@ -777,7 +775,7 @@ static HRESULT WINAPI VfwPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * 
 static ULONG WINAPI
 VfwPin_Release(IPin * iface)
 {
-   VfwPinImpl *This = (VfwPinImpl *)iface;
+   VfwPinImpl *This = impl_from_IPin(iface);
    ULONG refCount = InterlockedDecrement(&This->pin.pin.refCount);
 
    TRACE("() -> new refcount: %u\n", refCount);
@@ -793,11 +791,11 @@ VfwPin_Release(IPin * iface)
 static HRESULT WINAPI
 VfwPin_EnumMediaTypes(IPin * iface, IEnumMediaTypes ** ppEnum)
 {
+    VfwPinImpl *This = impl_from_IPin(iface);
     AM_MEDIA_TYPE *pmt;
     HRESULT hr;
 
-    VfwPinImpl *This = (VfwPinImpl *)iface;
-    hr = qcap_driver_get_format(This->driver_info, &pmt);
+    hr = qcap_driver_get_format(This->parent->driver_info, &pmt);
     if (SUCCEEDED(hr)) {
         hr = BasePinImpl_EnumMediaTypes(iface, ppEnum);
         DeleteMediaType(pmt);

@@ -50,6 +50,11 @@ static RTL_CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static RTL_CRITICAL_SECTION vcomp_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
+#define VCOMP_DYNAMIC_FLAGS_STATIC      0x01
+#define VCOMP_DYNAMIC_FLAGS_CHUNKED     0x02
+#define VCOMP_DYNAMIC_FLAGS_GUIDED      0x03
+#define VCOMP_DYNAMIC_FLAGS_INCREMENT   0x40
+
 struct vcomp_thread_data
 {
     struct vcomp_team_data  *team;
@@ -62,8 +67,17 @@ struct vcomp_thread_data
     struct list             entry;
     CONDITION_VARIABLE      cond;
 
+    /* single */
+    unsigned int            single;
+
     /* section */
     unsigned int            section;
+
+    /* dynamic */
+    unsigned int            dynamic;
+    unsigned int            dynamic_type;
+    unsigned int            dynamic_begin;
+    unsigned int            dynamic_end;
 };
 
 struct vcomp_team_data
@@ -84,10 +98,21 @@ struct vcomp_team_data
 
 struct vcomp_task_data
 {
+    /* single */
+    unsigned int            single;
+
     /* section */
     unsigned int            section;
     int                     num_sections;
     int                     section_index;
+
+    /* dynamic */
+    unsigned int            dynamic;
+    unsigned int            dynamic_first;
+    unsigned int            dynamic_last;
+    unsigned int            dynamic_iterations;
+    int                     dynamic_step;
+    unsigned int            dynamic_chunksize;
 };
 
 #if defined(__i386__)
@@ -199,7 +224,9 @@ static struct vcomp_thread_data *vcomp_init_thread_data(void)
         ExitProcess(1);
     }
 
+    data->task.single           = 0;
     data->task.section          = 0;
+    data->task.dynamic          = 0;
 
     thread_data = &data->thread;
     thread_data->team           = NULL;
@@ -207,7 +234,10 @@ static struct vcomp_thread_data *vcomp_init_thread_data(void)
     thread_data->thread_num     = 0;
     thread_data->parallel       = FALSE;
     thread_data->fork_threads   = 0;
+    thread_data->single         = 1;
     thread_data->section        = 1;
+    thread_data->dynamic        = 1;
+    thread_data->dynamic_type   = 0;
 
     vcomp_set_thread_data(thread_data);
     return thread_data;
@@ -467,15 +497,42 @@ void CDECL _vcomp_set_num_threads(int num_threads)
         vcomp_init_thread_data()->fork_threads = num_threads;
 }
 
+int CDECL _vcomp_master_begin(void)
+{
+    TRACE("()\n");
+    return !vcomp_init_thread_data()->thread_num;
+}
+
+void CDECL _vcomp_master_end(void)
+{
+    TRACE("()\n");
+    /* nothing to do here */
+}
+
 int CDECL _vcomp_single_begin(int flags)
 {
-    TRACE("(%x): stub\n", flags);
-    return TRUE;
+    struct vcomp_thread_data *thread_data = vcomp_init_thread_data();
+    struct vcomp_task_data *task_data = thread_data->task;
+    int ret = FALSE;
+
+    TRACE("(%x): semi-stub\n", flags);
+
+    EnterCriticalSection(&vcomp_section);
+    thread_data->single++;
+    if ((int)(thread_data->single - task_data->single) > 0)
+    {
+        task_data->single = thread_data->single;
+        ret = TRUE;
+    }
+    LeaveCriticalSection(&vcomp_section);
+
+    return ret;
 }
 
 void CDECL _vcomp_single_end(void)
 {
-    TRACE("stub\n");
+    TRACE("()\n");
+    /* nothing to do here */
 }
 
 void CDECL _vcomp_sections_init(int n)
@@ -634,6 +691,121 @@ void CDECL _vcomp_for_static_end(void)
     /* nothing to do here */
 }
 
+void CDECL _vcomp_for_dynamic_init(unsigned int flags, unsigned int first, unsigned int last,
+                                   int step, unsigned int chunksize)
+{
+    unsigned int iterations, per_thread, remaining;
+    struct vcomp_thread_data *thread_data = vcomp_init_thread_data();
+    struct vcomp_team_data *team_data = thread_data->team;
+    struct vcomp_task_data *task_data = thread_data->task;
+    int num_threads = team_data ? team_data->num_threads : 1;
+    int thread_num = thread_data->thread_num;
+    unsigned int type = flags & ~VCOMP_DYNAMIC_FLAGS_INCREMENT;
+
+    TRACE("(%u, %u, %u, %d, %u)\n", flags, first, last, step, chunksize);
+
+    if (step <= 0)
+    {
+        thread_data->dynamic_type = 0;
+        return;
+    }
+
+    if (flags & VCOMP_DYNAMIC_FLAGS_INCREMENT)
+        iterations = 1 + (last - first) / step;
+    else
+    {
+        iterations = 1 + (first - last) / step;
+        step *= -1;
+    }
+
+    if (type == VCOMP_DYNAMIC_FLAGS_STATIC)
+    {
+        per_thread = iterations / num_threads;
+        remaining  = iterations - per_thread * num_threads;
+
+        if (thread_num < remaining)
+            per_thread++;
+        else if (per_thread)
+            first += remaining * step;
+        else
+        {
+            thread_data->dynamic_type = 0;
+            return;
+        }
+
+        thread_data->dynamic_type   = VCOMP_DYNAMIC_FLAGS_STATIC;
+        thread_data->dynamic_begin  = first + per_thread * thread_num * step;
+        thread_data->dynamic_end    = thread_data->dynamic_begin + (per_thread - 1) * step;
+    }
+    else
+    {
+        if (type != VCOMP_DYNAMIC_FLAGS_CHUNKED &&
+            type != VCOMP_DYNAMIC_FLAGS_GUIDED)
+        {
+            FIXME("unsupported flags %u\n", flags);
+            type = VCOMP_DYNAMIC_FLAGS_GUIDED;
+        }
+
+        EnterCriticalSection(&vcomp_section);
+        thread_data->dynamic++;
+        thread_data->dynamic_type = type;
+        if ((int)(thread_data->dynamic - task_data->dynamic) > 0)
+        {
+            task_data->dynamic              = thread_data->dynamic;
+            task_data->dynamic_first        = first;
+            task_data->dynamic_last         = last;
+            task_data->dynamic_iterations   = iterations;
+            task_data->dynamic_step         = step;
+            task_data->dynamic_chunksize    = chunksize;
+        }
+        LeaveCriticalSection(&vcomp_section);
+    }
+}
+
+int CDECL _vcomp_for_dynamic_next(unsigned int *begin, unsigned int *end)
+{
+    struct vcomp_thread_data *thread_data = vcomp_init_thread_data();
+    struct vcomp_task_data *task_data = thread_data->task;
+    struct vcomp_team_data *team_data = thread_data->team;
+    int num_threads = team_data ? team_data->num_threads : 1;
+
+    TRACE("(%p, %p)\n", begin, end);
+
+    if (thread_data->dynamic_type == VCOMP_DYNAMIC_FLAGS_STATIC)
+    {
+        *begin = thread_data->dynamic_begin;
+        *end   = thread_data->dynamic_end;
+        thread_data->dynamic_type = 0;
+        return 1;
+    }
+    else if (thread_data->dynamic_type == VCOMP_DYNAMIC_FLAGS_CHUNKED ||
+             thread_data->dynamic_type == VCOMP_DYNAMIC_FLAGS_GUIDED)
+    {
+        unsigned int iterations = 0;
+        EnterCriticalSection(&vcomp_section);
+        if (thread_data->dynamic == task_data->dynamic &&
+            task_data->dynamic_iterations != 0)
+        {
+            iterations = min(task_data->dynamic_iterations, task_data->dynamic_chunksize);
+            if (thread_data->dynamic_type == VCOMP_DYNAMIC_FLAGS_GUIDED &&
+                task_data->dynamic_iterations > num_threads * task_data->dynamic_chunksize)
+            {
+                iterations = (task_data->dynamic_iterations + num_threads - 1) / num_threads;
+            }
+            *begin = task_data->dynamic_first;
+            *end   = task_data->dynamic_first + (iterations - 1) * task_data->dynamic_step;
+            task_data->dynamic_iterations -= iterations;
+            task_data->dynamic_first      += iterations * task_data->dynamic_step;
+            if (!task_data->dynamic_iterations)
+                *end = task_data->dynamic_last;
+        }
+        LeaveCriticalSection(&vcomp_section);
+        return iterations != 0;
+    }
+
+    return 0;
+}
+
 int CDECL omp_in_parallel(void)
 {
     TRACE("()\n");
@@ -710,14 +882,19 @@ void WINAPIV _vcomp_fork(BOOL ifval, int nargs, void *wrapper, ...)
     team_data.barrier           = 0;
     team_data.barrier_count     = 0;
 
+    task_data.single            = 0;
     task_data.section           = 0;
+    task_data.dynamic           = 0;
 
     thread_data.team            = &team_data;
     thread_data.task            = &task_data;
     thread_data.thread_num      = 0;
     thread_data.parallel        = ifval || prev_thread_data->parallel;
     thread_data.fork_threads    = 0;
+    thread_data.single          = 1;
     thread_data.section         = 1;
+    thread_data.dynamic         = 1;
+    thread_data.dynamic_type    = 0;
     list_init(&thread_data.entry);
     InitializeConditionVariable(&thread_data.cond);
 
@@ -735,7 +912,10 @@ void WINAPIV _vcomp_fork(BOOL ifval, int nargs, void *wrapper, ...)
             data->thread_num    = team_data.num_threads++;
             data->parallel      = thread_data.parallel;
             data->fork_threads  = 0;
+            data->single        = 1;
             data->section       = 1;
+            data->dynamic       = 1;
+            data->dynamic_type  = 0;
             list_remove(&data->entry);
             list_add_tail(&thread_data.entry, &data->entry);
             WakeAllConditionVariable(&data->cond);
@@ -756,7 +936,10 @@ void WINAPIV _vcomp_fork(BOOL ifval, int nargs, void *wrapper, ...)
             data->thread_num    = team_data.num_threads;
             data->parallel      = thread_data.parallel;
             data->fork_threads  = 0;
+            data->single        = 1;
             data->section       = 1;
+            data->dynamic       = 1;
+            data->dynamic_type  = 0;
             InitializeConditionVariable(&data->cond);
 
             thread = CreateThread(NULL, 0, _vcomp_fork_worker, data, 0, NULL);
@@ -794,6 +977,40 @@ void WINAPIV _vcomp_fork(BOOL ifval, int nargs, void *wrapper, ...)
     }
 
     __ms_va_end(team_data.valist);
+}
+
+void CDECL _vcomp_enter_critsect(CRITICAL_SECTION **critsect)
+{
+    TRACE("(%p)\n", critsect);
+
+    if (!*critsect)
+    {
+        CRITICAL_SECTION *new_critsect;
+        if (!(new_critsect = HeapAlloc(GetProcessHeap(), 0, sizeof(*new_critsect))))
+        {
+            ERR("could not allocate critical section\n");
+            ExitProcess(1);
+        }
+
+        InitializeCriticalSection(new_critsect);
+        new_critsect->DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": critsect");
+
+        if (interlocked_cmpxchg_ptr((void **)critsect, new_critsect, NULL) != NULL)
+        {
+            /* someone beat us to it */
+            new_critsect->DebugInfo->Spare[0] = 0;
+            DeleteCriticalSection(new_critsect);
+            HeapFree(GetProcessHeap(), 0, new_critsect);
+        }
+    }
+
+    EnterCriticalSection(*critsect);
+}
+
+void CDECL _vcomp_leave_critsect(CRITICAL_SECTION *critsect)
+{
+    TRACE("(%p)\n", critsect);
+    LeaveCriticalSection(critsect);
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved)

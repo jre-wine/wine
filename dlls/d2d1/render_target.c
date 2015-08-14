@@ -284,7 +284,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateBitmap(ID2D1RenderT
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = d2d_bitmap_init(object, render_target, size, src_data, pitch, desc)))
+    if (FAILED(hr = d2d_bitmap_init_memory(object, render_target, size, src_data, pitch, desc)))
     {
         WARN("Failed to initialize bitmap, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
@@ -406,10 +406,27 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateBitmapFromWicBitmap
 static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateSharedBitmap(ID2D1RenderTarget *iface,
         REFIID iid, void *data, const D2D1_BITMAP_PROPERTIES *desc, ID2D1Bitmap **bitmap)
 {
-    FIXME("iface %p, iid %s, data %p, desc %p, bitmap %p stub!\n",
-        iface, debugstr_guid(iid), data, desc, bitmap);
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
+    struct d2d_bitmap *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, iid %s, data %p, desc %p, bitmap %p.\n",
+            iface, debugstr_guid(iid), data, desc, bitmap);
+
+    if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    if (FAILED(hr = d2d_bitmap_init_shared(object, render_target, iid, data, desc)))
+    {
+        WARN("Failed to initialize bitmap, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created bitmap %p.\n", object);
+    *bitmap = &object->ID2D1Bitmap_iface;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateBitmapBrush(ID2D1RenderTarget *iface,
@@ -426,7 +443,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateBitmapBrush(ID2D1Re
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = d2d_bitmap_brush_init(object, render_target, bitmap, bitmap_brush_desc, brush_desc)))
+    if (FAILED(hr = d2d_bitmap_brush_init(object, render_target->factory, bitmap, bitmap_brush_desc, brush_desc)))
     {
         WARN("Failed to initialize brush, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
@@ -442,6 +459,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateBitmapBrush(ID2D1Re
 static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateSolidColorBrush(ID2D1RenderTarget *iface,
         const D2D1_COLOR_F *color, const D2D1_BRUSH_PROPERTIES *desc, ID2D1SolidColorBrush **brush)
 {
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
     struct d2d_brush *object;
 
     TRACE("iface %p, color %p, desc %p, brush %p.\n", iface, color, desc, brush);
@@ -449,7 +467,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateSolidColorBrush(ID2
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    d2d_solid_color_brush_init(object, iface, color, desc);
+    d2d_solid_color_brush_init(object, render_target->factory, color, desc);
 
     TRACE("Created brush %p.\n", object);
     *brush = (ID2D1SolidColorBrush *)&object->ID2D1Brush_iface;
@@ -461,6 +479,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateGradientStopCollect
         const D2D1_GRADIENT_STOP *stops, UINT32 stop_count, D2D1_GAMMA gamma, D2D1_EXTEND_MODE extend_mode,
         ID2D1GradientStopCollection **gradient)
 {
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
     struct d2d_gradient *object;
     HRESULT hr;
 
@@ -470,7 +489,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateGradientStopCollect
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = d2d_gradient_init(object, iface, stops, stop_count, gamma, extend_mode)))
+    if (FAILED(hr = d2d_gradient_init(object, render_target->factory, stops, stop_count, gamma, extend_mode)))
     {
         WARN("Failed to initialize gradient, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
@@ -487,6 +506,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateLinearGradientBrush
         const D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES *gradient_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc,
         ID2D1GradientStopCollection *gradient, ID2D1LinearGradientBrush **brush)
 {
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
     struct d2d_brush *object;
 
     TRACE("iface %p, gradient_brush_desc %p, brush_desc %p, gradient %p, brush %p.\n",
@@ -495,7 +515,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateLinearGradientBrush
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    d2d_linear_gradient_brush_init(object, iface, gradient_brush_desc, brush_desc, gradient);
+    d2d_linear_gradient_brush_init(object, render_target->factory, gradient_brush_desc, brush_desc, gradient);
 
     TRACE("Created brush %p.\n", object);
     *brush = (ID2D1LinearGradientBrush *)&object->ID2D1Brush_iface;
@@ -533,6 +553,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateLayer(ID2D1RenderTa
 
 static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateMesh(ID2D1RenderTarget *iface, ID2D1Mesh **mesh)
 {
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
     struct d2d_mesh *object;
 
     TRACE("iface %p, mesh %p.\n", iface, mesh);
@@ -540,7 +561,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateMesh(ID2D1RenderTar
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    d2d_mesh_init(object);
+    d2d_mesh_init(object, render_target->factory);
 
     TRACE("Created mesh %p.\n", object);
     *mesh = &object->ID2D1Mesh_iface;
@@ -1133,6 +1154,7 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_PopAxisAlignedClip(ID2D1Rend
 static void STDMETHODCALLTYPE d2d_d3d_render_target_Clear(ID2D1RenderTarget *iface, const D2D1_COLOR_F *color)
 {
     struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
+    D2D1_COLOR_F c = {0.0f, 0.0f, 0.0f, 0.0f};
     D3D10_SUBRESOURCE_DATA buffer_data;
     D3D10_BUFFER_DESC buffer_desc;
     ID3D10Buffer *vs_cb, *ps_cb;
@@ -1162,8 +1184,15 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_Clear(ID2D1RenderTarget *ifa
         return;
     }
 
-    buffer_desc.ByteWidth = sizeof(*color);
-    buffer_data.pSysMem = color;
+    if (color)
+        c = *color;
+    if (render_target->format.alphaMode == D2D1_ALPHA_MODE_IGNORE)
+        c.a = 1.0f;
+    c.r *= c.a;
+    c.g *= c.a;
+    c.b *= c.a;
+    buffer_desc.ByteWidth = sizeof(c);
+    buffer_data.pSysMem = &c;
 
     if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->device, &buffer_desc, &buffer_data, &ps_cb)))
     {
@@ -1564,6 +1593,7 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
 #if 0
         float3x2 transform;
         float opacity;
+        bool ignore_alpha;
 
         SamplerState s;
         Texture2D t;
@@ -1575,27 +1605,29 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
 
             texcoord.x = position.x * transform._11 + position.y * transform._21 + transform._31;
             texcoord.y = position.x * transform._12 + position.y * transform._22 + transform._32;
-            ret = t.Sample(s, texcoord);
-            ret.a *= opacity;
+            ret = t.Sample(s, texcoord) * opacity;
+            if (ignore_alpha)
+                ret.a = opacity;
 
             return ret;
         }
 #endif
-        0x43425844, 0x9a5f9280, 0xa5351c23, 0x15d6e760, 0xce35bcc3, 0x00000001, 0x000001d0, 0x00000003,
+        0x43425844, 0xf5bb1e01, 0xe3386963, 0xcaa095bd, 0xea2887de, 0x00000001, 0x000001fc, 0x00000003,
         0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
         0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x5449534f, 0x004e4f49,
         0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
-        0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00000134, 0x00000040,
-        0x0000004d, 0x04000059, 0x00208e46, 0x00000000, 0x00000002, 0x0300005a, 0x00106000, 0x00000000,
+        0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00000160, 0x00000040,
+        0x00000058, 0x04000059, 0x00208e46, 0x00000000, 0x00000003, 0x0300005a, 0x00106000, 0x00000000,
         0x04001858, 0x00107000, 0x00000000, 0x00005555, 0x04002064, 0x00101032, 0x00000000, 0x00000001,
         0x03000065, 0x001020f2, 0x00000000, 0x02000068, 0x00000001, 0x0800000f, 0x00100012, 0x00000000,
         0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000000, 0x08000000, 0x00100012, 0x00000000,
         0x0010000a, 0x00000000, 0x0020802a, 0x00000000, 0x00000000, 0x0800000f, 0x00100042, 0x00000000,
         0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000001, 0x08000000, 0x00100022, 0x00000000,
         0x0010002a, 0x00000000, 0x0020802a, 0x00000000, 0x00000001, 0x09000045, 0x001000f2, 0x00000000,
-        0x00100046, 0x00000000, 0x00107e46, 0x00000000, 0x00106000, 0x00000000, 0x08000038, 0x00102082,
-        0x00000000, 0x0010003a, 0x00000000, 0x0020803a, 0x00000000, 0x00000001, 0x05000036, 0x00102072,
-        0x00000000, 0x00100246, 0x00000000, 0x0100003e,
+        0x00100046, 0x00000000, 0x00107e46, 0x00000000, 0x00106000, 0x00000000, 0x08000038, 0x001000f2,
+        0x00000000, 0x00100e46, 0x00000000, 0x00208ff6, 0x00000000, 0x00000001, 0x0b000037, 0x00102082,
+        0x00000000, 0x0020800a, 0x00000000, 0x00000002, 0x0020803a, 0x00000000, 0x00000001, 0x0010003a,
+        0x00000000, 0x05000036, 0x00102072, 0x00000000, 0x00100246, 0x00000000, 0x0100003e,
     };
     /* The basic idea here is to evaluate the implicit form of the curve in
      * texture space. "t.z" determines which side of the curve is shaded. */
@@ -1784,11 +1816,19 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
 
     memset(&blend_desc, 0, sizeof(blend_desc));
     blend_desc.BlendEnable[0] = TRUE;
-    blend_desc.SrcBlend = D3D10_BLEND_SRC_ALPHA;
+    blend_desc.SrcBlend = D3D10_BLEND_ONE;
     blend_desc.DestBlend = D3D10_BLEND_INV_SRC_ALPHA;
     blend_desc.BlendOp = D3D10_BLEND_OP_ADD;
-    blend_desc.SrcBlendAlpha = D3D10_BLEND_ZERO;
-    blend_desc.DestBlendAlpha = D3D10_BLEND_ONE;
+    if (desc->pixelFormat.alphaMode == D2D1_ALPHA_MODE_IGNORE)
+    {
+        blend_desc.SrcBlendAlpha = D3D10_BLEND_ZERO;
+        blend_desc.DestBlendAlpha = D3D10_BLEND_ONE;
+    }
+    else
+    {
+        blend_desc.SrcBlendAlpha = D3D10_BLEND_ONE;
+        blend_desc.DestBlendAlpha = D3D10_BLEND_INV_SRC_ALPHA;
+    }
     blend_desc.BlendOpAlpha = D3D10_BLEND_OP_ADD;
     blend_desc.RenderTargetWriteMask[0] = D3D10_COLOR_WRITE_ENABLE_ALL;
     if (FAILED(hr = ID3D10Device_CreateBlendState(render_target->device, &blend_desc, &render_target->bs)))

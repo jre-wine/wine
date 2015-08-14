@@ -19,8 +19,12 @@
 
 #include "config.h"
 
+#include <fcntl.h>
+#include <io.h>
+#include <share.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/stat.h>
 
 #include "msvcirt.h"
 #include "windef.h"
@@ -31,6 +35,19 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcirt);
 
 #define RESERVE_SIZE 512
 #define STATEBUF_SIZE 8
+
+/* ?sh_none@filebuf@@2HB */
+const int filebuf_sh_none = 0x800;
+/* ?sh_read@filebuf@@2HB */
+const int filebuf_sh_read = 0xa00;
+/* ?sh_write@filebuf@@2HB */
+const int filebuf_sh_write = 0xc00;
+/* ?openprot@filebuf@@2HB */
+const int filebuf_openprot = 420;
+/* ?binary@filebuf@@2HB */
+const int filebuf_binary = 0x8000;
+/* ?text@filebuf@@2HB */
+const int filebuf_text = 0x4000;
 
 /* ?adjustfield@ios@@2JB */
 const LONG ios_adjustfield = FLAGS_left | FLAGS_right | FLAGS_internal;
@@ -80,6 +97,15 @@ streambuf* __thiscall streambuf_setbuf(streambuf*, char*, int);
 void __thiscall streambuf_setg(streambuf*, char*, char*, char*);
 void __thiscall streambuf_setp(streambuf*, char*, char*);
 
+/* class filebuf */
+typedef struct {
+    streambuf base;
+    filedesc fd;
+    int close;
+} filebuf;
+
+filebuf* __thiscall filebuf_close(filebuf*);
+
 /* class ios */
 struct _ostream;
 typedef struct {
@@ -116,6 +142,8 @@ typedef struct {
 
 /* ??_7streambuf@@6B@ */
 extern const vtable_ptr MSVCP_streambuf_vtable;
+/* ??_7filebuf@@6B@ */
+extern const vtable_ptr MSVCP_filebuf_vtable;
 /* ??_7ios@@6B@ */
 extern const vtable_ptr MSVCP_ios_vtable;
 
@@ -134,6 +162,18 @@ void __asm_dummy_vtables(void) {
             VTABLE_ADD_FUNC(streambuf_underflow)
             VTABLE_ADD_FUNC(streambuf_pbackfail)
             VTABLE_ADD_FUNC(streambuf_doallocate));
+    __ASM_VTABLE(filebuf,
+            VTABLE_ADD_FUNC(filebuf_vector_dtor)
+            VTABLE_ADD_FUNC(filebuf_sync)
+            VTABLE_ADD_FUNC(filebuf_setbuf)
+            VTABLE_ADD_FUNC(filebuf_seekoff)
+            VTABLE_ADD_FUNC(streambuf_seekpos)
+            VTABLE_ADD_FUNC(streambuf_xsputn)
+            VTABLE_ADD_FUNC(streambuf_xsgetn)
+            VTABLE_ADD_FUNC(filebuf_overflow)
+            VTABLE_ADD_FUNC(filebuf_underflow)
+            VTABLE_ADD_FUNC(streambuf_pbackfail)
+            VTABLE_ADD_FUNC(streambuf_doallocate));
     __ASM_VTABLE(ios,
             VTABLE_ADD_FUNC(ios_vector_dtor));
 #ifndef __GNUC__
@@ -141,6 +181,7 @@ void __asm_dummy_vtables(void) {
 #endif
 
 DEFINE_RTTI_DATA0(streambuf, 0, ".?AVstreambuf@@")
+DEFINE_RTTI_DATA1(filebuf, 0, &streambuf_rtti_base_descriptor, ".?AVfilebuf@@")
 DEFINE_RTTI_DATA0(ios, 0, ".?AVios@@")
 
 /* ??0streambuf@@IAE@PADH@Z */
@@ -514,6 +555,7 @@ void __thiscall streambuf_setp(streambuf *this, char *pb, char *ep)
 /* ?sync@streambuf@@UAEHXZ */
 /* ?sync@streambuf@@UEAAHXZ */
 DEFINE_THISCALL_WRAPPER(streambuf_sync, 4)
+#define call_streambuf_sync(this) CALL_VTBL_FUNC(this, 4, int, (streambuf*), (this))
 int __thiscall streambuf_sync(streambuf *this)
 {
     TRACE("(%p)\n", this);
@@ -736,6 +778,257 @@ void __thiscall streambuf_dbp(streambuf *this)
         printf("pbase()=%p, pptr()=%p, epptr()=%d\n", this->pbase, this->pptr, this->epptr);
         printf("eback()=%p, gptr()=%p, egptr()=%d\n", this->eback, this->gptr, this->egptr);
     }
+}
+
+/* ??0filebuf@@QAE@ABV0@@Z */
+/* ??0filebuf@@QEAA@AEBV0@@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_copy_ctor, 8)
+filebuf* __thiscall filebuf_copy_ctor(filebuf* this, const filebuf *copy)
+{
+    TRACE("(%p %p)\n", this, copy);
+    *this = *copy;
+    this->base.vtable = &MSVCP_filebuf_vtable;
+    return this;
+}
+
+/* ??0filebuf@@QAE@HPADH@Z */
+/* ??0filebuf@@QEAA@HPEADH@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_fd_reserve_ctor, 16)
+filebuf* __thiscall filebuf_fd_reserve_ctor(filebuf* this, filedesc fd, char *buffer, int length)
+{
+    TRACE("(%p %d %p %d)\n", this, fd, buffer, length);
+    streambuf_reserve_ctor(&this->base, buffer, length);
+    this->base.vtable = &MSVCP_filebuf_vtable;
+    this->fd = fd;
+    this->close = 0;
+    return this;
+}
+
+/* ??0filebuf@@QAE@H@Z */
+/* ??0filebuf@@QEAA@H@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_fd_ctor, 8)
+filebuf* __thiscall filebuf_fd_ctor(filebuf* this, filedesc fd)
+{
+    filebuf_fd_reserve_ctor(this, fd, NULL, 0);
+    this->base.unbuffered = 0;
+    return this;
+}
+
+/* ??0filebuf@@QAE@XZ */
+/* ??0filebuf@@QEAA@XZ */
+DEFINE_THISCALL_WRAPPER(filebuf_ctor, 4)
+filebuf* __thiscall filebuf_ctor(filebuf* this)
+{
+    return filebuf_fd_ctor(this, -1);
+}
+
+/* ??1filebuf@@UAE@XZ */
+/* ??1filebuf@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(filebuf_dtor, 4)
+void __thiscall filebuf_dtor(filebuf* this)
+{
+    TRACE("(%p)\n", this);
+    if (this->close)
+        filebuf_close(this);
+    streambuf_dtor(&this->base);
+}
+
+/* ??4filebuf@@QAEAAV0@ABV0@@Z */
+/* ??4filebuf@@QEAAAEAV0@AEBV0@@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_assign, 8)
+filebuf* __thiscall filebuf_assign(filebuf* this, const filebuf *rhs)
+{
+    filebuf_dtor(this);
+    return filebuf_copy_ctor(this, rhs);
+}
+
+/* ??_Efilebuf@@UAEPAXI@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_vector_dtor, 8)
+filebuf* __thiscall filebuf_vector_dtor(filebuf *this, unsigned int flags)
+{
+    TRACE("(%p %x)\n", this, flags);
+    if (flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
+
+        for (i = *ptr-1; i >= 0; i--)
+            filebuf_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        filebuf_dtor(this);
+        if (flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+    return this;
+}
+
+/* ??_Gfilebuf@@UAEPAXI@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_scalar_dtor, 8)
+filebuf* __thiscall filebuf_scalar_dtor(filebuf *this, unsigned int flags)
+{
+    TRACE("(%p %x)\n", this, flags);
+    filebuf_dtor(this);
+    if (flags & 1) MSVCRT_operator_delete(this);
+    return this;
+}
+
+/* ?attach@filebuf@@QAEPAV1@H@Z */
+/* ?attach@filebuf@@QEAAPEAV1@H@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_attach, 8)
+filebuf* __thiscall filebuf_attach(filebuf *this, filedesc fd)
+{
+    TRACE("(%p %d)\n", this, fd);
+    if (this->fd != -1)
+        return NULL;
+
+    streambuf_lock(&this->base);
+    this->fd = fd;
+    streambuf_allocate(&this->base);
+    streambuf_unlock(&this->base);
+    return this;
+}
+
+/* ?close@filebuf@@QAEPAV1@XZ */
+/* ?close@filebuf@@QEAAPEAV1@XZ */
+DEFINE_THISCALL_WRAPPER(filebuf_close, 4)
+filebuf* __thiscall filebuf_close(filebuf *this)
+{
+    filebuf *ret;
+
+    TRACE("(%p)\n", this);
+    if (this->fd == -1)
+        return NULL;
+
+    streambuf_lock(&this->base);
+    if (call_streambuf_sync(&this->base) == EOF || _close(this->fd) < 0) {
+        ret = NULL;
+    } else {
+        this->fd = -1;
+        ret = this;
+    }
+    streambuf_unlock(&this->base);
+    return ret;
+}
+
+/* ?fd@filebuf@@QBEHXZ */
+/* ?fd@filebuf@@QEBAHXZ */
+DEFINE_THISCALL_WRAPPER(filebuf_fd, 4)
+filedesc __thiscall filebuf_fd(const filebuf *this)
+{
+    TRACE("(%p)\n", this);
+    return this->fd;
+}
+
+/* ?is_open@filebuf@@QBEHXZ */
+/* ?is_open@filebuf@@QEBAHXZ */
+DEFINE_THISCALL_WRAPPER(filebuf_is_open, 4)
+int __thiscall filebuf_is_open(const filebuf *this)
+{
+    TRACE("(%p)\n", this);
+    return this->fd != -1;
+}
+
+/* ?open@filebuf@@QAEPAV1@PBDHH@Z */
+/* ?open@filebuf@@QEAAPEAV1@PEBDHH@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_open, 16)
+filebuf* __thiscall filebuf_open(filebuf *this, const char *name, ios_open_mode mode, int protection)
+{
+    const int inout_mode[4] = {-1, _O_RDONLY, _O_WRONLY, _O_RDWR};
+    const int share_mode[4] = {_SH_DENYRW, _SH_DENYWR, _SH_DENYRD, _SH_DENYNO};
+    int op_flags, sh_flags, fd;
+
+    TRACE("(%p %s %x %x)\n", this, name, mode, protection);
+    if (this->fd != -1)
+        return NULL;
+
+    /* mode */
+    if (mode & (OPENMODE_app|OPENMODE_trunc))
+        mode |= OPENMODE_out;
+    op_flags = inout_mode[mode & (OPENMODE_in|OPENMODE_out)];
+    if (op_flags < 0)
+        return NULL;
+    if (mode & OPENMODE_app)
+        op_flags |= _O_APPEND;
+    if ((mode & OPENMODE_trunc) ||
+            ((mode & OPENMODE_out) && !(mode & (OPENMODE_in|OPENMODE_app|OPENMODE_ate))))
+        op_flags |= _O_TRUNC;
+    if (!(mode & OPENMODE_nocreate))
+        op_flags |= _O_CREAT;
+    if (mode & OPENMODE_noreplace)
+        op_flags |= _O_EXCL;
+    op_flags |= (mode & OPENMODE_binary) ? _O_BINARY : _O_TEXT;
+
+    /* share protection */
+    sh_flags = (protection & filebuf_sh_none) ? share_mode[(protection >> 9) & 3] : _SH_DENYNO;
+
+    TRACE("op_flags %x, sh_flags %x\n", op_flags, sh_flags);
+    fd = _sopen(name, op_flags, sh_flags, _S_IREAD|_S_IWRITE);
+    if (fd < 0)
+        return NULL;
+
+    streambuf_lock(&this->base);
+    this->close = 1;
+    if ((mode & OPENMODE_ate) &&
+            call_streambuf_seekoff(&this->base, 0, SEEKDIR_end, mode & (OPENMODE_in|OPENMODE_out)) == EOF) {
+        _close(fd);
+    } else
+        this->fd = fd;
+    streambuf_unlock(&this->base);
+    return (this->fd == -1) ? NULL : this;
+}
+
+/* ?overflow@filebuf@@UAEHH@Z */
+/* ?overflow@filebuf@@UEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_overflow, 8)
+int __thiscall filebuf_overflow(filebuf *this, int c)
+{
+    FIXME("(%p %d) stub\n", this, c);
+    return EOF;
+}
+
+/* ?seekoff@filebuf@@UAEJJW4seek_dir@ios@@H@Z */
+/* ?seekoff@filebuf@@UEAAJJW4seek_dir@ios@@H@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_seekoff, 16)
+streampos __thiscall filebuf_seekoff(filebuf *this, streamoff offset, ios_seek_dir dir, int mode)
+{
+    FIXME("(%p %d %d %d) stub\n", this, offset, dir, mode);
+    return 0;
+}
+
+/* ?setbuf@filebuf@@UAEPAVstreambuf@@PADH@Z */
+/* ?setbuf@filebuf@@UEAAPEAVstreambuf@@PEADH@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_setbuf, 12)
+streambuf* __thiscall filebuf_setbuf(filebuf *this, char *buffer, int length)
+{
+    FIXME("(%p %p %d) stub\n", this, buffer, length);
+    return NULL;
+}
+
+/* ?setmode@filebuf@@QAEHH@Z */
+/* ?setmode@filebuf@@QEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(filebuf_setmode, 8)
+int __thiscall filebuf_setmode(filebuf *this, int mode)
+{
+    FIXME("(%p %d) stub\n", this, mode);
+    return 0;
+}
+
+/* ?sync@filebuf@@UAEHXZ */
+/* ?sync@filebuf@@UEAAHXZ */
+DEFINE_THISCALL_WRAPPER(filebuf_sync, 4)
+int __thiscall filebuf_sync(filebuf *this)
+{
+    FIXME("(%p) stub\n", this);
+    return 0;
+}
+
+/* ?underflow@filebuf@@UAEHXZ */
+/* ?underflow@filebuf@@UEAAHXZ */
+DEFINE_THISCALL_WRAPPER(filebuf_underflow, 4)
+int __thiscall filebuf_underflow(filebuf *this)
+{
+    FIXME("(%p) stub\n", this);
+    return EOF;
 }
 
 /* ??0ios@@IAE@ABV0@@Z */
@@ -1411,6 +1704,7 @@ static void init_io(void *base)
 {
 #ifdef __x86_64__
     init_streambuf_rtti(base);
+    init_filebuf_rtti(base);
     init_ios_rtti(base);
 #endif
 }

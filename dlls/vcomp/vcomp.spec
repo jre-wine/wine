@@ -53,11 +53,11 @@
 @ cdecl _vcomp_barrier()
 @ stub _vcomp_copyprivate_broadcast
 @ stub _vcomp_copyprivate_receive
-@ stub _vcomp_enter_critsect
+@ cdecl _vcomp_enter_critsect(ptr)
 @ stub _vcomp_flush
-@ stub _vcomp_for_dynamic_init
+@ cdecl _vcomp_for_dynamic_init(long long long long long)
 @ stub _vcomp_for_dynamic_init_i8
-@ stub _vcomp_for_dynamic_next
+@ cdecl _vcomp_for_dynamic_next(ptr ptr)
 @ stub _vcomp_for_dynamic_next_i8
 @ cdecl _vcomp_for_static_end()
 @ cdecl _vcomp_for_static_init(long long long long ptr ptr ptr ptr ptr)
@@ -66,10 +66,10 @@
 @ stub _vcomp_for_static_simple_init_i8
 @ varargs _vcomp_fork(long long ptr)
 @ stub _vcomp_get_thread_num
-@ stub _vcomp_leave_critsect
+@ cdecl _vcomp_leave_critsect(ptr)
 @ stub _vcomp_master_barrier
-@ stub _vcomp_master_begin
-@ stub _vcomp_master_end
+@ cdecl _vcomp_master_begin()
+@ cdecl _vcomp_master_end()
 @ stub _vcomp_ordered_begin
 @ stub _vcomp_ordered_end
 @ stub _vcomp_ordered_loop_end

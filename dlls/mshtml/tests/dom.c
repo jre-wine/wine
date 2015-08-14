@@ -1676,6 +1676,22 @@ static void _test_option_put_selected(unsigned line, IHTMLOptionElement *option,
     _test_option_selected(line, option, b);
 }
 
+#define test_option_get_index(o,s) _test_option_get_index(__LINE__,o,s)
+static void _test_option_get_index(unsigned line, IHTMLOptionElement *option, LONG exval)
+{
+    HRESULT hres;
+    LONG val;
+
+    hres = IHTMLOptionElement_get_index(option, NULL);
+    ok_(__FILE__,line)(hres == E_INVALIDARG, "Expect E_INVALIDARG, got %08x\n", hres);
+
+    val = 12345678;
+    hres = IHTMLOptionElement_get_index(option, &val);
+    ok_(__FILE__,line)(hres == S_OK, "get_index failed: %08x\n", hres);
+    ok_(__FILE__,line)(val == exval || broken(val == 12345678),  /* Win2k doesn't touch it*/
+        "value = %d, expected = %d\n", val, exval);
+}
+
 #define test_textarea_value(t,v) _test_textarea_value(__LINE__,t,v)
 static void _test_textarea_value(unsigned line, IUnknown *unk, const char *exval)
 {
@@ -2175,6 +2191,30 @@ static void _test_select_set_multiple(unsigned line, IHTMLSelectElement *select,
     ok_(__FILE__,line) (hres == S_OK, "put_multiple failed: %08x\n", hres);
 
     _test_select_multiple(line, select, val);
+}
+
+#define test_select_size(s,v) _test_select_size(__LINE__,s,v)
+static void _test_select_size(unsigned line, IHTMLSelectElement *select, LONG exval)
+{
+    HRESULT hres;
+    LONG val;
+
+    hres = IHTMLSelectElement_get_size(select, NULL);
+    ok_(__FILE__,line) (hres == E_INVALIDARG, "got %08x, expected E_INVALIDARG\n", hres);
+
+    val = 0xdeadbeef;
+    hres = IHTMLSelectElement_get_size(select, &val);
+    ok_(__FILE__,line) (hres == S_OK, "get_size failed: %08x\n", hres);
+    ok_(__FILE__,line) (val == exval, "size = %d, expected %d\n", val, exval);
+}
+
+#define test_select_set_size(s,v,e) _test_select_set_size(__LINE__,s,v,e)
+static void _test_select_set_size(unsigned line, IHTMLSelectElement *select, LONG val, HRESULT exhres)
+{
+    HRESULT hres;
+
+    hres = IHTMLSelectElement_put_size(select, val);
+    ok_(__FILE__,line) (hres == exhres, "put_size(%d) got %08x, expect %08x\n", val, hres, exhres);
 }
 
 #define test_range_text(r,t) _test_range_text(__LINE__,r,t)
@@ -2832,7 +2872,6 @@ static void test_select_remove(IHTMLSelectElement *select)
     test_select_length(select, 2);
 
     hres = IHTMLSelectElement_remove(select, -1);
-    todo_wine
     ok(hres == E_INVALIDARG, "remove failed: %08x, expected E_INVALIDARG\n", hres);
     test_select_length(select, 2);
 
@@ -4866,6 +4905,15 @@ static void test_select_elem(IHTMLSelectElement *select)
     test_select_set_value(select, "val1");
     test_select_value(select, "val1");
 
+    test_select_size(select, 0);
+    test_select_set_size(select, 1, S_OK);
+    test_select_size(select, 1);
+
+    test_select_set_size(select, -1, CTL_E_INVALIDPROPERTYVALUE);
+    test_select_size(select, 1);
+    test_select_set_size(select, 3, S_OK);
+    test_select_size(select, 3);
+
     test_select_get_disabled(select, VARIANT_FALSE);
     test_select_set_disabled(select, VARIANT_TRUE);
     test_select_set_disabled(select, VARIANT_FALSE);
@@ -4966,6 +5014,7 @@ static void test_create_option_elem(IHTMLDocument2 *doc)
 
     test_option_put_text(option, "new text");
     test_option_put_value(option, "new value");
+    test_option_get_index(option, 0);
     test_option_put_selected(option, VARIANT_TRUE);
     test_option_put_selected(option, VARIANT_FALSE);
 

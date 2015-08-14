@@ -61,6 +61,7 @@ typedef struct WCEL_Context {
     WCHAR*			yanked;		/* yanked line */
     unsigned			mark;		/* marked point (emacs mode only) */
     CONSOLE_SCREEN_BUFFER_INFO	csbi;		/* current state (initial cursor, window size, attribute) */
+    CONSOLE_CURSOR_INFO         cinfo;          /* original cursor state (size, visibility) */
     HANDLE			hConIn;
     HANDLE			hConOut;
     unsigned			done : 1,	/* to 1 when we're done with editing */
@@ -68,6 +69,7 @@ typedef struct WCEL_Context {
                                 can_wrap : 1,   /* to 1 when multi-line edition can take place */
                                 shall_echo : 1, /* to 1 when characters should be echo:ed when keyed-in */
                                 insert : 1,     /* to 1 when new characters are inserted (otherwise overwrite) */
+                                insertkey : 1,  /* to 1 when the Insert key toggle is active */
                                 can_pos_cursor : 1; /* to 1 when console can (re)position cursor */
     unsigned			histSize;
     unsigned			histPos;
@@ -231,7 +233,7 @@ static BOOL WCEL_Grow(WCEL_Context* ctx, size_t len)
 {
     if (!WCEL_IsSingleLine(ctx, len) && !ctx->can_wrap)
     {
-        FIXME("Mode doesn't allow to wrap. However, we should allow to overwrite current string\n");
+        FIXME("Mode doesn't allow wrapping. However, we should allow overwriting the current string\n");
         return FALSE;
     }
 
@@ -484,6 +486,8 @@ static void WCEL_Done(WCEL_Context* ctx)
     ctx->line[ctx->len++] = '\n';
     ctx->line[ctx->len] = 0;
     WriteConsoleW(ctx->hConOut, &nl, 1, NULL, NULL);
+    if (ctx->insertkey)
+        SetConsoleCursorInfo(ctx->hConOut, &ctx->cinfo);
     ctx->done = 1;
 }
 
@@ -763,24 +767,13 @@ static void WCEL_RepeatCount(WCEL_Context* ctx)
 
 static void WCEL_ToggleInsert(WCEL_Context* ctx)
 {
-    DWORD               mode;
     CONSOLE_CURSOR_INFO cinfo;
 
-    if (GetConsoleMode(ctx->hConIn, &mode) && GetConsoleCursorInfo(ctx->hConOut, &cinfo))
+    ctx->insertkey = !ctx->insertkey;
+
+    if (GetConsoleCursorInfo(ctx->hConOut, &cinfo))
     {
-        if ((mode & (ENABLE_INSERT_MODE|ENABLE_EXTENDED_FLAGS)) == (ENABLE_INSERT_MODE|ENABLE_EXTENDED_FLAGS))
-        {
-            mode &= ~ENABLE_INSERT_MODE;
-            cinfo.dwSize = 100;
-            ctx->insert = FALSE;
-        }
-        else
-        {
-            mode |= ENABLE_INSERT_MODE | ENABLE_EXTENDED_FLAGS;
-            cinfo.dwSize = 25;
-            ctx->insert = TRUE;
-        }
-        SetConsoleMode(ctx->hConIn, mode);
+        cinfo.dwSize = ctx->insertkey ? 100 : 25;
         SetConsoleCursorInfo(ctx->hConOut, &cinfo);
     }
 }
@@ -940,6 +933,7 @@ WCHAR* CONSOLE_Readline(HANDLE hConsoleIn, BOOL can_pos_cursor)
     if (!GetConsoleMode(ctx.hConOut, &mode)) mode = 0;
     ctx.can_wrap = (mode & ENABLE_WRAP_AT_EOL_OUTPUT) ? 1 : 0;
     ctx.can_pos_cursor = can_pos_cursor;
+    GetConsoleCursorInfo(ctx.hConOut, &ctx.cinfo);
 
     if (!WCEL_Grow(&ctx, 1))
     {
@@ -990,6 +984,8 @@ WCHAR* CONSOLE_Readline(HANDLE hConsoleIn, BOOL can_pos_cursor)
         GetConsoleMode(hConsoleIn, &mode);
         ctx.insert = (mode & (ENABLE_INSERT_MODE|ENABLE_EXTENDED_FLAGS)) ==
                      (ENABLE_INSERT_MODE|ENABLE_EXTENDED_FLAGS);
+        if (ctx.insertkey)
+            ctx.insert = !ctx.insert;
 
 	if (func)
 	    (func)(&ctx);

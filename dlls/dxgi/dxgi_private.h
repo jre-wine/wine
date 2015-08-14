@@ -76,6 +76,10 @@ const char *debug_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
 
 DXGI_FORMAT dxgi_format_from_wined3dformat(enum wined3d_format_id format) DECLSPEC_HIDDEN;
 enum wined3d_format_id wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
+void dxgi_sample_desc_from_wined3d(DXGI_SAMPLE_DESC *desc,
+        enum wined3d_multisample_type wined3d_type, unsigned int wined3d_quality) DECLSPEC_HIDDEN;
+void wined3d_sample_desc_from_dxgi(enum wined3d_multisample_type *wined3d_type,
+        unsigned int *wined3d_quality, const DXGI_SAMPLE_DESC *dxgi_desc) DECLSPEC_HIDDEN;
 HRESULT dxgi_get_private_data(struct wined3d_private_store *store,
         REFGUID guid, UINT *data_size, void *data) DECLSPEC_HIDDEN;
 HRESULT dxgi_set_private_data(struct wined3d_private_store *store,
@@ -160,11 +164,10 @@ struct dxgi_surface
     LONG refcount;
     struct wined3d_private_store private_store;
     IDXGIDevice *device;
-
-    DXGI_SURFACE_DESC desc;
+    struct wined3d_resource *wined3d_resource;
 };
 
 HRESULT dxgi_surface_init(struct dxgi_surface *surface, IDXGIDevice *device,
-        IUnknown *outer, const DXGI_SURFACE_DESC *desc) DECLSPEC_HIDDEN;
+        IUnknown *outer, struct wined3d_resource *wined3d_resource) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_DXGI_PRIVATE_H */

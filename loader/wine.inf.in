@@ -2708,6 +2708,11 @@ HKLM,%CurrentVersionNT%\Time Zones\Central Standard Time (Mexico),"Display",,"Am
 HKLM,%CurrentVersionNT%\Time Zones\Central Standard Time (Mexico),"Dlt",,"Central Daylight Time (Mexico)"
 HKLM,%CurrentVersionNT%\Time Zones\Central Standard Time (Mexico),"Std",,"Central Standard Time (Mexico)"
 HKLM,%CurrentVersionNT%\Time Zones\Central Standard Time (Mexico),"TZI",1,68,01,00,00,00,00,00,00,c4,ff,ff,ff,00,00,0a,00,00,00,05,00,02,00,00,00,00,00,00,00,00,00,04,00,00,00,01,00,02,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Chile Standard Time,"Display",,"Chile/Continental"
+HKLM,%CurrentVersionNT%\Time Zones\Chile Standard Time,"Dlt",,"Chile Daylight Time"
+HKLM,%CurrentVersionNT%\Time Zones\Chile Standard Time,"Std",,"Chile Standard Time"
+HKLM,%CurrentVersionNT%\Time Zones\Chile Standard Time,"TZI",1,b4,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Chile Standard Time\Dynamic DST,"2015",1,b4,00,00,00,00,00,00,00,c4,ff,ff,ff,df,07,04,00,00,00,1a,00,01,00,00,00,00,00,00,00,e0,07,01,00,05,00,01,00,00,00,00,00,00,00,00,00
 HKLM,%CurrentVersionNT%\Time Zones\China Standard Time,"Display",,"Asia/Shanghai"
 HKLM,%CurrentVersionNT%\Time Zones\China Standard Time,"Dlt",,"China Daylight Time"
 HKLM,%CurrentVersionNT%\Time Zones\China Standard Time,"Std",,"China Standard Time"
@@ -2733,6 +2738,11 @@ HKLM,%CurrentVersionNT%\Time Zones\E. South America Standard Time\Dynamic DST,"2
 HKLM,%CurrentVersionNT%\Time Zones\E. South America Standard Time\Dynamic DST,"2026",1,b4,00,00,00,00,00,00,00,c4,ff,ff,ff,ea,07,02,00,00,00,16,00,00,00,00,00,00,00,00,00,ea,07,0a,00,00,00,12,00,00,00,00,00,00,00,00,00
 HKLM,%CurrentVersionNT%\Time Zones\E. South America Standard Time\Dynamic DST,"2034",1,b4,00,00,00,00,00,00,00,c4,ff,ff,ff,f2,07,02,00,00,00,1a,00,00,00,00,00,00,00,00,00,f2,07,0a,00,00,00,0f,00,00,00,00,00,00,00,00,00
 HKLM,%CurrentVersionNT%\Time Zones\E. South America Standard Time\Dynamic DST,"2037",1,b4,00,00,00,00,00,00,00,c4,ff,ff,ff,f5,07,02,00,00,00,16,00,00,00,00,00,00,00,00,00,f5,07,0a,00,00,00,12,00,00,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Easter Island Standard Time,"Display",,"Chile/EasterIsland"
+HKLM,%CurrentVersionNT%\Time Zones\Easter Island Standard Time,"Dlt",,"Easter Island Daylight Time"
+HKLM,%CurrentVersionNT%\Time Zones\Easter Island Standard Time,"Std",,"Easter Island Standard Time"
+HKLM,%CurrentVersionNT%\Time Zones\Easter Island Standard Time,"TZI",1,2c,01,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Easter Island Standard Time\Dynamic DST,"2015",1,2c,01,00,00,00,00,00,00,c4,ff,ff,ff,df,07,04,00,06,00,19,00,17,00,00,00,00,00,00,00,e0,07,01,00,05,00,01,00,00,00,00,00,00,00,00,00
 HKLM,%CurrentVersionNT%\Time Zones\Eastern Standard Time,"Display",,"America/New_York"
 HKLM,%CurrentVersionNT%\Time Zones\Eastern Standard Time,"Dlt",,"Eastern Daylight Time"
 HKLM,%CurrentVersionNT%\Time Zones\Eastern Standard Time,"Std",,"Eastern Standard Time"
@@ -2926,14 +2936,13 @@ HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time,"Display",,"Africa/Casa
 HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time,"Dlt",,"Morocco Daylight Time"
 HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time,"Std",,"Morocco Standard Time"
 HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time,"TZI",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,00,00,0a,00,00,00,05,00,03,00,00,00,00,00,00,00,00,00,03,00,00,00,05,00,02,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2015",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,df,07,0a,00,00,00,19,00,03,00,00,00,00,00,00,00,df,07,07,00,06,00,12,00,02,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2016",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e0,07,0a,00,00,00,1e,00,03,00,00,00,00,00,00,00,e0,07,07,00,06,00,09,00,02,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2022",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e6,07,0a,00,00,00,1e,00,03,00,00,00,00,00,00,00,e6,07,05,00,06,00,07,00,02,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2023",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e7,07,0a,00,00,00,1d,00,03,00,00,00,00,00,00,00,e7,07,04,00,06,00,16,00,02,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2024",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e8,07,0a,00,00,00,1b,00,03,00,00,00,00,00,00,00,e8,07,04,00,06,00,0d,00,02,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2025",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e9,07,0a,00,00,00,1a,00,03,00,00,00,00,00,00,00,e9,07,04,00,06,00,05,00,02,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2035",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,f3,07,0a,00,06,00,1b,00,03,00,00,00,00,00,00,00,f3,07,03,00,00,00,19,00,02,00,00,00,00,00,00,00
-HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2036",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,f4,07,0a,00,06,00,12,00,03,00,00,00,00,00,00,00,f4,07,03,00,00,00,1e,00,02,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2015",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,df,07,0a,00,00,00,19,00,03,00,00,00,00,00,00,00,df,07,07,00,00,00,13,00,02,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2016",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e0,07,0a,00,00,00,1e,00,03,00,00,00,00,00,00,00,e0,07,07,00,00,00,0a,00,02,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2022",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e6,07,0a,00,00,00,1e,00,03,00,00,00,00,00,00,00,e6,07,05,00,00,00,08,00,02,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2023",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e7,07,0a,00,00,00,1d,00,03,00,00,00,00,00,00,00,e7,07,04,00,00,00,17,00,02,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2024",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e8,07,0a,00,00,00,1b,00,03,00,00,00,00,00,00,00,e8,07,04,00,00,00,0e,00,02,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2025",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,e9,07,0a,00,00,00,1a,00,03,00,00,00,00,00,00,00,e9,07,04,00,00,00,06,00,02,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\Morocco Standard Time\Dynamic DST,"2036",1,00,00,00,00,00,00,00,00,c4,ff,ff,ff,f4,07,0a,00,00,00,13,00,03,00,00,00,00,00,00,00,f4,07,03,00,00,00,1e,00,02,00,00,00,00,00,00,00
 HKLM,%CurrentVersionNT%\Time Zones\Mountain Standard Time,"Display",,"America/Denver"
 HKLM,%CurrentVersionNT%\Time Zones\Mountain Standard Time,"Dlt",,"Mountain Daylight Time"
 HKLM,%CurrentVersionNT%\Time Zones\Mountain Standard Time,"Std",,"Mountain Standard Time"
@@ -3070,6 +3079,10 @@ HKLM,%CurrentVersionNT%\Time Zones\US Mountain Standard Time,"Display",,"America
 HKLM,%CurrentVersionNT%\Time Zones\US Mountain Standard Time,"Dlt",,"US Mountain Daylight Time"
 HKLM,%CurrentVersionNT%\Time Zones\US Mountain Standard Time,"Std",,"US Mountain Standard Time"
 HKLM,%CurrentVersionNT%\Time Zones\US Mountain Standard Time,"TZI",1,a4,01,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
+HKLM,%CurrentVersionNT%\Time Zones\UTC,"Display",,"Etc/UTC"
+HKLM,%CurrentVersionNT%\Time Zones\UTC,"Dlt",,"Coordinated Universal Time"
+HKLM,%CurrentVersionNT%\Time Zones\UTC,"Std",,"Coordinated Universal Time"
+HKLM,%CurrentVersionNT%\Time Zones\UTC,"TZI",1,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00,00
 HKLM,%CurrentVersionNT%\Time Zones\Venezuela Standard Time,"Display",,"America/Caracas"
 HKLM,%CurrentVersionNT%\Time Zones\Venezuela Standard Time,"Dlt",,"Venezuela Daylight Time"
 HKLM,%CurrentVersionNT%\Time Zones\Venezuela Standard Time,"Std",,"Venezuela Standard Time"

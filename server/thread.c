@@ -175,6 +175,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->context         = NULL;
     thread->suspend_context = NULL;
     thread->teb             = 0;
+    thread->entry_point     = 0;
     thread->debug_ctx       = NULL;
     thread->debug_event     = NULL;
     thread->debug_break     = 0;
@@ -497,6 +498,8 @@ static void set_thread_info( struct thread *thread,
     }
     if (req->mask & SET_THREAD_INFO_TOKEN)
         security_set_thread_token( thread, req->token );
+    if (req->mask & SET_THREAD_INFO_ENTRYPOINT)
+        thread->entry_point = req->entry_point;
 }
 
 /* stop a thread (at the Unix level) */
@@ -1284,6 +1287,7 @@ DECL_HANDLER(init_thread)
     current->unix_pid = req->unix_pid;
     current->unix_tid = req->unix_tid;
     current->teb      = req->teb;
+    current->entry_point = process->peb ? req->entry : 0;
 
     if (!process->peb)  /* first thread, initialize the process too */
     {
@@ -1371,12 +1375,25 @@ DECL_HANDLER(get_thread_info)
         reply->pid            = get_process_id( thread->process );
         reply->tid            = get_thread_id( thread );
         reply->teb            = thread->teb;
+        reply->entry_point    = thread->entry_point;
         reply->exit_code      = (thread->state == TERMINATED) ? thread->exit_code : STATUS_PENDING;
         reply->priority       = thread->priority;
         reply->affinity       = thread->affinity;
+        reply->last           = thread->process->running_threads == 1;
+
+        release_object( thread );
+    }
+}
+
+/* fetch information about thread times */
+DECL_HANDLER(get_thread_times)
+{
+    struct thread *thread;
+
+    if ((thread = get_thread_from_handle( req->handle, THREAD_QUERY_INFORMATION )))
+    {
         reply->creation_time  = thread->creation_time;
         reply->exit_time      = thread->exit_time;
-        reply->last           = thread->process->running_threads == 1;
 
         release_object( thread );
     }

@@ -23,6 +23,7 @@
 #include "wine/test.h"
 #include "initguid.h"
 #include "dwrite.h"
+#include "wincodec.h"
 
 struct figure
 {
@@ -438,29 +439,34 @@ static IDXGISwapChain *create_swapchain(ID3D10Device1 *device, HWND window, BOOL
     return swapchain;
 }
 
-static ID2D1RenderTarget *create_render_target(IDXGISurface *surface)
+static ID2D1RenderTarget *create_render_target_desc(IDXGISurface *surface, const D2D1_RENDER_TARGET_PROPERTIES *desc)
 {
-    D2D1_RENDER_TARGET_PROPERTIES desc;
     ID2D1RenderTarget *render_target;
     ID2D1Factory *factory;
     HRESULT hr;
 
     hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
     ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory, surface, desc, &render_target);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    ID2D1Factory_Release(factory);
+
+    return render_target;
+}
+
+static ID2D1RenderTarget *create_render_target(IDXGISurface *surface)
+{
+    D2D1_RENDER_TARGET_PROPERTIES desc;
 
     desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
     desc.pixelFormat.format = DXGI_FORMAT_UNKNOWN;
-    desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
     desc.dpiX = 0.0f;
     desc.dpiY = 0.0f;
     desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
     desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
-    hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory, surface, &desc, &render_target);
-    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
 
-    ID2D1Factory_Release(factory);
-
-    return render_target;
+    return create_render_target_desc(surface, &desc);
 }
 
 static void test_clip(void)
@@ -1530,6 +1536,468 @@ static void test_path_geometry(void)
     DestroyWindow(window);
 }
 
+static void test_bitmap_formats(void)
+{
+    D2D1_BITMAP_PROPERTIES bitmap_desc;
+    IDXGISwapChain *swapchain;
+    D2D1_SIZE_U size = {4, 4};
+    ID2D1RenderTarget *rt;
+    ID3D10Device1 *device;
+    IDXGISurface *surface;
+    ID2D1Bitmap *bitmap;
+    unsigned int i, j;
+    HWND window;
+    HRESULT hr;
+
+    static const struct
+    {
+        DXGI_FORMAT format;
+        DWORD mask;
+    }
+    bitmap_formats[] =
+    {
+        {DXGI_FORMAT_R32G32B32A32_FLOAT,    0x8a},
+        {DXGI_FORMAT_R16G16B16A16_FLOAT,    0x8a},
+        {DXGI_FORMAT_R16G16B16A16_UNORM,    0x8a},
+        {DXGI_FORMAT_R8G8B8A8_TYPELESS,     0x00},
+        {DXGI_FORMAT_R8G8B8A8_UNORM,        0x0a},
+        {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,   0x8a},
+        {DXGI_FORMAT_R8G8B8A8_UINT,         0x00},
+        {DXGI_FORMAT_R8G8B8A8_SNORM,        0x00},
+        {DXGI_FORMAT_R8G8B8A8_SINT,         0x00},
+        {DXGI_FORMAT_A8_UNORM,              0x06},
+        {DXGI_FORMAT_B8G8R8A8_UNORM,        0x0a},
+        {DXGI_FORMAT_B8G8R8X8_UNORM,        0x88},
+        {DXGI_FORMAT_B8G8R8A8_TYPELESS,     0x00},
+        {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,   0x8a},
+    };
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+    window = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    swapchain = create_swapchain(device, window, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain, 0, &IID_IDXGISurface, (void **)&surface);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    rt = create_render_target(surface);
+    ok(!!rt, "Failed to create render target.\n");
+
+    bitmap_desc.dpiX = 96.0f;
+    bitmap_desc.dpiY = 96.0f;
+    for (i = 0; i < sizeof(bitmap_formats) / sizeof(*bitmap_formats); ++i)
+    {
+        for (j = 0; j < 4; ++j)
+        {
+            if ((bitmap_formats[i].mask & (0x80 | (1u << j))) == (0x80 | (1u << j)))
+                continue;
+
+            bitmap_desc.pixelFormat.format = bitmap_formats[i].format;
+            bitmap_desc.pixelFormat.alphaMode = j;
+            hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
+            if (bitmap_formats[i].mask & (1u << j))
+                ok(hr == S_OK, "Got unexpected hr %#x, for format %#x/%#x.\n",
+                        hr, bitmap_formats[i].format, j);
+            else
+                ok(hr == D2DERR_UNSUPPORTED_PIXEL_FORMAT, "Got unexpected hr %#x, for format %#x/%#x.\n",
+                        hr, bitmap_formats[i].format, j);
+            if (SUCCEEDED(hr))
+                ID2D1Bitmap_Release(bitmap);
+        }
+    }
+
+    ID2D1RenderTarget_Release(rt);
+    IDXGISurface_Release(surface);
+    IDXGISwapChain_Release(swapchain);
+    ID3D10Device1_Release(device);
+    DestroyWindow(window);
+}
+
+static void test_alpha_mode(void)
+{
+    D2D1_RENDER_TARGET_PROPERTIES rt_desc;
+    D2D1_BITMAP_PROPERTIES bitmap_desc;
+    ID2D1SolidColorBrush *color_brush;
+    ID2D1BitmapBrush *bitmap_brush;
+    IDXGISwapChain *swapchain;
+    ID2D1RenderTarget *rt;
+    ID3D10Device1 *device;
+    IDXGISurface *surface;
+    ID2D1Bitmap *bitmap;
+    D2D1_COLOR_F color;
+    D2D1_RECT_F rect;
+    D2D1_SIZE_U size;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    BOOL match;
+
+    static const DWORD bitmap_data[] =
+    {
+        0x7f7f0000, 0x7f7f7f00, 0x7f007f00, 0x7f007f7f,
+        0x7f00007f, 0x7f7f007f, 0x7f000000, 0x7f404040,
+        0x7f7f7f7f, 0x7f7f7f7f, 0x7f7f7f7f, 0x7f000000,
+        0x7f7f7f7f, 0x7f000000, 0x7f000000, 0x7f000000,
+    };
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+    window = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    swapchain = create_swapchain(device, window, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain, 0, &IID_IDXGISurface, (void **)&surface);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    rt = create_render_target(surface);
+    ok(!!rt, "Failed to create render target.\n");
+
+    ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
+
+    set_size_u(&size, 4, 4);
+    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    bitmap_desc.dpiX = 96.0f / 40.0f;
+    bitmap_desc.dpiY = 96.0f / 30.0f;
+    hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+
+    hr = ID2D1RenderTarget_CreateBitmapBrush(rt, bitmap, NULL, NULL, &bitmap_brush);
+    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ID2D1BitmapBrush_SetInterpolationMode(bitmap_brush, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    ID2D1BitmapBrush_SetExtendModeX(bitmap_brush, D2D1_EXTEND_MODE_WRAP);
+    ID2D1BitmapBrush_SetExtendModeY(bitmap_brush, D2D1_EXTEND_MODE_WRAP);
+
+    set_color(&color, 0.0f, 1.0f, 0.0f, 0.75f);
+    hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &color_brush);
+    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+
+    ID2D1RenderTarget_BeginDraw(rt);
+    ID2D1RenderTarget_Clear(rt, NULL);
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    match = compare_surface(surface, "48c41aff3a130a17ee210866b2ab7d36763934d5");
+    ok(match, "Surface does not match.\n");
+
+    ID2D1RenderTarget_BeginDraw(rt);
+    set_color(&color, 1.0f, 0.0f, 0.0f, 0.25f);
+    ID2D1RenderTarget_Clear(rt, &color);
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    match = compare_surface(surface, "6487e683730fb5a77c1911388d00b04664c5c4e4");
+    ok(match, "Surface does not match.\n");
+
+    ID2D1RenderTarget_BeginDraw(rt);
+    set_color(&color, 0.0f, 0.0f, 1.0f, 0.75f);
+    ID2D1RenderTarget_Clear(rt, &color);
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    match = compare_surface(surface, "7a35ba09e43cbaf591388ff1ef8de56157630c98");
+    ok(match, "Surface does not match.\n");
+
+    ID2D1RenderTarget_BeginDraw(rt);
+
+    set_rect(&rect,   0.0f,   0.0f, 160.0f, 120.0f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+    set_rect(&rect, 160.0f,   0.0f, 320.0f, 120.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 0.75f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+    set_rect(&rect, 320.0f,   0.0f, 480.0f, 120.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 0.25f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+
+    ID2D1Bitmap_Release(bitmap);
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ID2D1BitmapBrush_SetBitmap(bitmap_brush, bitmap);
+
+    set_rect(&rect,   0.0f, 120.0f, 160.0f, 240.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 1.0f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+    set_rect(&rect, 160.0f, 120.0f, 320.0f, 240.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 0.75f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+    set_rect(&rect, 320.0f, 120.0f, 480.0f, 240.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 0.25f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+
+    set_rect(&rect,   0.0f, 240.0f, 160.0f, 360.0f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)color_brush);
+    set_rect(&rect, 160.0f, 240.0f, 320.0f, 360.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 0.75f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)color_brush);
+    set_rect(&rect, 320.0f, 240.0f, 480.0f, 360.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 0.25f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)color_brush);
+
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    match = compare_surface(surface, "14f8ac64b70966c7c3c6281c59aaecdb17c3b16a");
+    ok(match, "Surface does not match.\n");
+
+    ID2D1RenderTarget_Release(rt);
+    rt_desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+    rt_desc.pixelFormat.format = DXGI_FORMAT_UNKNOWN;
+    rt_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    rt_desc.dpiX = 0.0f;
+    rt_desc.dpiY = 0.0f;
+    rt_desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
+    rt_desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
+    rt = create_render_target_desc(surface, &rt_desc);
+    ok(!!rt, "Failed to create render target.\n");
+
+    ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
+
+    ID2D1Bitmap_Release(bitmap);
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ID2D1BitmapBrush_SetBitmap(bitmap_brush, bitmap);
+
+    ID2D1BitmapBrush_Release(bitmap_brush);
+    hr = ID2D1RenderTarget_CreateBitmapBrush(rt, bitmap, NULL, NULL, &bitmap_brush);
+    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+    ID2D1BitmapBrush_SetInterpolationMode(bitmap_brush, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    ID2D1BitmapBrush_SetExtendModeX(bitmap_brush, D2D1_EXTEND_MODE_WRAP);
+    ID2D1BitmapBrush_SetExtendModeY(bitmap_brush, D2D1_EXTEND_MODE_WRAP);
+
+    ID2D1SolidColorBrush_Release(color_brush);
+    set_color(&color, 0.0f, 1.0f, 0.0f, 0.75f);
+    hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &color_brush);
+    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+
+    ID2D1RenderTarget_BeginDraw(rt);
+    ID2D1RenderTarget_Clear(rt, NULL);
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    match = compare_surface(surface, "b44510bf2d2e61a8d7c0ad862de49a471f1fd13f");
+    ok(match, "Surface does not match.\n");
+
+    ID2D1RenderTarget_BeginDraw(rt);
+    set_color(&color, 1.0f, 0.0f, 0.0f, 0.25f);
+    ID2D1RenderTarget_Clear(rt, &color);
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    match = compare_surface(surface, "2184f4a9198fc1de09ac85301b7a03eebadd9b81");
+    ok(match, "Surface does not match.\n");
+
+    ID2D1RenderTarget_BeginDraw(rt);
+    set_color(&color, 0.0f, 0.0f, 1.0f, 0.75f);
+    ID2D1RenderTarget_Clear(rt, &color);
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    match = compare_surface(surface, "6527ec83b4039c895b50f9b3e144fe0cf90d1889");
+    ok(match, "Surface does not match.\n");
+
+    ID2D1RenderTarget_BeginDraw(rt);
+
+    set_rect(&rect,   0.0f,   0.0f, 160.0f, 120.0f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+    set_rect(&rect, 160.0f,   0.0f, 320.0f, 120.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 0.75f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+    set_rect(&rect, 320.0f,   0.0f, 480.0f, 120.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 0.25f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+
+    ID2D1Bitmap_Release(bitmap);
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    hr = ID2D1RenderTarget_CreateBitmap(rt, size, bitmap_data, 4 * sizeof(*bitmap_data), &bitmap_desc, &bitmap);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ID2D1BitmapBrush_SetBitmap(bitmap_brush, bitmap);
+
+    set_rect(&rect,   0.0f, 120.0f, 160.0f, 240.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 1.0f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+    set_rect(&rect, 160.0f, 120.0f, 320.0f, 240.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 0.75f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+    set_rect(&rect, 320.0f, 120.0f, 480.0f, 240.0f);
+    ID2D1BitmapBrush_SetOpacity(bitmap_brush, 0.25f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)bitmap_brush);
+
+    set_rect(&rect,   0.0f, 240.0f, 160.0f, 360.0f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)color_brush);
+    set_rect(&rect, 160.0f, 240.0f, 320.0f, 360.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 0.75f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)color_brush);
+    set_rect(&rect, 320.0f, 240.0f, 480.0f, 360.0f);
+    ID2D1SolidColorBrush_SetOpacity(color_brush, 0.25f);
+    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)color_brush);
+
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+    match = compare_surface(surface, "465f5a3190d7bde408b3206b4be939fb22f8a3d6");
+    ok(match, "Surface does not match.\n");
+
+    refcount = ID2D1Bitmap_Release(bitmap);
+    ok(refcount == 1, "Bitmap has %u references left.\n", refcount);
+    ID2D1SolidColorBrush_Release(color_brush);
+    ID2D1BitmapBrush_Release(bitmap_brush);
+    ID2D1RenderTarget_Release(rt);
+    IDXGISurface_Release(surface);
+    IDXGISwapChain_Release(swapchain);
+    ID3D10Device1_Release(device);
+    DestroyWindow(window);
+}
+
+static void test_shared_bitmap(void)
+{
+    IDXGISwapChain *swapchain1, *swapchain2;
+    IWICBitmap *wic_bitmap1, *wic_bitmap2;
+    D2D1_RENDER_TARGET_PROPERTIES desc;
+    D2D1_BITMAP_PROPERTIES bitmap_desc;
+    IDXGISurface *surface1, *surface2;
+    ID2D1Factory *factory1, *factory2;
+    ID3D10Device1 *device1, *device2;
+    IWICImagingFactory *wic_factory;
+    ID2D1Bitmap *bitmap1, *bitmap2;
+    ID2D1RenderTarget *rt1, *rt2;
+    D2D1_SIZE_U size = {4, 4};
+    HWND window1, window2;
+    HRESULT hr;
+
+    if (!(device1 = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+
+    window1 = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    window2 = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    swapchain1 = create_swapchain(device1, window1, TRUE);
+    swapchain2 = create_swapchain(device1, window2, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain1, 0, &IID_IDXGISurface, (void **)&surface1);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    hr = IDXGISwapChain_GetBuffer(swapchain2, 0, &IID_IDXGISurface, (void **)&surface2);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+            &IID_IWICImagingFactory, (void **)&wic_factory);
+    ok(SUCCEEDED(hr), "Failed to create WIC imaging factory, hr %#x.\n", hr);
+    hr = IWICImagingFactory_CreateBitmap(wic_factory, 640, 480,
+            &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &wic_bitmap1);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    hr = IWICImagingFactory_CreateBitmap(wic_factory, 640, 480,
+            &GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, &wic_bitmap2);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    IWICImagingFactory_Release(wic_factory);
+
+    desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+    desc.pixelFormat.format = DXGI_FORMAT_UNKNOWN;
+    desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    desc.dpiX = 0.0f;
+    desc.dpiY = 0.0f;
+    desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
+    desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
+
+    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    bitmap_desc.dpiX = 96.0f;
+    bitmap_desc.dpiY = 96.0f;
+
+    hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory1);
+    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory2);
+    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+
+    /* DXGI surface render targets with the same device and factory. */
+    hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory1, surface1, &desc, &rt1);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    hr = ID2D1RenderTarget_CreateBitmap(rt1, size, NULL, 0, &bitmap_desc, &bitmap1);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+
+    hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory1, surface2, &desc, &rt2);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ID2D1Bitmap_Release(bitmap2);
+    hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_IUnknown, bitmap1, NULL, &bitmap2);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+    ID2D1RenderTarget_Release(rt2);
+
+    /* DXGI surface render targets with the same device but different factories. */
+    hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory2, surface2, &desc, &rt2);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
+    ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#x.\n", hr);
+    ID2D1RenderTarget_Release(rt2);
+
+    /* DXGI surface render targets with different devices but the same factory. */
+    IDXGISurface_Release(surface2);
+    IDXGISwapChain_Release(swapchain2);
+    device2 = create_device();
+    ok(!!device2, "Failed to create device.\n");
+    swapchain2 = create_swapchain(device2, window2, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain2, 0, &IID_IDXGISurface, (void **)&surface2);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+
+    hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory1, surface2, &desc, &rt2);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
+    ok(hr == D2DERR_UNSUPPORTED_OPERATION, "Got unexpected hr %#x.\n", hr);
+    ID2D1RenderTarget_Release(rt2);
+
+    /* DXGI surface render targets with different devices and different factories. */
+    hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory2, surface2, &desc, &rt2);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
+    ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#x.\n", hr);
+    ID2D1RenderTarget_Release(rt2);
+
+    /* DXGI surface render target and WIC bitmap render target, same factory. */
+    hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory1, wic_bitmap2, &desc, &rt2);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
+    ok(hr == D2DERR_UNSUPPORTED_OPERATION, "Got unexpected hr %#x.\n", hr);
+    ID2D1RenderTarget_Release(rt2);
+
+    /* WIC bitmap render targets on different D2D factories. */
+    ID2D1Bitmap_Release(bitmap1);
+    ID2D1RenderTarget_Release(rt1);
+    hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory1, wic_bitmap1, &desc, &rt1);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    hr = ID2D1RenderTarget_CreateBitmap(rt1, size, NULL, 0, &bitmap_desc, &bitmap1);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+
+    hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory2, wic_bitmap2, &desc, &rt2);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
+    ok(hr == D2DERR_WRONG_FACTORY, "Got unexpected hr %#x.\n", hr);
+    ID2D1RenderTarget_Release(rt2);
+
+    /* WIC bitmap render targets on the same D2D factory. */
+    hr = ID2D1Factory_CreateWicBitmapRenderTarget(factory1, wic_bitmap2, &desc, &rt2);
+    ok(SUCCEEDED(hr), "Failed to create render target, hr %#x.\n", hr);
+    hr = ID2D1RenderTarget_CreateSharedBitmap(rt2, &IID_ID2D1Bitmap, bitmap1, NULL, &bitmap2);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+    ID2D1Bitmap_Release(bitmap2);
+    ID2D1RenderTarget_Release(rt2);
+
+    ID2D1Bitmap_Release(bitmap1);
+    ID2D1RenderTarget_Release(rt1);
+    ID2D1Factory_Release(factory2);
+    ID2D1Factory_Release(factory1);
+    IWICBitmap_Release(wic_bitmap2);
+    IWICBitmap_Release(wic_bitmap1);
+    IDXGISurface_Release(surface2);
+    IDXGISurface_Release(surface1);
+    IDXGISwapChain_Release(swapchain2);
+    IDXGISwapChain_Release(swapchain1);
+    ID3D10Device1_Release(device2);
+    ID3D10Device1_Release(device1);
+    DestroyWindow(window2);
+    DestroyWindow(window1);
+    CoUninitialize();
+}
+
 START_TEST(d2d1)
 {
     test_clip();
@@ -1537,4 +2005,7 @@ START_TEST(d2d1)
     test_color_brush();
     test_bitmap_brush();
     test_path_geometry();
+    test_bitmap_formats();
+    test_alpha_mode();
+    test_shared_bitmap();
 }

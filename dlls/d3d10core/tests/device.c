@@ -164,6 +164,7 @@ static IDXGISwapChain *create_swapchain(ID3D10Device *device, HWND window, BOOL 
 static void test_create_texture2d(void)
 {
     ULONG refcount, expected_refcount;
+    D3D10_SUBRESOURCE_DATA data = {0};
     ID3D10Device *device, *tmp;
     D3D10_TEXTURE2D_DESC desc;
     ID3D10Texture2D *texture;
@@ -187,6 +188,9 @@ static void test_create_texture2d(void)
     desc.BindFlags = D3D10_BIND_RENDER_TARGET;
     desc.CPUAccessFlags = 0;
     desc.MiscFlags = 0;
+
+    hr = ID3D10Device_CreateTexture2D(device, &desc, &data, &texture);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
 
     expected_refcount = get_refcount((IUnknown *)device) + 1;
     hr = ID3D10Device_CreateTexture2D(device, &desc, NULL, &texture);
@@ -255,6 +259,7 @@ static void test_create_texture2d(void)
 static void test_create_texture3d(void)
 {
     ULONG refcount, expected_refcount;
+    D3D10_SUBRESOURCE_DATA data = {0};
     ID3D10Device *device, *tmp;
     D3D10_TEXTURE3D_DESC desc;
     ID3D10Texture3D *texture;
@@ -276,6 +281,9 @@ static void test_create_texture3d(void)
     desc.BindFlags = D3D10_BIND_RENDER_TARGET;
     desc.CPUAccessFlags = 0;
     desc.MiscFlags = 0;
+
+    hr = ID3D10Device_CreateTexture3D(device, &desc, &data, &texture);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
 
     expected_refcount = get_refcount((IUnknown *)device) + 1;
     hr = ID3D10Device_CreateTexture3D(device, &desc, NULL, &texture);
@@ -389,6 +397,7 @@ static void test_create_depthstencil_view(void)
 static void test_create_rendertarget_view(void)
 {
     D3D10_RENDER_TARGET_VIEW_DESC rtv_desc;
+    D3D10_SUBRESOURCE_DATA data = {0};
     D3D10_TEXTURE2D_DESC texture_desc;
     ULONG refcount, expected_refcount;
     D3D10_BUFFER_DESC buffer_desc;
@@ -409,6 +418,9 @@ static void test_create_rendertarget_view(void)
     buffer_desc.BindFlags = D3D10_BIND_RENDER_TARGET;
     buffer_desc.CPUAccessFlags = 0;
     buffer_desc.MiscFlags = 0;
+
+    hr = ID3D10Device_CreateBuffer(device, &buffer_desc, &data, &buffer);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
 
     expected_refcount = get_refcount((IUnknown *)device) + 1;
     hr = ID3D10Device_CreateBuffer(device, &buffer_desc, NULL, &buffer);
