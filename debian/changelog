@@ -1,3 +1,9 @@
+wine-development (1.7.49-1~bpo8+1) jessie-backports; urgency=medium
+
+  * Rebuild for jessie-backports (closes: 793551).
+
+ -- Jens Reyer <jreyer-guest@alioth.debian.org>  Fri, 14 Aug 2015 18:57:16 +0200
+
 wine-development (1.7.49-1) unstable; urgency=medium
 
   * New upstream release 1.7.49, released Aug 7, 2015.
