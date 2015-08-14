@@ -1,3 +1,11 @@
+wine-development (1.7.48-1~bpo8+1) jessie-backports; urgency=medium
+
+  * Rebuild for jessie-backports (closes: 793551).
+    Note: depends on backported khronos-api.
+  * Add myself to uploaders.
+
+ -- Jens Reyer <jreyer-guest@alioth.debian.org>  Wed, 12 Aug 2015 00:28:36 +0200
+
 wine-development (1.7.48-1) unstable; urgency=medium
 
   * New upstream release 1.7.48, released Jul 28, 2015.
