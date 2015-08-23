@@ -50,6 +50,12 @@ WINE_DECLARE_DEBUG_CHANNEL(snoop);
 WINE_DECLARE_DEBUG_CHANNEL(loaddll);
 WINE_DECLARE_DEBUG_CHANNEL(imports);
 
+#ifdef _WIN64
+#define DEFAULT_SECURITY_COOKIE_64  (((ULONGLONG)0x00002b99 << 32) | 0x2ddfa232)
+#endif
+#define DEFAULT_SECURITY_COOKIE_32  0xbb40e64e
+#define DEFAULT_SECURITY_COOKIE_16  (DEFAULT_SECURITY_COOKIE_32 >> 16)
+
 /* we don't want to include winuser.h */
 #define RT_MANIFEST                         ((ULONG_PTR)24)
 #define ISOLATIONAWARE_MANIFEST_RESOURCE_ID ((ULONG_PTR)2)
@@ -1166,6 +1172,10 @@ static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved )
         if ((status = process_attach( wm->deps[i], lpReserved )) != STATUS_SUCCESS) break;
     }
 
+    if (!wm->ldr.InInitializationOrderModuleList.Flink)
+        InsertTailList(&NtCurrentTeb()->Peb->LdrData->InInitializationOrderModuleList,
+                &wm->ldr.InInitializationOrderModuleList);
+
     /* Call DLL entry point */
     if (status == STATUS_SUCCESS)
     {
@@ -1183,10 +1193,6 @@ static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved )
         }
         current_modref = prev;
     }
-
-    if (!wm->ldr.InInitializationOrderModuleList.Flink)
-        InsertTailList(&NtCurrentTeb()->Peb->LdrData->InInitializationOrderModuleList,
-                       &wm->ldr.InInitializationOrderModuleList);
 
     if (wm->ldr.ActivationContext) RtlDeactivateActivationContext( 0, cookie );
     /* Remove recursion flag */
@@ -1602,6 +1608,132 @@ static void load_builtin_callback( void *module, const char *filename )
 }
 
 
+/***********************************************************************
+ *           set_security_cookie
+ *
+ * Create a random security cookie for buffer overflow protection. Make
+ * sure it does not accidentally match the default cookie value.
+ */
+static void set_security_cookie( void *module, SIZE_T len )
+{
+    static ULONG seed;
+    IMAGE_LOAD_CONFIG_DIRECTORY *loadcfg;
+    ULONG loadcfg_size;
+    ULONG_PTR *cookie;
+
+    loadcfg = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG, &loadcfg_size );
+    if (!loadcfg) return;
+    if (loadcfg_size < offsetof(IMAGE_LOAD_CONFIG_DIRECTORY, SecurityCookie) + sizeof(loadcfg->SecurityCookie)) return;
+    if (!loadcfg->SecurityCookie) return;
+    if (loadcfg->SecurityCookie < (ULONG_PTR)module ||
+        loadcfg->SecurityCookie > (ULONG_PTR)module + len - sizeof(ULONG_PTR))
+    {
+        WARN( "security cookie %p outside of image %p-%p\n",
+              (void *)loadcfg->SecurityCookie, module, (char *)module + len );
+        return;
+    }
+
+    cookie = (ULONG_PTR *)loadcfg->SecurityCookie;
+    TRACE( "initializing security cookie %p\n", cookie );
+
+    if (!seed) seed = NtGetTickCount() ^ GetCurrentProcessId();
+    for (;;)
+    {
+        if (*cookie == DEFAULT_SECURITY_COOKIE_16)
+            *cookie = RtlRandom( &seed ) >> 16; /* leave the high word clear */
+        else if (*cookie == DEFAULT_SECURITY_COOKIE_32)
+            *cookie = RtlRandom( &seed );
+#ifdef DEFAULT_SECURITY_COOKIE_64
+        else if (*cookie == DEFAULT_SECURITY_COOKIE_64)
+        {
+            *cookie = RtlRandom( &seed );
+            /* fill up, but keep the highest word clear */
+            *cookie ^= (ULONG_PTR)RtlRandom( &seed ) << 16;
+        }
+#endif
+        else
+            break;
+    }
+}
+
+static NTSTATUS perform_relocations( void *module, SIZE_T len )
+{
+    IMAGE_NT_HEADERS *nt;
+    char *base;
+    IMAGE_BASE_RELOCATION *rel, *end;
+    const IMAGE_DATA_DIRECTORY *relocs;
+    const IMAGE_SECTION_HEADER *sec;
+    INT_PTR delta;
+    ULONG protect_old[96], i;
+
+    nt = RtlImageNtHeader( module );
+    base = (char *)nt->OptionalHeader.ImageBase;
+
+    assert( module != base );
+
+    /* no relocations are performed on non page-aligned binaries */
+    if (nt->OptionalHeader.SectionAlignment < page_size)
+        return STATUS_SUCCESS;
+
+    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_DLL) && NtCurrentTeb()->Peb->ImageBaseAddress)
+        return STATUS_SUCCESS;
+
+    relocs = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
+
+    if (nt->FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED)
+    {
+        WARN( "Need to relocate module from %p to %p, but there are no relocation records\n",
+              base, module );
+        return STATUS_CONFLICTING_ADDRESSES;
+    }
+
+    if (!relocs->Size) return STATUS_SUCCESS;
+    if (!relocs->VirtualAddress) return STATUS_CONFLICTING_ADDRESSES;
+
+    if (nt->FileHeader.NumberOfSections > sizeof(protect_old)/sizeof(protect_old[0]))
+        return STATUS_INVALID_IMAGE_FORMAT;
+
+    sec = (const IMAGE_SECTION_HEADER *)((const char *)&nt->OptionalHeader +
+                                         nt->FileHeader.SizeOfOptionalHeader);
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        void *addr = get_rva( module, sec[i].VirtualAddress );
+        SIZE_T size = sec[i].SizeOfRawData;
+        NtProtectVirtualMemory( NtCurrentProcess(), &addr,
+                                &size, PAGE_READWRITE, &protect_old[i] );
+    }
+
+    TRACE( "relocating from %p-%p to %p-%p\n",
+           base, base + len, module, (char *)module + len );
+
+    rel = get_rva( module, relocs->VirtualAddress );
+    end = get_rva( module, relocs->VirtualAddress + relocs->Size );
+    delta = (char *)module - base;
+
+    while (rel < end - 1 && rel->SizeOfBlock)
+    {
+        if (rel->VirtualAddress >= len)
+        {
+            WARN( "invalid address %p in relocation %p\n", get_rva( module, rel->VirtualAddress ), rel );
+            return STATUS_ACCESS_VIOLATION;
+        }
+        rel = LdrProcessRelocationBlock( get_rva( module, rel->VirtualAddress ),
+                                         (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT),
+                                         (USHORT *)(rel + 1), delta );
+        if (!rel) return STATUS_INVALID_IMAGE_FORMAT;
+    }
+
+    for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
+    {
+        void *addr = get_rva( module, sec[i].VirtualAddress );
+        SIZE_T size = sec[i].SizeOfRawData;
+        NtProtectVirtualMemory( NtCurrentProcess(), &addr,
+                                &size, protect_old[i], &protect_old[i] );
+    }
+
+    return STATUS_SUCCESS;
+}
+
 /******************************************************************************
  *	load_native_dll  (internal)
  */
@@ -1626,7 +1758,17 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
     module = NULL;
     status = NtMapViewOfSection( mapping, NtCurrentProcess(),
                                  &module, 0, 0, &size, &len, ViewShare, 0, PAGE_EXECUTE_READ );
-    if (status < 0) goto done;
+
+    /* perform base relocation, if necessary */
+
+    if (status == STATUS_IMAGE_NOT_AT_BASE)
+        status = perform_relocations( module, len );
+
+    if (status != STATUS_SUCCESS)
+    {
+        if (module) NtUnmapViewOfSection( NtCurrentProcess(), module );
+        goto done;
+    }
 
     /* create the MODREF */
 
@@ -1635,6 +1777,8 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
         status = STATUS_NO_MEMORY;
         goto done;
     }
+
+    set_security_cookie( module, len );
 
     /* fixup imports */
 

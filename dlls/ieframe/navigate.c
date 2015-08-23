@@ -146,6 +146,13 @@ HRESULT set_dochost_url(DocHost *This, const WCHAR *url)
     return S_OK;
 }
 
+void notify_download_state(DocHost *dochost, BOOL is_downloading)
+{
+    DISPPARAMS dwl_dp = {NULL};
+    TRACE("(%x)\n", is_downloading);
+    call_sink(dochost->cps.wbe2, is_downloading ? DISPID_DOWNLOADBEGIN : DISPID_DOWNLOADCOMPLETE, &dwl_dp);
+}
+
 static inline BindStatusCallback *impl_from_IBindStatusCallback(IBindStatusCallback *iface)
 {
     return CONTAINING_RECORD(iface, BindStatusCallback, IBindStatusCallback_iface);
@@ -357,6 +364,8 @@ static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *ifac
     if(!This->doc_host)
         return S_OK;
 
+    if(!This->doc_host->olecmd)
+        notify_download_state(This->doc_host, FALSE);
     if(FAILED(hresult))
         handle_navigation_error(This->doc_host, hresult, This->url, NULL);
 
@@ -772,27 +781,6 @@ static void doc_navigate_task_destr(task_header_t *t)
     heap_free(task);
 }
 
-void on_commandstate_change(DocHost *doc_host, LONG command, VARIANT_BOOL enable)
-{
-    DISPPARAMS dispparams;
-    VARIANTARG params[2];
-
-    TRACE("command=%d enable=%d\n", command, enable);
-
-    dispparams.cArgs = 2;
-    dispparams.cNamedArgs = 0;
-    dispparams.rgdispidNamedArgs = NULL;
-    dispparams.rgvarg = params;
-
-    V_VT(params) = VT_BOOL;
-    V_BOOL(params) = enable;
-
-    V_VT(params+1) = VT_I4;
-    V_I4(params+1) = command;
-
-    call_sink(doc_host->cps.wbe2, DISPID_COMMANDSTATECHANGE, &dispparams);
-}
-
 static void doc_navigate_proc(DocHost *This, task_header_t *t)
 {
     task_doc_navigate_t *task = (task_doc_navigate_t*)t;
@@ -896,6 +884,7 @@ static HRESULT navigate_bsc(DocHost *This, BindStatusCallback *bsc, IMoniker *mo
         return S_OK;
     }
 
+    notify_download_state(This, TRUE);
     on_commandstate_change(This, CSC_NAVIGATEBACK, VARIANT_FALSE);
     on_commandstate_change(This, CSC_NAVIGATEFORWARD, VARIANT_FALSE);
 
@@ -1102,19 +1091,10 @@ static HRESULT navigate_history(DocHost *This, unsigned travellog_pos)
         return E_NOTIMPL;
     }
 
-    if (travellog_pos < This->travellog.position)
-    {
-        on_commandstate_change(This, CSC_NAVIGATEBACK, VARIANT_FALSE);
-        on_commandstate_change(This, CSC_NAVIGATEFORWARD, VARIANT_TRUE);
-    }
-    else if (travellog_pos > This->travellog.position)
-    {
-        on_commandstate_change(This, CSC_NAVIGATEBACK, VARIANT_TRUE);
-        on_commandstate_change(This, CSC_NAVIGATEFORWARD, VARIANT_FALSE);
-    }
-
     This->travellog.loading_pos = travellog_pos;
     entry = This->travellog.log + This->travellog.loading_pos;
+
+    update_navigation_commands(This);
 
     if(!entry->stream)
         return async_doc_navigate(This, entry->url, NULL, NULL, 0, FALSE);

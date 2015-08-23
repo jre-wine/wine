@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <fcntl.h>
 #include <io.h>
 #include <stdio.h>
 #include <windef.h>
@@ -23,6 +24,8 @@
 #include "wine/test.h"
 
 typedef void (*vtable_ptr)(void);
+typedef LONG streamoff;
+typedef LONG streampos;
 typedef int filedesc;
 
 typedef enum {
@@ -42,6 +45,12 @@ typedef enum {
     OPENMODE_noreplace   = 0x40,
     OPENMODE_binary      = 0x80
 } ios_open_mode;
+
+typedef enum {
+    SEEKDIR_beg = 0,
+    SEEKDIR_cur = 1,
+    SEEKDIR_end = 2
+} ios_seek_dir;
 
 typedef enum {
     FLAGS_skipws     = 0x1,
@@ -65,6 +74,8 @@ const int filebuf_sh_none = 0x800;
 const int filebuf_sh_read = 0xa00;
 const int filebuf_sh_write = 0xc00;
 const int filebuf_openprot = 420;
+const int filebuf_binary = _O_BINARY;
+const int filebuf_text = _O_TEXT;
 
 /* class streambuf */
 typedef struct {
@@ -154,6 +165,12 @@ static void (*__thiscall p_filebuf_dtor)(filebuf*);
 static filebuf* (*__thiscall p_filebuf_attach)(filebuf*, filedesc);
 static filebuf* (*__thiscall p_filebuf_open)(filebuf*, const char*, ios_open_mode, int);
 static filebuf* (*__thiscall p_filebuf_close)(filebuf*);
+static int (*__thiscall p_filebuf_setmode)(filebuf*, int);
+static streambuf* (*__thiscall p_filebuf_setbuf)(filebuf*, char*, int);
+static int (*__thiscall p_filebuf_sync)(filebuf*);
+static int (*__thiscall p_filebuf_overflow)(filebuf*, int);
+static int (*__thiscall p_filebuf_underflow)(filebuf*);
+static streampos (*__thiscall p_filebuf_seekoff)(filebuf*, streamoff, ios_seek_dir, int);
 
 /* ios */
 static ios* (*__thiscall p_ios_copy_ctor)(ios*, const ios*);
@@ -292,6 +309,12 @@ static BOOL init(void)
         SET(p_filebuf_attach, "?attach@filebuf@@QEAAPEAV1@H@Z");
         SET(p_filebuf_open, "?open@filebuf@@QEAAPEAV1@PEBDHH@Z");
         SET(p_filebuf_close, "?close@filebuf@@QEAAPEAV1@XZ");
+        SET(p_filebuf_setmode, "?setmode@filebuf@@QEAAHH@Z");
+        SET(p_filebuf_setbuf, "?setbuf@filebuf@@UEAAPEAVstreambuf@@PEADH@Z");
+        SET(p_filebuf_sync, "?sync@filebuf@@UEAAHXZ");
+        SET(p_filebuf_overflow, "?overflow@filebuf@@UEAAHH@Z");
+        SET(p_filebuf_underflow, "?underflow@filebuf@@UEAAHXZ");
+        SET(p_filebuf_seekoff, "?seekoff@filebuf@@UEAAJJW4seek_dir@ios@@H@Z");
 
         SET(p_ios_copy_ctor, "??0ios@@IEAA@AEBV0@@Z");
         SET(p_ios_ctor, "??0ios@@IEAA@XZ");
@@ -350,6 +373,12 @@ static BOOL init(void)
         SET(p_filebuf_attach, "?attach@filebuf@@QAEPAV1@H@Z");
         SET(p_filebuf_open, "?open@filebuf@@QAEPAV1@PBDHH@Z");
         SET(p_filebuf_close, "?close@filebuf@@QAEPAV1@XZ");
+        SET(p_filebuf_setmode, "?setmode@filebuf@@QAEHH@Z");
+        SET(p_filebuf_setbuf, "?setbuf@filebuf@@UAEPAVstreambuf@@PADH@Z");
+        SET(p_filebuf_sync, "?sync@filebuf@@UAEHXZ");
+        SET(p_filebuf_overflow, "?overflow@filebuf@@UAEHH@Z");
+        SET(p_filebuf_underflow, "?underflow@filebuf@@UAEHXZ");
+        SET(p_filebuf_seekoff, "?seekoff@filebuf@@UAEJJW4seek_dir@ios@@H@Z");
 
         SET(p_ios_copy_ctor, "??0ios@@IAE@ABV0@@Z");
         SET(p_ios_ctor, "??0ios@@IAE@XZ");
@@ -957,6 +986,7 @@ static void test_filebuf(void)
     const char filename2[] = "test2";
     const char filename3[] = "test3";
     char read_buffer[16];
+    int ret;
 
     memset(&fb1, 0xab, sizeof(filebuf));
     memset(&fb2, 0xab, sizeof(filebuf));
@@ -990,6 +1020,33 @@ static void test_filebuf(void)
     ok(thread != NULL, "CreateThread failed\n");
     WaitForSingleObject(lock_arg.lock, INFINITE);
 
+    /* setbuf */
+    fb1.base.do_lock = 0;
+    pret = (filebuf*) call_func3(p_filebuf_setbuf, &fb1, read_buffer, 16);
+    ok(pret == &fb1, "wrong return, expected %p got %p\n", &fb1, pret);
+    ok(fb1.base.allocated == 0, "wrong allocate value, expected 0 got %d\n", fb1.base.allocated);
+    ok(fb1.base.base == read_buffer, "wrong buffer, expected %p got %p\n", read_buffer, fb1.base.base);
+    ok(fb1.base.pbase == NULL, "wrong put area, expected %p got %p\n", NULL, fb1.base.pbase);
+    fb1.base.pbase = fb1.base.pptr = fb1.base.base;
+    fb1.base.epptr = fb1.base.ebuf;
+    fb1.base.do_lock = -1;
+    pret = (filebuf*) call_func3(p_filebuf_setbuf, &fb1, read_buffer, 16);
+    ok(pret == NULL, "wrong return, expected %p got %p\n", NULL, pret);
+    ok(fb1.base.allocated == 0, "wrong allocate value, expected 0 got %d\n", fb1.base.allocated);
+    ok(fb1.base.base == read_buffer, "wrong buffer, expected %p got %p\n", read_buffer, fb1.base.base);
+    ok(fb1.base.pbase == read_buffer, "wrong put area, expected %p got %p\n", read_buffer, fb1.base.pbase);
+    fb1.base.base = fb1.base.ebuf = NULL;
+    fb1.base.do_lock = 0;
+    pret = (filebuf*) call_func3(p_filebuf_setbuf, &fb1, read_buffer, 0);
+    ok(pret == &fb1, "wrong return, expected %p got %p\n", &fb1, pret);
+    ok(fb1.base.allocated == 0, "wrong allocate value, expected 0 got %d\n", fb1.base.allocated);
+    ok(fb1.base.unbuffered == 1, "wrong unbuffered value, expected 1 got %d\n", fb1.base.unbuffered);
+    ok(fb1.base.base == NULL, "wrong buffer, expected %p got %p\n", NULL, fb1.base.base);
+    ok(fb1.base.pbase == read_buffer, "wrong put area, expected %p got %p\n", read_buffer, fb1.base.pbase);
+    fb1.base.pbase = fb1.base.pptr = fb1.base.epptr = NULL;
+    fb1.base.unbuffered = 0;
+    fb1.base.do_lock = -1;
+
     /* attach */
     pret = (filebuf*) call_func2(p_filebuf_attach, &fb1, 2);
     ok(pret == NULL, "wrong return, expected %p got %p\n", NULL, pret);
@@ -1016,9 +1073,11 @@ static void test_filebuf(void)
     pret = (filebuf*) call_func4(p_filebuf_open, &fb1, filename1,
         OPENMODE_ate|OPENMODE_nocreate|OPENMODE_noreplace|OPENMODE_binary, filebuf_openprot);
     ok(pret == NULL, "wrong return, expected %p got %p\n", NULL, pret);
+    ok(fb1.base.allocated == 0, "wrong allocate value, expected 0 got %d\n", fb1.base.allocated);
     fb1.base.do_lock = 0;
     pret = (filebuf*) call_func4(p_filebuf_open, &fb1, filename1, OPENMODE_out, filebuf_openprot);
     ok(pret == &fb1, "wrong return, expected %p got %p\n", &fb1, pret);
+    ok(fb1.base.allocated == 1, "wrong allocate value, expected 1 got %d\n", fb1.base.allocated);
     ok(_write(fb1.fd, "testing", 7) == 7, "_write failed\n");
     pret = (filebuf*) call_func1(p_filebuf_close, &fb1);
     ok(pret == &fb1, "wrong return, expected %p got %p\n", &fb1, pret);
@@ -1088,8 +1147,9 @@ static void test_filebuf(void)
     /* open protection*/
     fb3.fd = -1;
     fb3.base.do_lock = 0;
-    pret = (filebuf*) call_func4(p_filebuf_open, &fb3, filename3, OPENMODE_in, filebuf_openprot);
+    pret = (filebuf*) call_func4(p_filebuf_open, &fb3, filename3, OPENMODE_in|OPENMODE_out, filebuf_openprot);
     ok(pret == &fb3, "wrong return, expected %p got %p\n", &fb3, pret);
+    ok(_write(fb3.fd, "You wouldn't\nget this from\nany other guy", 40) == 40, "_write failed\n");
     fb2.base.do_lock = 0;
     pret = (filebuf*) call_func4(p_filebuf_open, &fb2, filename3, OPENMODE_in|OPENMODE_out, filebuf_openprot);
     ok(pret == &fb2, "wrong return, expected %p got %p\n", &fb2, pret);
@@ -1103,6 +1163,187 @@ static void test_filebuf(void)
     pret = (filebuf*) call_func4(p_filebuf_open, &fb2, filename3, OPENMODE_in, filebuf_openprot);
     ok(pret == NULL, "wrong return, expected %p got %p\n", NULL, pret);
     fb3.base.do_lock = -1;
+
+    /* setmode */
+    fb1.base.do_lock = 0;
+    fb1.base.pbase = fb1.base.pptr = fb1.base.base;
+    fb1.base.epptr = fb1.base.ebuf;
+    ret = (int) call_func2(p_filebuf_setmode, &fb1, filebuf_binary);
+    ok(ret == filebuf_text, "wrong return, expected %d got %d\n", filebuf_text, ret);
+    ok(fb1.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb1.base.pptr);
+    ret = (int) call_func2(p_filebuf_setmode, &fb1, filebuf_binary);
+    ok(ret == filebuf_binary, "wrong return, expected %d got %d\n", filebuf_binary, ret);
+    fb1.base.do_lock = -1;
+    ret = (int) call_func2(p_filebuf_setmode, &fb1, 0x9000);
+    ok(ret == -1, "wrong return, expected -1 got %d\n", ret);
+    fb2.base.do_lock = 0;
+    ret = (int) call_func2(p_filebuf_setmode, &fb2, filebuf_text);
+    ok(ret == -1, "wrong return, expected -1 got %d\n", ret);
+    fb2.base.do_lock = -1;
+
+    /* sync */
+    ret = (int) call_func1(p_filebuf_sync, &fb1);
+    ok(ret == 0, "wrong return, expected 0 got %d\n", ret);
+    fb1.base.eback = fb1.base.gptr = fb1.base.base;
+    fb1.base.egptr = fb1.base.pbase = fb1.base.pptr = fb1.base.base + 256;
+    fb1.base.epptr = fb1.base.ebuf;
+    ret = (int) call_func3(p_streambuf_xsputn, &fb1.base, "We're no strangers to love\n", 27);
+    ok(ret == 27, "wrong return, expected 27 got %d\n", ret);
+    ret = (int) call_func1(p_filebuf_sync, &fb1);
+    ok(ret == -1, "wrong return, expected -1 got %d\n", ret);
+    ok(fb1.base.gptr == fb1.base.base, "wrong get pointer, expected %p got %p\n", fb1.base.base, fb1.base.gptr);
+    ok(fb1.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb1.base.pptr);
+    fb1.base.eback = fb1.base.gptr = fb1.base.egptr = NULL;
+    fb1.base.pbase = fb1.base.pptr = fb1.base.base;
+    fb1.base.epptr = fb1.base.ebuf;
+    ret = (int) call_func3(p_streambuf_xsputn, &fb1.base, "You know the rules and so do I\n", 31);
+    ok(ret == 31, "wrong return, expected 31 got %d\n", ret);
+    ret = (int) call_func1(p_filebuf_sync, &fb1);
+    ok(ret == 0, "wrong return, expected 0 got %d\n", ret);
+    ok(fb1.base.gptr == NULL, "wrong get pointer, expected %p got %p\n", NULL, fb1.base.gptr);
+    ok(fb1.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb1.base.pptr);
+    fb1.base.eback = fb1.base.base;
+    fb1.base.gptr = fb1.base.base + 190;
+    fb1.base.egptr = fb1.base.pbase = fb1.base.pptr = fb1.base.base + 256;
+    fb1.base.epptr = fb1.base.ebuf;
+    ret = (int) call_func1(p_filebuf_sync, &fb1);
+    ok(ret == 0, "wrong return, expected 0 got %d\n", ret);
+    ok(fb1.base.gptr == NULL, "wrong get pointer, expected %p got %p\n", NULL, fb1.base.gptr);
+    ok(fb1.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb1.base.pptr);
+    ok(_tell(fb1.fd) == 0, "_tell failed\n");
+    ret = (int) call_func1(p_filebuf_sync, &fb2);
+    ok(ret == -1, "wrong return, expected -1 got %d\n", ret);
+    fb3.base.eback = fb3.base.base;
+    fb3.base.gptr = fb3.base.egptr = fb3.base.pbase = fb3.base.pptr = fb3.base.base + 256;
+    fb3.base.epptr = fb3.base.ebuf;
+    ret = (int) call_func3(p_streambuf_xsputn, &fb3.base, "A full commitment's what I'm thinking of\n", 41);
+    ok(ret == 41, "wrong return, expected 41 got %d\n", ret);
+    ret = (int) call_func1(p_filebuf_sync, &fb3);
+    ok(ret == -1, "wrong return, expected -1 got %d\n", ret);
+    ok(fb3.base.gptr == fb3.base.base + 256, "wrong get pointer, expected %p got %p\n", fb3.base.base + 256, fb3.base.gptr);
+    ok(fb3.base.pptr == fb3.base.base + 297, "wrong put pointer, expected %p got %p\n", fb3.base.base + 297, fb3.base.pptr);
+    fb3.base.eback = fb3.base.base;
+    fb3.base.gptr = fb3.base.egptr = fb3.base.pbase = fb3.base.pptr = fb3.base.base + 256;
+    fb3.base.epptr = fb3.base.ebuf;
+    ret = (int) call_func1(p_filebuf_sync, &fb3);
+    ok(ret == 0, "wrong return, expected 0 got %d\n", ret);
+    ok(fb3.base.gptr == NULL, "wrong get pointer, expected %p got %p\n", NULL, fb3.base.gptr);
+    ok(fb3.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb3.base.pptr);
+    fb3.base.eback = fb3.base.base;
+    fb3.base.gptr = fb3.base.base + 216;
+    fb3.base.egptr = fb3.base.pbase = fb3.base.pptr = fb3.base.base + 256;
+    fb3.base.epptr = fb3.base.ebuf;
+    ok(_read(fb3.fd, fb3.base.gptr, 42) == 40, "read failed\n");
+    ret = (int) call_func1(p_filebuf_sync, &fb3);
+    ok(ret == 0, "wrong return, expected 0 got %d\n", ret);
+    ok(fb3.base.gptr == NULL, "wrong get pointer, expected %p got %p\n", NULL, fb3.base.gptr);
+    ok(fb3.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb3.base.pptr);
+    ok(_tell(fb3.fd) == 0, "_tell failed\n");
+    fb3.base.eback = fb3.base.gptr = fb3.base.egptr = NULL;
+    fb3.base.pbase = fb3.base.pptr = fb3.base.epptr = NULL;
+
+    /* overflow */
+    ret = (int) call_func2(p_filebuf_overflow, &fb1, EOF);
+    ok(ret == 1, "wrong return, expected 1 got %d\n", ret);
+    fb1.base.pbase = fb1.base.pptr = fb1.base.epptr = NULL;
+    fb1.base.eback = fb1.base.gptr = fb1.base.base;
+    fb1.base.egptr = fb1.base.ebuf;
+    ret = (int) call_func2(p_filebuf_overflow, &fb1, 'a');
+    ok(ret == EOF, "wrong return, expected EOF got %d\n", ret);
+    fb1.base.gptr = fb1.base.egptr = fb1.base.pbase = fb1.base.pptr = fb1.base.base + 256;
+    fb1.base.epptr = fb1.base.ebuf;
+    ret = (int) call_func3(p_streambuf_xsputn, &fb1.base, "I just want to tell you how I'm feeling", 39);
+    ok(ret == 39, "wrong return, expected 39 got %d\n", ret);
+    ret = (int) call_func2(p_filebuf_overflow, &fb1, '\n');
+    ok(ret == 1, "wrong return, expected 1 got %d\n", ret);
+    ok(fb1.base.gptr == NULL, "wrong get pointer, expected %p got %p\n", NULL, fb1.base.gptr);
+    ok(fb1.base.pbase == fb1.base.base, "wrong put base, expected %p got %p\n", fb1.base.base, fb1.base.pbase);
+    ok(fb1.base.pptr == fb1.base.base + 1, "wrong put pointer, expected %p got %p\n", fb1.base.base + 1, fb1.base.pptr);
+    ok(fb1.base.epptr == fb1.base.ebuf, "wrong put end pointer, expected %p got %p\n", fb1.base.ebuf, fb1.base.epptr);
+    ok(*fb1.base.pbase == '\n', "wrong character, expected '\\n' got '%c'\n", *fb1.base.pbase);
+    ret = (int) call_func2(p_filebuf_overflow, &fb1, EOF);
+    ok(ret == 1, "wrong return, expected 1 got %d\n", ret);
+    ok(fb1.base.gptr == NULL, "wrong get pointer, expected %p got %p\n", NULL, fb1.base.gptr);
+    ok(fb1.base.pbase == fb1.base.base, "wrong put base, expected %p got %p\n", fb1.base.base, fb1.base.pbase);
+    ok(fb1.base.pptr == fb1.base.base, "wrong put pointer, expected %p got %p\n", fb1.base.base, fb1.base.pptr);
+    ok(fb1.base.epptr == fb1.base.ebuf, "wrong put end pointer, expected %p got %p\n", fb1.base.ebuf, fb1.base.epptr);
+    ret = (int) call_func2(p_filebuf_overflow, &fb2, EOF);
+    ok(ret == EOF, "wrong return, expected EOF got %d\n", ret);
+    fb2.base.do_lock = 0;
+    pret = (filebuf*) call_func4(p_filebuf_open, &fb2, filename2, OPENMODE_in|OPENMODE_out, filebuf_openprot);
+    ok(pret == &fb2, "wrong return, expected %p got %p\n", &fb2, pret);
+    fb2.base.do_lock = -1;
+    ret = (int) call_func2(p_filebuf_overflow, &fb2, EOF);
+    ok(ret == 1, "wrong return, expected 1 got %d\n", ret);
+
+    /* underflow */
+    ret = (int) call_func1(p_filebuf_underflow, &fb1);
+    ok(ret == EOF, "wrong return, expected EOF got %d\n", ret);
+    ok(fb1.base.gptr == NULL, "wrong get pointer, expected %p got %p\n", NULL, fb1.base.gptr);
+    ok(fb1.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb1.base.pptr);
+    fb1.base.eback = fb1.base.gptr = fb1.base.base;
+    fb1.base.egptr = fb1.base.pbase = fb1.base.pptr = fb1.base.base + 256;
+    fb1.base.epptr = fb1.base.ebuf;
+    *fb1.base.gptr = 'A';
+    ret = (int) call_func1(p_filebuf_underflow, &fb1);
+    ok(ret == 'A', "wrong return, expected 'A' got %d\n", ret);
+    ok(fb1.base.gptr == fb1.base.base, "wrong get pointer, expected %p got %p\n", fb1.base.base, fb1.base.gptr);
+    ok(fb1.base.pptr == fb1.base.base + 256, "wrong put pointer, expected %p got %p\n", fb1.base.base + 256, fb1.base.pptr);
+    fb1.base.gptr = fb1.base.ebuf;
+    ret = (int) call_func1(p_filebuf_underflow, &fb1);
+    ok(ret == EOF, "wrong return, expected EOF got %d\n", ret);
+    ok(fb1.base.gptr == NULL, "wrong get pointer, expected %p got %p\n", NULL, fb1.base.gptr);
+    ok(fb1.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb1.base.pptr);
+    ok(_lseek(fb1.fd, 0, SEEK_SET) == 0, "_lseek failed\n");
+    ret = (int) call_func1(p_filebuf_underflow, &fb1);
+    ok(ret == 'f', "wrong return, expected 'f' got %d\n", ret);
+    ok(fb1.base.eback == fb1.base.base, "wrong get base, expected %p got %p\n", fb1.base.base, fb1.base.eback);
+    ok(fb1.base.gptr == fb1.base.base, "wrong get pointer, expected %p got %p\n", fb1.base.base, fb1.base.gptr);
+    ok(fb1.base.egptr == fb1.base.base + 106, "wrong get end pointer, expected %p got %p\n", fb1.base.base + 106, fb1.base.egptr);
+    ok(fb1.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb1.base.pptr);
+    ret = (int) call_func1(p_filebuf_underflow, &fb2);
+    ok(ret == EOF, "wrong return, expected EOF got %d\n", ret);
+    ok(_write(fb2.fd, "A\n", 2) == 2, "_write failed\n");
+    ok(_lseek(fb2.fd, 0, SEEK_SET) == 0, "_lseek failed\n");
+    ret = (int) call_func1(p_filebuf_underflow, &fb2);
+    ok(ret == 'A', "wrong return, expected 'A' got %d\n", ret);
+    ret = (int) call_func1(p_filebuf_underflow, &fb2);
+    ok(ret == '\n', "wrong return, expected '\\n' got %d\n", ret);
+    fb2.base.do_lock = 0;
+    pret = (filebuf*) call_func1(p_filebuf_close, &fb2);
+    ok(pret == &fb2, "wrong return, expected %p got %p\n", &fb2, pret);
+    fb2.base.do_lock = -1;
+    ret = (int) call_func1(p_filebuf_underflow, &fb2);
+    ok(ret == EOF, "wrong return, expected EOF got %d\n", ret);
+
+    /* seekoff */
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, 5, SEEKDIR_beg, 0);
+    ok(ret == 5, "wrong return, expected 5 got %d\n", ret);
+    ok(fb1.base.gptr == NULL, "wrong get pointer, expected %p got %p\n", NULL, fb1.base.gptr);
+    ok(fb1.base.pptr == NULL, "wrong put pointer, expected %p got %p\n", NULL, fb1.base.pptr);
+    fb1.base.eback = fb1.base.gptr = fb1.base.base;
+    fb1.base.egptr = fb1.base.ebuf;
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, 0, SEEKDIR_beg, 0);
+    ok(ret == EOF, "wrong return, expected EOF got %d\n", ret);
+    fb1.base.eback = fb1.base.gptr = fb1.base.egptr = NULL;
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, 10, SEEKDIR_beg, OPENMODE_in|OPENMODE_out);
+    ok(ret == 10, "wrong return, expected 10 got %d\n", ret);
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, 0, SEEKDIR_cur, 0);
+    ok(ret == 10, "wrong return, expected 10 got %d\n", ret);
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, 200, SEEKDIR_cur, OPENMODE_in);
+    ok(ret == 210, "wrong return, expected 210 got %d\n", ret);
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, -60, SEEKDIR_cur, 0);
+    ok(ret == 150, "wrong return, expected 150 got %d\n", ret);
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, 0, SEEKDIR_end, 0);
+    ok(ret == 106, "wrong return, expected 106 got %d\n", ret);
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, 20, SEEKDIR_end, OPENMODE_out);
+    ok(ret == 126, "wrong return, expected 126 got %d\n", ret);
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, -150, SEEKDIR_end, -1);
+    ok(ret == EOF, "wrong return, expected EOF got %d\n", ret);
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, 10, 3, 0);
+    ok(ret == EOF, "wrong return, expected EOF got %d\n", ret);
+    ret = (int) call_func4(p_filebuf_seekoff, &fb1, 16, SEEKDIR_beg, 0);
+    ok(ret == 16, "wrong return, expected 16 got %d\n", ret);
 
     /* close */
     pret = (filebuf*) call_func1(p_filebuf_close, &fb2);

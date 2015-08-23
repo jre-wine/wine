@@ -1,6 +1,7 @@
 /*
  * Direct3D 11
  *
+ * Copyright 2008 Henri Verbeet for CodeWeavers
  * Copyright 2013 Austin English
  *
  * This library is free software; you can redistribute it and/or
@@ -19,12 +20,11 @@
  *
  */
 
-#include <stdarg.h>
+#include "config.h"
+#include "wine/port.h"
 
-#include "windef.h"
-#include "winbase.h"
-#include "d3d11.h"
-#include "wine/debug.h"
+#define D3D11_INIT_GUID
+#include "d3d11_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d11);
 
@@ -45,14 +45,216 @@ static const char *debug_d3d_driver_type(D3D_DRIVER_TYPE driver_type)
     }
 }
 
+static HRESULT WINAPI layer_init(enum dxgi_device_layer_id id, DWORD *count, DWORD *values)
+{
+    TRACE("id %#x, count %p, values %p\n", id, count, values);
+
+    if (id != DXGI_DEVICE_LAYER_D3D10_DEVICE)
+    {
+        WARN("Unknown layer id %#x\n", id);
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
+}
+
+static UINT WINAPI layer_get_size(enum dxgi_device_layer_id id, struct layer_get_size_args *args, DWORD unknown0)
+{
+    TRACE("id %#x, args %p, unknown0 %#x\n", id, args, unknown0);
+
+    if (id != DXGI_DEVICE_LAYER_D3D10_DEVICE)
+    {
+        WARN("Unknown layer id %#x\n", id);
+        return 0;
+    }
+
+    return sizeof(struct d3d_device);
+}
+
+static HRESULT WINAPI layer_create(enum dxgi_device_layer_id id, void **layer_base, DWORD unknown0,
+        void *device_object, REFIID riid, void **device_layer)
+{
+    struct d3d_device *object;
+    HRESULT hr;
+
+    TRACE("id %#x, layer_base %p, unknown0 %#x, device_object %p, riid %s, device_layer %p\n",
+            id, layer_base, unknown0, device_object, debugstr_guid(riid), device_layer);
+
+    if (id != DXGI_DEVICE_LAYER_D3D10_DEVICE)
+    {
+        WARN("Unknown layer id %#x\n", id);
+        *device_layer = NULL;
+        return E_NOTIMPL;
+    }
+
+    object = *layer_base;
+    if (FAILED(hr = d3d10_device_init(object, device_object)))
+    {
+        WARN("Failed to initialize device, hr %#x.\n", hr);
+        *device_layer = NULL;
+        return hr;
+    }
+    *device_layer = &object->IUnknown_inner;
+
+    TRACE("Created d3d10 device at %p\n", object);
+
+    return S_OK;
+}
+
+HRESULT WINAPI D3D11CoreRegisterLayers(void)
+{
+    const struct dxgi_device_layer layers[] =
+    {
+        {DXGI_DEVICE_LAYER_D3D10_DEVICE, layer_init, layer_get_size, layer_create},
+    };
+
+    DXGID3D10RegisterLayers(layers, sizeof(layers)/sizeof(*layers));
+
+    return S_OK;
+}
+
+HRESULT WINAPI D3D11CoreCreateDevice(IDXGIFactory *factory, IDXGIAdapter *adapter, UINT flags,
+        const D3D_FEATURE_LEVEL *feature_levels, UINT levels, ID3D11Device **device)
+{
+    IUnknown *dxgi_device;
+    HMODULE d3d11;
+    HRESULT hr;
+
+    TRACE("factory %p, adapter %p, flags %#x, feature_levels %p, levels %u, device %p.\n",
+            factory, adapter, flags, feature_levels, levels, device);
+
+    FIXME("Ignoring feature levels.\n");
+
+    d3d11 = GetModuleHandleA("d3d11.dll");
+    hr = DXGID3D10CreateDevice(d3d11, factory, adapter, flags, 0, (void **)&dxgi_device);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create device, returning %#x.\n", hr);
+        return hr;
+    }
+
+    hr = IUnknown_QueryInterface(dxgi_device, &IID_ID3D11Device, (void **)device);
+    IUnknown_Release(dxgi_device);
+    if (FAILED(hr))
+    {
+        ERR("Failed to query ID3D11Device interface, returning E_FAIL.\n");
+        return E_FAIL;
+    }
+
+    return S_OK;
+}
+
 HRESULT WINAPI D3D11CreateDevice(IDXGIAdapter *adapter, D3D_DRIVER_TYPE driver_type, HMODULE swrast, UINT flags,
         const D3D_FEATURE_LEVEL *feature_levels, UINT levels, UINT sdk_version, ID3D11Device **device,
-        D3D_FEATURE_LEVEL *feature_level, ID3D11DeviceContext **context)
+        D3D_FEATURE_LEVEL *obtained_feature_level, ID3D11DeviceContext **immediate_context)
 {
-    FIXME("adapter %p, driver_type %s, swrast %p, flags %#x, feature_levels %p, levels %#x, sdk_version %u, "
-            "device %p, feature_level %p, context %p stub!\n", adapter, debug_d3d_driver_type(driver_type), swrast,
-            flags, feature_levels, levels, sdk_version, device, feature_level, context);
-    return E_OUTOFMEMORY;
+    IDXGIFactory *factory;
+    HRESULT hr;
+
+    TRACE("adapter %p, driver_type %s, swrast %p, flags %#x, feature_levels %p, levels %u, sdk_version %u, "
+            "device %p, obtained_feature_level %p, immediate_context %p.\n",
+            adapter, debug_d3d_driver_type(driver_type), swrast, flags, feature_levels, levels, sdk_version,
+            device, obtained_feature_level, immediate_context);
+
+    if (adapter)
+    {
+        IDXGIAdapter_AddRef(adapter);
+        hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory);
+        if (FAILED(hr))
+        {
+            WARN("Failed to get dxgi factory, returning %#x.\n", hr);
+            return hr;
+        }
+    }
+    else
+    {
+        hr = CreateDXGIFactory(&IID_IDXGIFactory, (void **)&factory);
+        if (FAILED(hr))
+        {
+            WARN("Failed to create dxgi factory, returning %#x.\n", hr);
+            return hr;
+        }
+
+        switch(driver_type)
+        {
+            case D3D_DRIVER_TYPE_HARDWARE:
+            {
+                hr = IDXGIFactory_EnumAdapters(factory, 0, &adapter);
+                if (FAILED(hr))
+                {
+                    WARN("No adapters found, returning %#x.\n", hr);
+                    IDXGIFactory_Release(factory);
+                    return hr;
+                }
+                break;
+            }
+
+            case D3D_DRIVER_TYPE_NULL:
+                FIXME("NULL device not implemented, falling back to refrast.\n");
+                /* fall through, for now */
+            case D3D_DRIVER_TYPE_REFERENCE:
+            {
+                HMODULE refrast = LoadLibraryA("d3d11ref.dll");
+                if (!refrast)
+                {
+                    WARN("Failed to load refrast, returning E_FAIL.\n");
+                    IDXGIFactory_Release(factory);
+                    return E_FAIL;
+                }
+                hr = IDXGIFactory_CreateSoftwareAdapter(factory, refrast, &adapter);
+                FreeLibrary(refrast);
+                if (FAILED(hr))
+                {
+                    WARN("Failed to create a software adapter, returning %#x.\n", hr);
+                    IDXGIFactory_Release(factory);
+                    return hr;
+                }
+                break;
+            }
+
+            case D3D_DRIVER_TYPE_SOFTWARE:
+            {
+                if (!swrast)
+                {
+                    WARN("Software device requested, but NULL swrast passed, returning E_FAIL.\n");
+                    IDXGIFactory_Release(factory);
+                    return E_FAIL;
+                }
+                hr = IDXGIFactory_CreateSoftwareAdapter(factory, swrast, &adapter);
+                if (FAILED(hr))
+                {
+                    WARN("Failed to create a software adapter, returning %#x.\n", hr);
+                    IDXGIFactory_Release(factory);
+                    return hr;
+                }
+                break;
+            }
+
+            default:
+                FIXME("Unhandled driver type %#x.\n", driver_type);
+                IDXGIFactory_Release(factory);
+                return E_FAIL;
+        }
+    }
+
+    hr = D3D11CoreCreateDevice(factory, adapter, flags, feature_levels, levels, device);
+    IDXGIAdapter_Release(adapter);
+    IDXGIFactory_Release(factory);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create a device, returning %#x.\n", hr);
+        return hr;
+    }
+
+    TRACE("Created ID3D11Device %p.\n", *device);
+
+    if (obtained_feature_level)
+        *obtained_feature_level = ID3D11Device_GetFeatureLevel(*device);
+
+    if (immediate_context)
+        ID3D11Device_GetImmediateContext(*device, immediate_context);
+
+    return hr;
 }
 
 HRESULT WINAPI D3D11CreateDeviceAndSwapChain(IDXGIAdapter *adapter, D3D_DRIVER_TYPE driver_type,

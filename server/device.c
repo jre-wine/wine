@@ -259,6 +259,7 @@ static struct irp_call *create_irp( struct device_file *file, const irp_params_t
     if ((irp = alloc_object( &irp_call_ops )))
     {
         irp->file     = (struct device_file *)grab_object( file );
+        irp->thread   = NULL;
         irp->async    = NULL;
         irp->params   = *params;
         irp->status   = STATUS_PENDING;
@@ -383,6 +384,7 @@ static struct object *device_open_file( struct object *obj, unsigned int access,
         struct irp_call *irp;
         irp_params_t params;
 
+        memset( &params, 0, sizeof(params) );
         params.create.major   = IRP_MJ_CREATE;
         params.create.access  = access;
         params.create.sharing = sharing;
@@ -421,6 +423,7 @@ static int device_file_close_handle( struct object *obj, struct process *process
         struct irp_call *irp;
         irp_params_t params;
 
+        memset( &params, 0, sizeof(params) );
         params.close.major = IRP_MJ_CLOSE;
         params.close.file  = file->user_ptr;
 
@@ -515,6 +518,7 @@ static obj_handle_t device_file_read( struct fd *fd, const async_data_t *async_d
     obj_handle_t handle;
     irp_params_t params;
 
+    memset( &params, 0, sizeof(params) );
     params.read.major = IRP_MJ_READ;
     params.read.key   = 0;
     params.read.pos   = pos;
@@ -536,6 +540,7 @@ static obj_handle_t device_file_write( struct fd *fd, const async_data_t *async_
     obj_handle_t handle;
     irp_params_t params;
 
+    memset( &params, 0, sizeof(params) );
     params.write.major = IRP_MJ_WRITE;
     params.write.key   = 0;
     params.write.pos   = pos;
@@ -556,6 +561,7 @@ static obj_handle_t device_file_flush( struct fd *fd, const async_data_t *async_
     obj_handle_t handle;
     irp_params_t params;
 
+    memset( &params, 0, sizeof(params) );
     params.flush.major = IRP_MJ_FLUSH_BUFFERS;
     params.flush.file  = file->user_ptr;
 
@@ -575,6 +581,7 @@ static obj_handle_t device_file_ioctl( struct fd *fd, ioctl_code_t code, const a
     obj_handle_t handle;
     irp_params_t params;
 
+    memset( &params, 0, sizeof(params) );
     params.ioctl.major = IRP_MJ_DEVICE_CONTROL;
     params.ioctl.code  = code;
     params.ioctl.file = file->user_ptr;

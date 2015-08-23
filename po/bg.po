@@ -12697,6 +12697,41 @@ msgstr ""
 "липсващ изпълним файл.\n"
 "Искате ли да премахнете записа за деинсталиране от системния регистър?"
 
+#: uninstaller.rc:31
+msgid "uninstaller: The application with GUID '%1' was not found\n"
+msgstr ""
+
+#: uninstaller.rc:32
+msgid ""
+"uninstaller: The option '--remove' must be followed by an application GUID\n"
+msgstr ""
+
+#: uninstaller.rc:33
+msgid "uninstaller: Invalid option [%1]\n"
+msgstr ""
+
+#: uninstaller.rc:35
+msgid ""
+"Wine Application Uninstaller\n"
+"\n"
+"Uninstall applications from the current Wine prefix.\n"
+"\n"
+msgstr ""
+
+#: uninstaller.rc:43
+msgid ""
+"Usage:\n"
+"  uninstaller [options]\n"
+"\n"
+"Options:\n"
+"  --help\t    Display this information.\n"
+"  --list\t    List all applications installed in this Wine prefix.\n"
+"  --remove {GUID}   Uninstall the specified application.\n"
+"\t\t    Use '--list' to determine the application GUID.\n"
+"  [no option]       Launch the graphical version of this program.\n"
+"\n"
+msgstr ""
+
 #: view.rc:36
 msgid "&Pan"
 msgstr ""

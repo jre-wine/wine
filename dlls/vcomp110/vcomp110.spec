@@ -55,7 +55,7 @@
 @ stub _vcomp_copyprivate_broadcast
 @ stub _vcomp_copyprivate_receive
 @ cdecl _vcomp_enter_critsect(ptr) vcomp._vcomp_enter_critsect
-@ stub _vcomp_flush
+@ cdecl _vcomp_flush() vcomp._vcomp_flush
 @ cdecl _vcomp_for_dynamic_init(long long long long long) vcomp._vcomp_for_dynamic_init
 @ stub _vcomp_for_dynamic_init_i8
 @ cdecl _vcomp_for_dynamic_next(ptr ptr) vcomp._vcomp_for_dynamic_next
@@ -89,8 +89,8 @@
 @ cdecl _vcomp_set_num_threads(long) vcomp._vcomp_set_num_threads
 @ cdecl _vcomp_single_begin(long) vcomp._vcomp_single_begin
 @ cdecl _vcomp_single_end() vcomp._vcomp_single_end
-@ stub omp_destroy_lock
-@ stub omp_destroy_nest_lock
+@ cdecl omp_destroy_lock(ptr) vcomp.omp_destroy_lock
+@ cdecl omp_destroy_nest_lock(ptr) vcomp.omp_destroy_nest_lock
 @ cdecl omp_get_dynamic() vcomp.omp_get_dynamic
 @ cdecl omp_get_max_threads() vcomp.omp_get_max_threads
 @ cdecl omp_get_nested() vcomp.omp_get_nested
@@ -100,14 +100,14 @@
 @ stub omp_get_wtick
 @ cdecl omp_get_wtime() vcomp.omp_get_wtime
 @ cdecl omp_in_parallel() vcomp.omp_in_parallel
-@ stub omp_init_lock
-@ stub omp_init_nest_lock
+@ cdecl omp_init_lock(ptr) vcomp.omp_init_lock
+@ cdecl omp_init_nest_lock(ptr) vcomp.omp_init_nest_lock
 @ cdecl omp_set_dynamic(long) vcomp.omp_set_dynamic
-@ stub omp_set_lock
-@ stub omp_set_nest_lock
+@ cdecl omp_set_lock(ptr) vcomp.omp_set_lock
+@ cdecl omp_set_nest_lock(ptr) vcomp.omp_set_nest_lock
 @ cdecl omp_set_nested(long) vcomp.omp_set_nested
 @ cdecl omp_set_num_threads(long) vcomp.omp_set_num_threads
-@ stub omp_test_lock
-@ stub omp_test_nest_lock
-@ stub omp_unset_lock
-@ stub omp_unset_nest_lock
+@ cdecl omp_test_lock(ptr) vcomp.omp_test_lock
+@ cdecl omp_test_nest_lock(ptr) vcomp.omp_test_nest_lock
+@ cdecl omp_unset_lock(ptr) vcomp.omp_unset_lock
+@ cdecl omp_unset_nest_lock(ptr) vcomp.omp_unset_nest_lock
