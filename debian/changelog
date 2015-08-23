@@ -1,3 +1,14 @@
+wine-development (1.7.50-1) unstable; urgency=medium
+
+  * New upstream release 1.7.50, released Aug 21, 2015.
+    - Regression in Office 2010 fixed (closes: #796082).
+    - First steps of the Direct3D 11 implementation.
+    - Better font matching in DirectWrite.
+    - Support for OpenMP on ARM platforms.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 23 Aug 2015 21:36:32 +0000
+
 wine-development (1.7.49-1) unstable; urgency=medium
 
   * New upstream release 1.7.49, released Aug 7, 2015.
