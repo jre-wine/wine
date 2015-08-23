@@ -44,6 +44,12 @@ struct space_info {
     ULONGLONG available;
 };
 
+enum file_type {
+    status_unknown, file_not_found, regular_file, directory_file,
+    symlink_file, block_file, character_file, fifo_file, socket_file,
+    type_unknown
+};
+
 static inline const char* debugstr_longlong(ULONGLONG ll)
 {
     static char string[17];
@@ -67,14 +73,25 @@ static void (CDECL *p__Do_call)(void *this);
 
 /* filesystem */
 static ULONGLONG(__cdecl *p_tr2_sys__File_size)(char const*);
+static ULONGLONG(__cdecl *p_tr2_sys__File_size_wchar)(WCHAR const*);
 static int (__cdecl *p_tr2_sys__Equivalent)(char const*, char const*);
+static int (__cdecl *p_tr2_sys__Equivalent_wchar)(WCHAR const*, WCHAR const*);
 static char* (__cdecl *p_tr2_sys__Current_get)(char *);
+static WCHAR* (__cdecl *p_tr2_sys__Current_get_wchar)(WCHAR *);
 static MSVCP_bool (__cdecl *p_tr2_sys__Current_set)(char const*);
+static MSVCP_bool (__cdecl *p_tr2_sys__Current_set_wchar)(WCHAR const*);
 static int (__cdecl *p_tr2_sys__Make_dir)(char const*);
+static int (__cdecl *p_tr2_sys__Make_dir_wchar)(WCHAR const*);
 static MSVCP_bool (__cdecl *p_tr2_sys__Remove_dir)(char const*);
+static MSVCP_bool (__cdecl *p_tr2_sys__Remove_dir_wchar)(WCHAR const*);
 static int (__cdecl *p_tr2_sys__Copy_file)(char const*, char const*, MSVCP_bool);
+static int (__cdecl *p_tr2_sys__Copy_file_wchar)(WCHAR const*, WCHAR const*, MSVCP_bool);
 static int (__cdecl *p_tr2_sys__Rename)(char const*, char const*);
+static int (__cdecl *p_tr2_sys__Rename_wchar)(WCHAR const*, WCHAR const*);
 static struct space_info (__cdecl *p_tr2_sys__Statvfs)(char const*);
+static struct space_info (__cdecl *p_tr2_sys__Statvfs_wchar)(WCHAR const*);
+static enum file_type (__cdecl *p_tr2_sys__Stat)(char const*, int *);
+static enum file_type (__cdecl *p_tr2_sys__Lstat)(char const*, int *);
 
 static HMODULE msvcp;
 #define SETNOFAIL(x,y) x = (void*)GetProcAddress(msvcp,y)
@@ -105,41 +122,85 @@ static BOOL init(void)
     if(sizeof(void*) == 8) { /* 64-bit initialization */
         SET(p_tr2_sys__File_size,
                 "?_File_size@sys@tr2@std@@YA_KPEBD@Z");
+        SET(p_tr2_sys__File_size_wchar,
+                "?_File_size@sys@tr2@std@@YA_KPEB_W@Z");
         SET(p_tr2_sys__Equivalent,
                 "?_Equivalent@sys@tr2@std@@YAHPEBD0@Z");
+        SET(p_tr2_sys__Equivalent_wchar,
+                "?_Equivalent@sys@tr2@std@@YAHPEB_W0@Z");
         SET(p_tr2_sys__Current_get,
                 "?_Current_get@sys@tr2@std@@YAPEADAEAY0BAE@D@Z");
+        SET(p_tr2_sys__Current_get_wchar,
+                "?_Current_get@sys@tr2@std@@YAPEA_WAEAY0BAE@_W@Z");
         SET(p_tr2_sys__Current_set,
                 "?_Current_set@sys@tr2@std@@YA_NPEBD@Z");
+        SET(p_tr2_sys__Current_set_wchar,
+                "?_Current_set@sys@tr2@std@@YA_NPEB_W@Z");
         SET(p_tr2_sys__Make_dir,
                 "?_Make_dir@sys@tr2@std@@YAHPEBD@Z");
+        SET(p_tr2_sys__Make_dir_wchar,
+                "?_Make_dir@sys@tr2@std@@YAHPEB_W@Z");
         SET(p_tr2_sys__Remove_dir,
                 "?_Remove_dir@sys@tr2@std@@YA_NPEBD@Z");
+        SET(p_tr2_sys__Remove_dir_wchar,
+                "?_Remove_dir@sys@tr2@std@@YA_NPEB_W@Z");
         SET(p_tr2_sys__Copy_file,
                 "?_Copy_file@sys@tr2@std@@YAHPEBD0_N@Z");
+        SET(p_tr2_sys__Copy_file_wchar,
+                "?_Copy_file@sys@tr2@std@@YAHPEB_W0_N@Z");
         SET(p_tr2_sys__Rename,
                 "?_Rename@sys@tr2@std@@YAHPEBD0@Z");
+        SET(p_tr2_sys__Rename_wchar,
+                "?_Rename@sys@tr2@std@@YAHPEB_W0@Z");
         SET(p_tr2_sys__Statvfs,
                 "?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PEBD@Z");
+        SET(p_tr2_sys__Statvfs_wchar,
+                "?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PEB_W@Z");
+        SET(p_tr2_sys__Stat,
+                "?_Stat@sys@tr2@std@@YA?AW4file_type@123@PEBDAEAH@Z");
+        SET(p_tr2_sys__Lstat,
+                "?_Lstat@sys@tr2@std@@YA?AW4file_type@123@PEBDAEAH@Z");
     } else {
         SET(p_tr2_sys__File_size,
                 "?_File_size@sys@tr2@std@@YA_KPBD@Z");
+        SET(p_tr2_sys__File_size_wchar,
+                "?_File_size@sys@tr2@std@@YA_KPB_W@Z");
         SET(p_tr2_sys__Equivalent,
                 "?_Equivalent@sys@tr2@std@@YAHPBD0@Z");
+        SET(p_tr2_sys__Equivalent_wchar,
+                "?_Equivalent@sys@tr2@std@@YAHPB_W0@Z");
         SET(p_tr2_sys__Current_get,
                 "?_Current_get@sys@tr2@std@@YAPADAAY0BAE@D@Z");
+        SET(p_tr2_sys__Current_get_wchar,
+                "?_Current_get@sys@tr2@std@@YAPA_WAAY0BAE@_W@Z");
         SET(p_tr2_sys__Current_set,
                 "?_Current_set@sys@tr2@std@@YA_NPBD@Z");
+        SET(p_tr2_sys__Current_set_wchar,
+                "?_Current_set@sys@tr2@std@@YA_NPB_W@Z");
         SET(p_tr2_sys__Make_dir,
                 "?_Make_dir@sys@tr2@std@@YAHPBD@Z");
+        SET(p_tr2_sys__Make_dir_wchar,
+                "?_Make_dir@sys@tr2@std@@YAHPB_W@Z");
         SET(p_tr2_sys__Remove_dir,
                 "?_Remove_dir@sys@tr2@std@@YA_NPBD@Z");
+        SET(p_tr2_sys__Remove_dir_wchar,
+                "?_Remove_dir@sys@tr2@std@@YA_NPB_W@Z");
         SET(p_tr2_sys__Copy_file,
                 "?_Copy_file@sys@tr2@std@@YAHPBD0_N@Z");
+        SET(p_tr2_sys__Copy_file_wchar,
+                "?_Copy_file@sys@tr2@std@@YAHPB_W0_N@Z");
         SET(p_tr2_sys__Rename,
                 "?_Rename@sys@tr2@std@@YAHPBD0@Z");
+        SET(p_tr2_sys__Rename_wchar,
+                "?_Rename@sys@tr2@std@@YAHPB_W0@Z");
         SET(p_tr2_sys__Statvfs,
                 "?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PBD@Z");
+        SET(p_tr2_sys__Statvfs_wchar,
+                "?_Statvfs@sys@tr2@std@@YA?AUspace_info@123@PB_W@Z");
+        SET(p_tr2_sys__Stat,
+                "?_Stat@sys@tr2@std@@YA?AW4file_type@123@PBDAAH@Z");
+        SET(p_tr2_sys__Lstat,
+                "?_Lstat@sys@tr2@std@@YA?AW4file_type@123@PBDAAH@Z");
     }
 
     msvcr = GetModuleHandleA("msvcr120.dll");
@@ -351,6 +412,7 @@ static void test_tr2_sys__File_size(void)
     ULONGLONG val;
     HANDLE file;
     LARGE_INTEGER file_size;
+    WCHAR testW[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','1',0};
     CreateDirectoryA("tr2_test_dir", NULL);
 
     file = CreateFileA("tr2_test_dir/f1", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
@@ -360,6 +422,8 @@ static void test_tr2_sys__File_size(void)
     ok(SetEndOfFile(file), "SetEndOfFile failed\n");
     CloseHandle(file);
     val = p_tr2_sys__File_size("tr2_test_dir/f1");
+    ok(val == 7, "file_size is %s\n", debugstr_longlong(val));
+    val = p_tr2_sys__File_size_wchar(testW);
     ok(val == 7, "file_size is %s\n", debugstr_longlong(val));
 
     file = CreateFileA("tr2_test_dir/f2", GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
@@ -381,9 +445,9 @@ static void test_tr2_sys__File_size(void)
     ok(val == 0, "file_size is %s\n", debugstr_longlong(val));
     ok(errno == 0xdeadbeef, "errno = %d\n", errno);
 
-    ok(DeleteFileA("tr2_test_dir/f1"), "Expected tr2_test_dir/f1 to exist\n");
-    ok(DeleteFileA("tr2_test_dir/f2"), "Expected tr2_test_dir/f2 to exist\n");
-    ok(RemoveDirectoryA("tr2_test_dir"), "Expected tr2_test_dir to exist\n");
+    ok(DeleteFileA("tr2_test_dir/f1"), "expect tr2_test_dir/f1 to exist\n");
+    ok(DeleteFileA("tr2_test_dir/f2"), "expect tr2_test_dir/f2 to exist\n");
+    ok(p_tr2_sys__Remove_dir("tr2_test_dir"), "expect tr2_test_dir to exist\n");
 }
 
 static void test_tr2_sys__Equivalent(void)
@@ -391,6 +455,8 @@ static void test_tr2_sys__Equivalent(void)
     int val, i;
     HANDLE file;
     char temp_path[MAX_PATH], current_path[MAX_PATH];
+    WCHAR testW[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','1',0};
+    WCHAR testW2[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','2',0};
     struct {
         char const *path1;
         char const *path2;
@@ -432,9 +498,14 @@ static void test_tr2_sys__Equivalent(void)
         ok(errno == 0xdeadbeef, "errno = %d\n", errno);
     }
 
-    ok(DeleteFileA("tr2_test_dir/f1"), "Expected tr2_test_dir/f1 to exist\n");
-    ok(DeleteFileA("tr2_test_dir/f2"), "Expected tr2_test_dir/f2 to exist\n");
-    ok(RemoveDirectoryA("tr2_test_dir"), "Expected tr2_test_dir to exist\n");
+    val = p_tr2_sys__Equivalent_wchar(testW, testW);
+    ok(val == 1, "tr2_sys__Equivalent(): expect: 1, got %d\n", val);
+    val = p_tr2_sys__Equivalent_wchar(testW, testW2);
+    ok(val == 0, "tr2_sys__Equivalent(): expect: 0, got %d\n", val);
+
+    ok(DeleteFileA("tr2_test_dir/f1"), "expect tr2_test_dir/f1 to exist\n");
+    ok(DeleteFileA("tr2_test_dir/f2"), "expect tr2_test_dir/f2 to exist\n");
+    ok(p_tr2_sys__Remove_dir("tr2_test_dir"), "expect tr2_test_dir to exist\n");
     ok(SetCurrentDirectoryA(current_path), "SetCurrentDirectoryA failed\n");
 }
 
@@ -442,6 +513,8 @@ static void test_tr2_sys__Current_get(void)
 {
     char temp_path[MAX_PATH], current_path[MAX_PATH], origin_path[MAX_PATH];
     char *temp;
+    WCHAR temp_path_wchar[MAX_PATH], current_path_wchar[MAX_PATH];
+    WCHAR *temp_wchar;
     memset(origin_path, 0, MAX_PATH);
     GetCurrentDirectoryA(MAX_PATH, origin_path);
     memset(temp_path, 0, MAX_PATH);
@@ -454,6 +527,14 @@ static void test_tr2_sys__Current_get(void)
     temp[strlen(temp)] = '\\';
     ok(!strcmp(temp_path, current_path), "test_tr2_sys__Current_get(): expect: %s, got %s\n", temp_path, current_path);
 
+    GetTempPathW(MAX_PATH, temp_path_wchar);
+    ok(SetCurrentDirectoryW(temp_path_wchar), "SetCurrentDirectoryW to temp_path_wchar failed\n");
+    memset(current_path_wchar, 0, MAX_PATH);
+    temp_wchar = p_tr2_sys__Current_get_wchar(current_path_wchar);
+    ok(temp_wchar == current_path_wchar, "p_tr2_sys__Current_get_wchar returned different buffer\n");
+    temp_wchar[wcslen(temp_wchar)] = '\\';
+    ok(!wcscmp(temp_path_wchar, current_path_wchar), "test_tr2_sys__Current_get(): expect: %s, got %s\n", wine_dbgstr_w(temp_path_wchar), wine_dbgstr_w(current_path_wchar));
+
     ok(SetCurrentDirectoryA(origin_path), "SetCurrentDirectoryA to origin_path failed\n");
     memset(current_path, 0, MAX_PATH);
     temp = p_tr2_sys__Current_get(current_path);
@@ -465,6 +546,7 @@ static void test_tr2_sys__Current_set(void)
 {
     char temp_path[MAX_PATH], current_path[MAX_PATH], origin_path[MAX_PATH];
     char *temp;
+    WCHAR testW[] = {'.','/',0};
     memset(temp_path, 0, MAX_PATH);
     GetTempPathA(MAX_PATH, temp_path);
     memset(origin_path, 0, MAX_PATH);
@@ -479,7 +561,7 @@ static void test_tr2_sys__Current_set(void)
     temp[strlen(temp)] = '\\';
     ok(!strcmp(temp_path, current_path), "test_tr2_sys__Current_get(): expect: %s, got %s\n", temp_path, current_path);
 
-    ok(p_tr2_sys__Current_set("./"), "p_tr2_sys__Current_set to temp_path failed\n");
+    ok(p_tr2_sys__Current_set_wchar(testW), "p_tr2_sys__Current_set_wchar to temp_path failed\n");
     memset(current_path, 0, MAX_PATH);
     temp = p_tr2_sys__Current_get(current_path);
     ok(temp == current_path, "p_tr2_sys__Current_get returned different buffer\n");
@@ -504,6 +586,7 @@ static void test_tr2_sys__Current_set(void)
 static void test_tr2_sys__Make_dir(void)
 {
     int ret, i;
+    WCHAR testW[] = {'w','d',0};
     struct {
         char const *path;
         int val;
@@ -520,8 +603,11 @@ static void test_tr2_sys__Make_dir(void)
         ok(ret == tests[i].val, "tr2_sys__Make_dir(): test %d expect: %d, got %d\n", i+1, tests[i].val, ret);
         ok(errno == 0xdeadbeef, "tr2_sys__Make_dir(): test %d errno expect 0xdeadbeef, got %d\n", i+1, errno);
     }
+    ret = p_tr2_sys__Make_dir_wchar(testW);
+    ok(ret == 1, "tr2_sys__Make_dir(): expect: 1, got %d\n", ret);
 
-    ok(RemoveDirectoryA("tr2_test_dir"), "Expected tr2_test_dir to exist\n");
+    ok(p_tr2_sys__Remove_dir("tr2_test_dir"), "expect tr2_test_dir to exist\n");
+    ok(p_tr2_sys__Remove_dir_wchar(testW), "expect wd to exist\n");
 }
 
 static void test_tr2_sys__Remove_dir(void)
@@ -553,6 +639,7 @@ static void test_tr2_sys__Copy_file(void)
     HANDLE file;
     int ret, i;
     LARGE_INTEGER file_size;
+    WCHAR testW[] = {'f','1',0}, testW2[] = {'f','w',0};
     struct {
         char const *source;
         char const *dest;
@@ -599,8 +686,11 @@ static void test_tr2_sys__Copy_file(void)
             ok(p_tr2_sys__File_size(tests[i].source) == p_tr2_sys__File_size(tests[i].dest),
                     "test_tr2_sys__Copy_file(): test %d failed, two files' size are not equal\n", i+1);
     }
+    ret = p_tr2_sys__Copy_file_wchar(testW, testW2, TRUE);
+    ok(ret == ERROR_SUCCESS, "test_tr2_sys__Copy_file_wchar() expect ERROR_SUCCESS, got %d\n", ret);
 
     ok(DeleteFileA("f1"), "expect f1 to exist\n");
+    ok(DeleteFileW(testW2), "expect fw to exist\n");
     ok(DeleteFileA("f1_copy"), "expect f1_copy to exist\n");
     ok(DeleteFileA("tr2_test_dir/f1_copy"), "expect tr2_test_dir/f1 to exist\n");
     ret = p_tr2_sys__Remove_dir("tr2_test_dir");
@@ -614,6 +704,8 @@ static void test_tr2_sys__Rename(void)
     BY_HANDLE_FILE_INFORMATION info1, info2;
     char temp_path[MAX_PATH], current_path[MAX_PATH];
     LARGE_INTEGER file_size;
+    WCHAR testW[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','1',0};
+    WCHAR testW2[] = {'t','r','2','_','t','e','s','t','_','d','i','r','/','f','w',0};
     struct {
         char const *old_path;
         char const *new_path;
@@ -676,8 +768,10 @@ static void test_tr2_sys__Rename(void)
     ok(ret == ERROR_ALREADY_EXISTS, "test_tr2_sys__Rename(): expect: ERROR_ALREADY_EXISTS, got %d\n", ret);
     ok(p_tr2_sys__File_size("tr2_test_dir\\f1") == 7, "test_tr2_sys__Rename(): expect: 7, got %s\n", debugstr_longlong(p_tr2_sys__File_size("tr2_test_dir\\f1")));
     ok(p_tr2_sys__File_size("tr2_test_dir\\f1_rename") == 0, "test_tr2_sys__Rename(): expect: 0, got %s\n",debugstr_longlong(p_tr2_sys__File_size("tr2_test_dir\\f1_rename")));
+    ret = p_tr2_sys__Rename_wchar(testW, testW2);
+    ok(ret == ERROR_SUCCESS, "tr2_sys__Rename_wchar(): expect: ERROR_SUCCESS, got %d\n",  ret);
 
-    ok(DeleteFileA("tr2_test_dir\\f1"), "expect f1 to exist\n");
+    ok(DeleteFileW(testW2), "expect fw to exist\n");
     ok(DeleteFileA("tr2_test_dir\\f1_rename"), "expect f1_rename to exist\n");
     ret = p_tr2_sys__Remove_dir("tr2_test_dir");
     ok(ret == 1, "test_tr2_sys__Remove_dir(): expect %d got %d\n", 1, ret);
@@ -688,12 +782,19 @@ static void test_tr2_sys__Statvfs(void)
 {
     struct space_info info;
     char current_path[MAX_PATH];
+    WCHAR current_path_wchar[MAX_PATH];
     memset(current_path, 0, MAX_PATH);
     p_tr2_sys__Current_get(current_path);
+    memset(current_path_wchar, 0, MAX_PATH);
+    p_tr2_sys__Current_get_wchar(current_path_wchar);
 
     info = p_tr2_sys__Statvfs(current_path);
     ok(info.capacity >= info.free, "test_tr2_sys__Statvfs(): info.capacity < info.free\n");
     ok(info.free >= info.available, "test_tr2_sys__Statvfs(): info.free < info.available\n");
+
+    info = p_tr2_sys__Statvfs_wchar(current_path_wchar);
+    ok(info.capacity >= info.free, "tr2_sys__Statvfs_wchar(): info.capacity < info.free\n");
+    ok(info.free >= info.available, "tr2_sys__Statvfs_wchar(): info.free < info.available\n");
 
     info = p_tr2_sys__Statvfs(NULL);
     ok(info.available == 0, "test_tr2_sys__Statvfs(): info.available expect: %d, got %s\n",
@@ -710,6 +811,95 @@ static void test_tr2_sys__Statvfs(void)
             0, debugstr_longlong(info.capacity));
     ok(info.free == 0, "test_tr2_sys__Statvfs(): info.free expect: %d, got %s\n",
             0, debugstr_longlong(info.free));
+}
+
+static void test_tr2_sys__Stat(void)
+{
+    int i, err_code, ret;
+    HANDLE file;
+    enum file_type val;
+    struct {
+        char const *path;
+        enum file_type ret;
+        int err_code;
+        int is_todo;
+    } tests[] = {
+        { NULL, status_unknown, ERROR_INVALID_PARAMETER, FALSE },
+        { "tr2_test_dir",    directory_file, ERROR_SUCCESS, FALSE },
+        { "tr2_test_dir\\f1",  regular_file, ERROR_SUCCESS, FALSE },
+        { "tr2_test_dir\\not_exist_file  ", file_not_found, ERROR_SUCCESS, FALSE },
+        { "tr2_test_dir\\??invalid_name>>", file_not_found, ERROR_SUCCESS, FALSE },
+        { "tr2_test_dir\\f1_link" ,   regular_file, ERROR_SUCCESS, TRUE },
+        { "tr2_test_dir\\dir_link", directory_file, ERROR_SUCCESS, TRUE },
+    };
+
+    CreateDirectoryA("tr2_test_dir", NULL);
+    file = CreateFileA("tr2_test_dir/f1", 0, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "create file failed: INVALID_HANDLE_VALUE\n");
+    ok(CloseHandle(file), "CloseHandle\n");
+    SetLastError(0xdeadbeef);
+    ret = CreateSymbolicLinkA("tr2_test_dir/f1_link", "tr2_test_dir/f1", 0);
+    if(!ret && (GetLastError()==ERROR_PRIVILEGE_NOT_HELD||GetLastError()==ERROR_INVALID_FUNCTION)) {
+        tests[5].ret = tests[6].ret = file_not_found;
+        win_skip("Privilege not held or symbolic link not supported, skipping symbolic link tests.\n");
+    }else {
+        ok(ret, "CreateSymbolicLinkA failed\n");
+        ok(CreateSymbolicLinkA("tr2_test_dir/dir_link", "tr2_test_dir", 1), "CreateSymbolicLinkA failed\n");
+    }
+
+    file = CreateNamedPipeA("\\\\.\\PiPe\\tests_pipe.c",
+            PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_WAIT, 2, 1024, 1024,
+            NMPWAIT_USE_DEFAULT_WAIT, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n");
+    err_code = 0xdeadbeef;
+    val = p_tr2_sys__Stat("\\\\.\\PiPe\\tests_pipe.c", &err_code);
+    todo_wine ok(regular_file == val, "tr2_sys__Stat(): expect: regular_file, got %d\n", val);
+    todo_wine ok(ERROR_SUCCESS == err_code, "tr2_sys__Stat(): err_code expect: ERROR_SUCCESS, got %d\n", err_code);
+    err_code = 0xdeadbeef;
+    val = p_tr2_sys__Lstat("\\\\.\\PiPe\\tests_pipe.c", &err_code);
+    ok(status_unknown == val, "tr2_sys__Lstat(): expect: status_unknown, got %d\n", val);
+    todo_wine ok(ERROR_PIPE_BUSY == err_code, "tr2_sys__Lstat(): err_code expect: ERROR_PIPE_BUSY, got %d\n", err_code);
+    ok(CloseHandle(file), "CloseHandle\n");
+    file = CreateNamedPipeA("\\\\.\\PiPe\\tests_pipe.c",
+            PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_WAIT, 2, 1024, 1024,
+            NMPWAIT_USE_DEFAULT_WAIT, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "CreateNamedPipe failed\n");
+    err_code = 0xdeadbeef;
+    val = p_tr2_sys__Lstat("\\\\.\\PiPe\\tests_pipe.c", &err_code);
+    todo_wine ok(regular_file == val, "tr2_sys__Lstat(): expect: regular_file, got %d\n", val);
+    todo_wine ok(ERROR_SUCCESS == err_code, "tr2_sys__Lstat(): err_code expect: ERROR_SUCCESS, got %d\n", err_code);
+    ok(CloseHandle(file), "CloseHandle\n");
+
+    for(i=0; i<sizeof(tests)/sizeof(tests[0]); i++) {
+        err_code = 0xdeadbeef;
+        val = p_tr2_sys__Stat(tests[i].path, &err_code);
+        if(tests[i].is_todo)
+            todo_wine ok(tests[i].ret == val, "tr2_sys__Stat(): test %d expect: %d, got %d\n",
+                    i+1, tests[i].ret, val);
+        else
+            ok(tests[i].ret == val, "tr2_sys__Stat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+        ok(tests[i].err_code == err_code, "tr2_sys__Stat(): test %d err_code expect: %d, got %d\n",
+                i+1, tests[i].err_code, err_code);
+
+        /* test tr2_sys__Lstat */
+        err_code = 0xdeadbeef;
+        val = p_tr2_sys__Lstat(tests[i].path, &err_code);
+        if(tests[i].is_todo)
+            todo_wine ok(tests[i].ret == val, "tr2_sys__Lstat(): test %d expect: %d, got %d\n",
+                    i+1, tests[i].ret, val);
+        else
+            ok(tests[i].ret == val, "tr2_sys__Lstat(): test %d expect: %d, got %d\n", i+1, tests[i].ret, val);
+
+        ok(tests[i].err_code == err_code, "tr2_sys__Lstat(): test %d err_code expect: %d, got %d\n",
+                i+1, tests[i].err_code, err_code);
+    }
+
+    if(ret) {
+        todo_wine ok(DeleteFileA("tr2_test_dir/f1_link"), "expect tr2_test_dir/f1_link to exist\n");
+        todo_wine ok(RemoveDirectoryA("tr2_test_dir/dir_link"), "expect tr2_test_dir/dir_link to exist\n");
+    }
+    ok(DeleteFileA("tr2_test_dir/f1"), "expect tr2_test_dir/f1 to exist\n");
+    ok(RemoveDirectoryA("tr2_test_dir"), "expect tr2_test_dir to exist\n");
 }
 
 START_TEST(msvcp120)
@@ -730,5 +920,6 @@ START_TEST(msvcp120)
     test_tr2_sys__Copy_file();
     test_tr2_sys__Rename();
     test_tr2_sys__Statvfs();
+    test_tr2_sys__Stat();
     FreeLibrary(msvcp);
 }

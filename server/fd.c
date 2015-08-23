@@ -164,7 +164,8 @@ struct closed_fd
 {
     struct list entry;       /* entry in inode closed list */
     int         unix_fd;     /* the unix file descriptor */
-    char        unlink[1];   /* name to unlink on close (if any) */
+    int         unlink;      /* whether to unlink on close */
+    char       *unix_name;   /* name to unlink on close, points to parent fd unix_name */
 };
 
 struct fd
@@ -1016,9 +1017,10 @@ static void inode_close_pending( struct inode *inode, int keep_unlinks )
             close( fd->unix_fd );
             fd->unix_fd = -1;
         }
-        if (!keep_unlinks || !fd->unlink[0])  /* get rid of it unless there's an unlink pending on that file */
+        if (!keep_unlinks || !fd->unlink)  /* get rid of it unless there's an unlink pending on that file */
         {
             list_remove( ptr );
+            free( fd->unix_name );
             free( fd );
         }
         ptr = next;
@@ -1048,16 +1050,17 @@ static void inode_destroy( struct object *obj )
         struct closed_fd *fd = LIST_ENTRY( ptr, struct closed_fd, entry );
         list_remove( ptr );
         if (fd->unix_fd != -1) close( fd->unix_fd );
-        if (fd->unlink[0])
+        if (fd->unlink)
         {
             /* make sure it is still the same file */
             struct stat st;
-            if (!stat( fd->unlink, &st ) && st.st_dev == inode->device->dev && st.st_ino == inode->ino)
+            if (!stat( fd->unix_name, &st ) && st.st_dev == inode->device->dev && st.st_ino == inode->ino)
             {
-                if (S_ISDIR(st.st_mode)) rmdir( fd->unlink );
-                else unlink( fd->unlink );
+                if (S_ISDIR(st.st_mode)) rmdir( fd->unix_name );
+                else unlink( fd->unix_name );
             }
         }
+        free( fd->unix_name );
         free( fd );
     }
     release_object( inode->device );
@@ -1103,7 +1106,7 @@ static void inode_add_closed_fd( struct inode *inode, struct closed_fd *fd )
     {
         list_add_head( &inode->closed, &fd->entry );
     }
-    else if (fd->unlink[0])  /* close the fd but keep the structure around for unlink */
+    else if (fd->unlink)  /* close the fd but keep the structure around for unlink */
     {
         if (fd->unix_fd != -1) close( fd->unix_fd );
         fd->unix_fd = -1;
@@ -1112,6 +1115,7 @@ static void inode_add_closed_fd( struct inode *inode, struct closed_fd *fd )
     else  /* no locks on this inode and no unlink, get rid of the fd */
     {
         if (fd->unix_fd != -1) close( fd->unix_fd );
+        free( fd->unix_name );
         free( fd );
     }
 }
@@ -1451,7 +1455,7 @@ static void fd_dump( struct object *obj, int verbose )
 {
     struct fd *fd = (struct fd *)obj;
     fprintf( stderr, "Fd unix_fd=%d user=%p options=%08x", fd->unix_fd, fd->user, fd->options );
-    if (fd->inode) fprintf( stderr, " inode=%p unlink='%s'", fd->inode, fd->closed->unlink );
+    if (fd->inode) fprintf( stderr, " inode=%p unlink=%d", fd->inode, fd->closed->unlink );
     fprintf( stderr, "\n" );
 }
 
@@ -1465,7 +1469,6 @@ static void fd_destroy( struct object *obj )
 
     if (fd->completion) release_object( fd->completion );
     remove_fd_locks( fd );
-    free( fd->unix_name );
     list_remove( &fd->inode_entry );
     if (fd->poll_index != -1) remove_poll_user( fd, fd->poll_index );
     if (fd->inode)
@@ -1476,6 +1479,7 @@ static void fd_destroy( struct object *obj )
     else  /* no inode, close it right away */
     {
         if (fd->unix_fd != -1) close( fd->unix_fd );
+        free( fd->unix_name );
     }
 }
 
@@ -1563,7 +1567,7 @@ static inline void unmount_fd( struct fd *fd )
     fd->unix_fd = -1;
     fd->no_fd_status = STATUS_VOLUME_DISMOUNTED;
     fd->closed->unix_fd = -1;
-    fd->closed->unlink[0] = 0;
+    fd->closed->unlink = 0;
 
     /* stop using Unix locks on this fd (existing locks have been removed by close) */
     fd->fs_locks = 0;
@@ -1662,7 +1666,8 @@ struct fd *dup_fd_object( struct fd *orig, unsigned int access, unsigned int sha
             goto failed;
         }
         closed->unix_fd = fd->unix_fd;
-        closed->unlink[0] = 0;
+        closed->unlink = 0;
+        closed->unix_name = fd->unix_name;
         fd->closed = closed;
         fd->inode = (struct inode *)grab_object( orig->inode );
         list_add_head( &fd->inode->open, &fd->inode_entry );
@@ -1712,7 +1717,7 @@ void set_fd_user( struct fd *fd, const struct fd_ops *user_ops, struct object *u
     fd->user   = user;
 }
 
-static char *dup_fd_name( struct fd *root, const char *name )
+char *dup_fd_name( struct fd *root, const char *name )
 {
     char *ret;
 
@@ -1738,7 +1743,6 @@ struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode, 
     struct stat st;
     struct closed_fd *closed_fd;
     struct fd *fd;
-    const char *unlink_name = "";
     int root_fd = -1;
     int rw_mode;
 
@@ -1752,8 +1756,7 @@ struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode, 
     if (!(fd = alloc_fd_object())) return NULL;
 
     fd->options = options;
-    if (options & FILE_DELETE_ON_CLOSE) unlink_name = name;
-    if (!(closed_fd = mem_alloc( sizeof(*closed_fd) + strlen(unlink_name) )))
+    if (!(closed_fd = mem_alloc( sizeof(*closed_fd) )))
     {
         release_object( fd );
         return NULL;
@@ -1810,7 +1813,8 @@ struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode, 
     }
 
     closed_fd->unix_fd = fd->unix_fd;
-    closed_fd->unlink[0] = 0;
+    closed_fd->unlink = 0;
+    closed_fd->unix_name = fd->unix_name;
     fstat( fd->unix_fd, &st );
     *mode = st.st_mode;
 
@@ -1851,7 +1855,7 @@ struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode, 
             set_error( err );
             return NULL;
         }
-        strcpy( closed_fd->unlink, unlink_name );
+        closed_fd->unlink = (options & FILE_DELETE_ON_CLOSE) != 0;
         if (flags & O_TRUNC)
         {
             if (S_ISDIR(st.st_mode))
@@ -1865,7 +1869,7 @@ struct fd *open_fd( struct fd *root, const char *name, int flags, mode_t *mode, 
     }
     else  /* special file */
     {
-        if (unlink_name[0])  /* we can't unlink special files */
+        if (options & FILE_DELETE_ON_CLOSE)  /* we can't unlink special files */
         {
             set_error( STATUS_INVALID_PARAMETER );
             goto error;
@@ -2210,6 +2214,145 @@ static struct fd *get_handle_fd_obj( struct process *process, obj_handle_t handl
     return fd;
 }
 
+/* set disposition for the fd */
+static void set_fd_disposition( struct fd *fd, int unlink )
+{
+    struct stat st;
+
+    if (!fd->inode)
+    {
+        set_error( STATUS_OBJECT_TYPE_MISMATCH );
+        return;
+    }
+
+    if (fd->unix_fd == -1)
+    {
+        set_error( fd->no_fd_status );
+        return;
+    }
+
+    if (fstat( fd->unix_fd, &st ) == -1)
+    {
+        file_set_error();
+        return;
+    }
+
+    /* can't unlink special files */
+    if (unlink && !S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        return;
+    }
+
+    /* can't unlink files we don't have permission to access */
+    if (unlink && !(st.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)))
+    {
+        set_error( STATUS_CANNOT_DELETE );
+        return;
+    }
+
+    fd->closed->unlink = unlink || (fd->options & FILE_DELETE_ON_CLOSE);
+}
+
+/* set new name for the fd */
+static void set_fd_name( struct fd *fd, struct fd *root, const char *nameptr,
+                         data_size_t len, int create_link )
+{
+    struct inode *inode;
+    struct stat st;
+    char *name;
+
+    if (!fd->inode || !fd->unix_name)
+    {
+        set_error( STATUS_OBJECT_TYPE_MISMATCH );
+        return;
+    }
+    if (!len || ((nameptr[0] == '/') ^ !root))
+    {
+        set_error( STATUS_OBJECT_PATH_SYNTAX_BAD );
+        return;
+    }
+    if (!(name = mem_alloc( len + 1 ))) return;
+    memcpy( name, nameptr, len );
+    name[len] = 0;
+
+    if (root)
+    {
+        char *combined_name = dup_fd_name( root, name );
+        if (!combined_name)
+        {
+            set_error( STATUS_NO_MEMORY );
+            goto failed;
+        }
+        free( name );
+        name = combined_name;
+    }
+
+    /* when creating a hard link, source cannot be a dir */
+    if (create_link && fd->unix_fd != -1 &&
+        !fstat( fd->unix_fd, &st ) && S_ISDIR( st.st_mode ))
+    {
+        set_error( STATUS_FILE_IS_A_DIRECTORY );
+        goto failed;
+    }
+
+    if (!stat( name, &st ))
+    {
+        /* can't replace directories or special files */
+        if (!S_ISREG( st.st_mode ))
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto failed;
+        }
+
+        /* can't replace an opened file */
+        if ((inode = get_inode( st.st_dev, st.st_ino, -1 )))
+        {
+            int is_empty = list_empty( &inode->open );
+            release_object( inode );
+            if (!is_empty)
+            {
+                set_error( STATUS_ACCESS_DENIED );
+                goto failed;
+            }
+        }
+
+        /* link() expects that the target doesn't exist */
+        /* rename() cannot replace files with directories */
+        if (create_link || (fd->unix_fd != -1 &&
+            !fstat( fd->unix_fd, &st ) && S_ISDIR( st.st_mode )))
+        {
+            if (unlink( name ))
+            {
+                file_set_error();
+                goto failed;
+            }
+        }
+    }
+
+    if (create_link)
+    {
+        if (link( fd->unix_name, name ))
+            file_set_error();
+        free( name );
+        return;
+    }
+
+    if (rename( fd->unix_name, name ))
+    {
+        file_set_error();
+        goto failed;
+    }
+
+    free( fd->unix_name );
+    fd->unix_name = name;
+    fd->closed->unix_name = name;
+    return;
+
+failed:
+    free( name );
+}
+
 struct completion *fd_get_completion( struct fd *fd, apc_param_t *p_key )
 {
     *p_key = fd->comp_key;
@@ -2243,19 +2386,30 @@ DECL_HANDLER(open_file_object)
 
     get_req_unicode_str( &name );
     if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
-        return;
-
-    if ((obj = open_object_dir( root, &name, req->attributes, NULL )))
     {
-        if ((result = obj->ops->open_file( obj, req->access, req->sharing, req->options )))
+        if (get_error() != STATUS_OBJECT_TYPE_MISMATCH) return;
+        if (!(obj = (struct object *)get_file_obj( current->process, req->rootdir, 0 ))) return;
+        if (name.len)
         {
-            reply->handle = alloc_handle( current->process, result, req->access, req->attributes );
-            release_object( result );
+            release_object( obj );
+            set_error( STATUS_OBJECT_PATH_NOT_FOUND );
+            return;
         }
-        release_object( obj );
+        clear_error();
+    }
+    else
+    {
+        obj = open_object_dir( root, &name, req->attributes, NULL );
+        if (root) release_object( root );
+        if (!obj) return;
     }
 
-    if (root) release_object( root );
+    if ((result = obj->ops->open_file( obj, req->access, req->sharing, req->options )))
+    {
+        reply->handle = alloc_handle( current->process, result, req->access, req->attributes );
+        release_object( result );
+    }
+    release_object( obj );
 }
 
 /* get the Unix name from a file handle */
@@ -2404,4 +2558,38 @@ DECL_HANDLER(add_fd_completion)
             add_completion( fd->completion, fd->comp_key, req->cvalue, req->status, req->information );
         release_object( fd );
     }
+}
+
+/* set fd disposition information */
+DECL_HANDLER(set_fd_disp_info)
+{
+    struct fd *fd = get_handle_fd_obj( current->process, req->handle, DELETE );
+    if (fd)
+    {
+        set_fd_disposition( fd, req->unlink );
+        release_object( fd );
+    }
+}
+
+/* set fd name information */
+DECL_HANDLER(set_fd_name_info)
+{
+    struct fd *fd, *root_fd = NULL;
+
+    if (req->rootdir)
+    {
+        struct dir *root;
+
+        if (!(root = get_dir_obj( current->process, req->rootdir, 0 ))) return;
+        root_fd = get_obj_fd( (struct object *)root );
+        release_object( root );
+        if (!root_fd) return;
+    }
+
+    if ((fd = get_handle_fd_obj( current->process, req->handle, 0 )))
+    {
+        set_fd_name( fd, root_fd, get_req_data(), get_req_data_size(), req->link );
+        release_object( fd );
+    }
+    if (root_fd) release_object( root_fd );
 }

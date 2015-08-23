@@ -133,6 +133,7 @@ static void d2d_draw(struct d2d_d3d_render_target *render_target, enum d2d_shape
 {
     struct d2d_shape_resources *shape_resources = &render_target->shape_resources[shape_type];
     ID3D10Device *device = render_target->device;
+    D3D10_RECT scissor_rect;
     unsigned int offset;
     D3D10_VIEWPORT vp;
     HRESULT hr;
@@ -164,16 +165,22 @@ static void d2d_draw(struct d2d_d3d_render_target *render_target, enum d2d_shape
     if (render_target->clip_stack.count)
     {
         const D2D1_RECT_F *clip_rect;
-        D3D10_RECT scissor_rect;
 
         clip_rect = &render_target->clip_stack.stack[render_target->clip_stack.count - 1];
         scissor_rect.left = clip_rect->left + 0.5f;
         scissor_rect.top = clip_rect->top + 0.5f;
         scissor_rect.right = clip_rect->right + 0.5f;
         scissor_rect.bottom = clip_rect->bottom + 0.5f;
-        ID3D10Device_RSSetScissorRects(device, 1, &scissor_rect);
-        ID3D10Device_RSSetState(device, render_target->rs);
     }
+    else
+    {
+        scissor_rect.left = 0.0f;
+        scissor_rect.top = 0.0f;
+        scissor_rect.right = render_target->pixel_size.width;
+        scissor_rect.bottom = render_target->pixel_size.height;
+    }
+    ID3D10Device_RSSetScissorRects(device, 1, &scissor_rect);
+    ID3D10Device_RSSetState(device, render_target->rs);
     ID3D10Device_OMSetRenderTargets(device, 1, &render_target->view, NULL);
     if (brush)
         d2d_brush_bind_resources(brush, render_target, shape_type);
@@ -435,7 +442,6 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateBitmapBrush(ID2D1Re
 {
     struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
     struct d2d_brush *object;
-    HRESULT hr;
 
     TRACE("iface %p, bitmap %p, bitmap_brush_desc %p, brush_desc %p, brush %p.\n",
             iface, bitmap, bitmap_brush_desc, brush_desc, brush);
@@ -443,12 +449,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_CreateBitmapBrush(ID2D1Re
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
 
-    if (FAILED(hr = d2d_bitmap_brush_init(object, render_target->factory, bitmap, bitmap_brush_desc, brush_desc)))
-    {
-        WARN("Failed to initialize brush, hr %#x.\n", hr);
-        HeapFree(GetProcessHeap(), 0, object);
-        return hr;
-    }
+    d2d_bitmap_brush_init(object, render_target->factory, bitmap, bitmap_brush_desc, brush_desc);
 
     TRACE("Created brush %p.\n", object);
     *brush = (ID2D1BitmapBrush *)&object->ID2D1Brush_iface;
@@ -670,6 +671,7 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
     ID3D10Buffer *ib, *vb, *vs_cb, *ps_cb;
     D3D10_SUBRESOURCE_DATA buffer_data;
     D3D10_BUFFER_DESC buffer_desc;
+    D2D1_MATRIX_3X2_F w, g;
     float tmp_x, tmp_y;
     HRESULT hr;
     struct
@@ -687,13 +689,24 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
 
     tmp_x =  (2.0f * render_target->dpi_x) / (96.0f * render_target->pixel_size.width);
     tmp_y = -(2.0f * render_target->dpi_y) / (96.0f * render_target->pixel_size.height);
-    transform._11 = render_target->drawing_state.transform._11 * tmp_x;
-    transform._21 = render_target->drawing_state.transform._21 * tmp_x;
-    transform._31 = render_target->drawing_state.transform._31 * tmp_x - 1.0f;
+    w = render_target->drawing_state.transform;
+    w._11 *= tmp_x;
+    w._21 *= tmp_x;
+    w._31 = w._31 * tmp_x - 1.0f;
+    w._12 *= tmp_y;
+    w._22 *= tmp_y;
+    w._32 = w._32 * tmp_y + 1.0f;
+
+    g = geometry_impl->transform;
+    d2d_matrix_multiply(&g, &w);
+
+    transform._11 = g._11;
+    transform._21 = g._21;
+    transform._31 = g._31;
     transform.pad0 = 0.0f;
-    transform._12 = render_target->drawing_state.transform._12 * tmp_y;
-    transform._22 = render_target->drawing_state.transform._22 * tmp_y;
-    transform._32 = render_target->drawing_state.transform._32 * tmp_y + 1.0f;
+    transform._12 = g._12;
+    transform._22 = g._22;
+    transform._32 = g._32;
     transform.pad1 = 0.0f;
 
     buffer_desc.ByteWidth = sizeof(transform);
@@ -719,32 +732,35 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
         return;
     }
 
-    buffer_desc.ByteWidth = geometry_impl->face_count * sizeof(*geometry_impl->faces);
-    buffer_desc.BindFlags = D3D10_BIND_INDEX_BUFFER;
-    buffer_data.pSysMem = geometry_impl->faces;
-
-    if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->device, &buffer_desc, &buffer_data, &ib)))
+    if (geometry_impl->face_count)
     {
-        WARN("Failed to create index buffer, hr %#x.\n", hr);
-        goto done;
-    }
+        buffer_desc.ByteWidth = geometry_impl->face_count * sizeof(*geometry_impl->faces);
+        buffer_desc.BindFlags = D3D10_BIND_INDEX_BUFFER;
+        buffer_data.pSysMem = geometry_impl->faces;
 
-    buffer_desc.ByteWidth = geometry_impl->vertex_count * sizeof(*geometry_impl->vertices);
-    buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
-    buffer_data.pSysMem = geometry_impl->vertices;
+        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->device, &buffer_desc, &buffer_data, &ib)))
+        {
+            WARN("Failed to create index buffer, hr %#x.\n", hr);
+            goto done;
+        }
 
-    if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->device, &buffer_desc, &buffer_data, &vb)))
-    {
-        ERR("Failed to create vertex buffer, hr %#x.\n", hr);
+        buffer_desc.ByteWidth = geometry_impl->vertex_count * sizeof(*geometry_impl->vertices);
+        buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
+        buffer_data.pSysMem = geometry_impl->vertices;
+
+        if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->device, &buffer_desc, &buffer_data, &vb)))
+        {
+            ERR("Failed to create vertex buffer, hr %#x.\n", hr);
+            ID3D10Buffer_Release(ib);
+            goto done;
+        }
+
+        d2d_draw(render_target, D2D_SHAPE_TYPE_TRIANGLE, ib, 3 * geometry_impl->face_count, vb,
+                sizeof(*geometry_impl->vertices), vs_cb, ps_cb, brush_impl);
+
+        ID3D10Buffer_Release(vb);
         ID3D10Buffer_Release(ib);
-        goto done;
     }
-
-    d2d_draw(render_target, D2D_SHAPE_TYPE_TRIANGLE, ib, 3 * geometry_impl->face_count, vb,
-            sizeof(*geometry_impl->vertices), vs_cb, ps_cb, brush_impl);
-
-    ID3D10Buffer_Release(vb);
-    ID3D10Buffer_Release(ib);
 
     if (geometry_impl->bezier_count)
     {
@@ -1452,7 +1468,7 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
             measuring_mode, glyph_run, desc, effect);
 
     if (desc)
-        FIXME("Ignoring glyph run description %p.\n", desc);
+        WARN("Ignoring glyph run description %p.\n", desc);
     if (effect)
         FIXME("Ignoring effect %p.\n", effect);
     if (context->options & ~D2D1_DRAW_TEXT_OPTIONS_NO_SNAP)
@@ -1486,10 +1502,10 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawStrikethrough(IDWriteText
 static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawInlineObject(IDWriteTextRenderer *iface, void *ctx,
         float origin_x, float origin_y, IDWriteInlineObject *object, BOOL is_sideways, BOOL is_rtl, IUnknown *effect)
 {
-    FIXME("iface %p, ctx %p, origin_x %.8e, origin_y %.8e, object %p, is_sideways %#x, is_rtl %#x, effect %p stub!\n",
+    TRACE("iface %p, ctx %p, origin_x %.8e, origin_y %.8e, object %p, is_sideways %#x, is_rtl %#x, effect %p.\n",
             iface, ctx, origin_x, origin_y, object, is_sideways, is_rtl, effect);
 
-    return E_NOTIMPL;
+    return IDWriteInlineObject_Draw(object, ctx, iface, origin_x, origin_y, is_sideways, is_rtl, effect);
 }
 
 static const struct IDWriteTextRendererVtbl d2d_text_renderer_vtbl =
@@ -1674,7 +1690,12 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
         0.0f, 0.0f,
     };
 
-    FIXME("Ignoring render target properties.\n");
+    if (desc->type != D2D1_RENDER_TARGET_TYPE_DEFAULT && desc->type != D2D1_RENDER_TARGET_TYPE_HARDWARE)
+        WARN("Ignoring render target type %#x.\n", desc->type);
+    if (desc->usage != D2D1_RENDER_TARGET_USAGE_NONE)
+        FIXME("Ignoring render target usage %#x.\n", desc->usage);
+    if (desc->minLevel != D2D1_FEATURE_LEVEL_DEFAULT)
+        WARN("Ignoring feature level %#x.\n", desc->minLevel);
 
     render_target->ID2D1RenderTarget_iface.lpVtbl = &d2d_d3d_render_target_vtbl;
     render_target->IDWriteTextRenderer_iface.lpVtbl = &d2d_text_renderer_vtbl;
@@ -1799,7 +1820,7 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
     }
 
     rs_desc.FillMode = D3D10_FILL_SOLID;
-    rs_desc.CullMode = D3D10_CULL_BACK;
+    rs_desc.CullMode = D3D10_CULL_NONE;
     rs_desc.FrontCounterClockwise = FALSE;
     rs_desc.DepthBias = 0;
     rs_desc.DepthBiasClamp = 0.0f;

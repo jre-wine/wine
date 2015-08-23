@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2015-07-14 16:31+0300\n"
+"PO-Revision-Date: 2015-08-18 20:53+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: Lithuanian <komp_lt@konf.lt>\n"
 "Language: lt\n"
@@ -198,7 +198,7 @@ msgid ""
 "Unable to execute the uninstaller, '%s'. Do you want to remove the uninstall "
 "entry for this program from the registry?"
 msgstr ""
-"Nepavyko įvykdyti programos pašalinimo komandos „%s“. Ar norite pašalinti "
+"Nepavyko įvykdyti programos šalinimo komandos „%s“. Ar norite pašalinti "
 "programos šalinimo įrašą iš registro?"
 
 #: appwiz.rc:36
@@ -12861,6 +12861,42 @@ msgstr ""
 "Nepavyko įvykdyti programos pašalinimo komandos „%s“, greičiausiai dėl "
 "trūkstamo vykdomojo failo.\n"
 "Ar norite pašalinti programos šalinimo įrašą iš registro?"
+
+#: uninstaller.rc:31
+msgid "uninstaller: The application with GUID '%1' was not found\n"
+msgstr "šalinimo programa: Programa su GUID „%1“ nerasta\n"
+
+#: uninstaller.rc:32
+msgid ""
+"uninstaller: The option '--remove' must be followed by an application GUID\n"
+msgstr ""
+"šalinimo programa: Už parametro „--remove“ privalo būti programos GUID\n"
+
+#: uninstaller.rc:33
+msgid "uninstaller: Invalid option [%1]\n"
+msgstr "šalinimo programa: Netinkamas parametras [%1]\n"
+
+#: uninstaller.rc:35
+msgid ""
+"Wine Application Uninstaller\n"
+"\n"
+"Uninstall applications from the current Wine prefix.\n"
+"\n"
+msgstr ""
+
+#: uninstaller.rc:43
+msgid ""
+"Usage:\n"
+"  uninstaller [options]\n"
+"\n"
+"Options:\n"
+"  --help\t    Display this information.\n"
+"  --list\t    List all applications installed in this Wine prefix.\n"
+"  --remove {GUID}   Uninstall the specified application.\n"
+"\t\t    Use '--list' to determine the application GUID.\n"
+"  [no option]       Launch the graphical version of this program.\n"
+"\n"
+msgstr ""
 
 #: view.rc:36
 msgid "&Pan"

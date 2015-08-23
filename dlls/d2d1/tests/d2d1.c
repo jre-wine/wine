@@ -54,6 +54,14 @@ static void set_rect(D2D1_RECT_F *rect, float left, float top, float right, floa
     rect->bottom = bottom;
 }
 
+static void set_rect_u(D2D1_RECT_U *rect, UINT32 left, UINT32 top, UINT32 right, UINT32 bottom)
+{
+    rect->left = left;
+    rect->top = top;
+    rect->right = right;
+    rect->bottom = bottom;
+}
+
 static void set_color(D2D1_COLOR_F *color, float r, float g, float b, float a)
 {
     color->r = r;
@@ -243,6 +251,18 @@ static void serialize_figure(struct figure *figure)
         trace("%.*s\n", k * 4, output);
 }
 
+static void figure_add_span(struct figure *figure, unsigned int span)
+{
+    if (figure->span_count == figure->spans_size)
+    {
+        figure->spans_size *= 2;
+        figure->spans = HeapReAlloc(GetProcessHeap(), 0, figure->spans,
+                figure->spans_size * sizeof(*figure->spans));
+    }
+
+    figure->spans[figure->span_count++] = span;
+}
+
 static void deserialize_span(struct figure *figure, unsigned int *current, unsigned int *shift, unsigned int c)
 {
     *current |= (c & 0x7f) << *shift;
@@ -252,14 +272,8 @@ static void deserialize_span(struct figure *figure, unsigned int *current, unsig
         return;
     }
 
-    if (figure->span_count == figure->spans_size)
-    {
-        figure->spans_size *= 2;
-        figure->spans = HeapReAlloc(GetProcessHeap(), 0, figure->spans,
-                figure->spans_size * sizeof(*figure->spans));
-    }
-
-    figure->spans[figure->span_count++] = *current;
+    if (*current)
+        figure_add_span(figure, *current);
     *current = 0;
     *shift = 0;
 }
@@ -345,28 +359,48 @@ static BOOL compare_figure(IDXGISurface *surface, unsigned int x, unsigned int y
         {
             if ((i || j) && prev != row[j])
             {
-                if (figure.span_count == figure.spans_size)
-                {
-                    figure.spans_size *= 2;
-                    figure.spans = HeapReAlloc(GetProcessHeap(), 0, figure.spans,
-                            figure.spans_size * sizeof(*figure.spans));
-                }
-                figure.spans[figure.span_count++] = span;
+                figure_add_span(&figure, span);
                 prev = row[j];
                 span = 0;
             }
         }
     }
+    if (span)
+        figure_add_span(&figure, span);
 
     deserialize_figure(&ref_figure, (BYTE *)ref);
+    span = w * h;
+    for (i = 0; i < ref_figure.span_count; ++i)
+    {
+        span -= ref_figure.spans[i];
+    }
+    if (span)
+        figure_add_span(&ref_figure, span);
 
-    j = min(figure.span_count, ref_figure.span_count);
-    for (i = 0, diff = 0; i < j; ++i)
-        diff += abs(figure.spans[i] - ref_figure.spans[i]);
-    for (i = j; j < figure.span_count; ++j)
-        diff += figure.spans[i];
-    for (i = j; j < ref_figure.span_count; ++j)
-        diff += ref_figure.spans[i];
+    for (i = 0, j = 0, diff = 0; i < figure.span_count && j < ref_figure.span_count;)
+    {
+        if (figure.spans[i] == ref_figure.spans[j])
+        {
+            if ((i ^ j) & 1)
+                diff += ref_figure.spans[j];
+            ++i;
+            ++j;
+        }
+        else if (figure.spans[i] > ref_figure.spans[j])
+        {
+            if ((i ^ j) & 1)
+                diff += ref_figure.spans[j];
+            figure.spans[i] -= ref_figure.spans[j];
+            ++j;
+        }
+        else
+        {
+            if ((i ^ j) & 1)
+                diff += figure.spans[i];
+            ref_figure.spans[j] -= figure.spans[i];
+            ++i;
+        }
+    }
     if (diff > max_diff)
         serialize_figure(&figure);
 
@@ -1221,10 +1255,13 @@ static void fill_geometry_sink_bezier(ID2D1GeometrySink *sink)
 
 static void test_path_geometry(void)
 {
+    ID2D1TransformedGeometry *transformed_geometry;
+    D2D1_MATRIX_3X2_F matrix, tmp_matrix;
     ID2D1GeometrySink *sink, *tmp_sink;
     D2D1_POINT_2F point = {0.0f, 0.0f};
     ID2D1SolidColorBrush *brush;
     ID2D1PathGeometry *geometry;
+    ID2D1Geometry *tmp_geometry;
     IDXGISwapChain *swapchain;
     ID2D1RenderTarget *rt;
     ID3D10Device1 *device;
@@ -1429,14 +1466,32 @@ static void test_path_geometry(void)
     ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
     ID2D1GeometrySink_Release(sink);
 
+    set_matrix_identity(&matrix);
+    translate_matrix(&matrix, 80.0f, 640.0f);
+    scale_matrix(&matrix, 1.0f, -1.0f);
+    hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)geometry, &matrix, &transformed_geometry);
+    ok(SUCCEEDED(hr), "Failed to create transformed geometry, hr %#x.\n", hr);
+
+    ID2D1TransformedGeometry_GetSourceGeometry(transformed_geometry, &tmp_geometry);
+    ok(tmp_geometry == (ID2D1Geometry *)geometry,
+            "Got unexpected source geometry %p, expected %p.\n", tmp_geometry, geometry);
+    ID2D1Geometry_Release(tmp_geometry);
+    ID2D1TransformedGeometry_GetTransform(transformed_geometry, &tmp_matrix);
+    ok(!memcmp(&tmp_matrix, &matrix, sizeof(matrix)),
+            "Got unexpected matrix {%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}.\n",
+            tmp_matrix._11, tmp_matrix._12, tmp_matrix._21,
+            tmp_matrix._22, tmp_matrix._31, tmp_matrix._32);
+
     ID2D1RenderTarget_BeginDraw(rt);
     set_color(&color, 0.396f, 0.180f, 0.537f, 1.0f);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
+    ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
-    match = compare_surface(surface, "736d9bf019bcf0be264571c1bd954f07752330ab");
+    match = compare_surface(surface, "3aace1b22aae111cb577614fed16e4eb1650dba5");
     ok(match, "Surface does not match.\n");
+    ID2D1TransformedGeometry_Release(transformed_geometry);
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
@@ -1455,13 +1510,21 @@ static void test_path_geometry(void)
     ok(count == 44, "Got unexpected segment count %u.\n", count);
     ID2D1GeometrySink_Release(sink);
 
+    set_matrix_identity(&matrix);
+    translate_matrix(&matrix, 320.0f, 320.0f);
+    scale_matrix(&matrix, -1.0f, 1.0f);
+    hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)geometry, &matrix, &transformed_geometry);
+    ok(SUCCEEDED(hr), "Failed to create transformed geometry, hr %#x.\n", hr);
+
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
+    ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
-    match = compare_surface(surface, "dd80ed3c218698687156ff4598db3a53917f8476");
+    match = compare_surface(surface, "bfb40a1f007694fa07dbd3b854f3f5d9c3e1d76b");
     ok(match, "Surface does not match.\n");
+    ID2D1TransformedGeometry_Release(transformed_geometry);
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
@@ -1479,9 +1542,18 @@ static void test_path_geometry(void)
     ok(count == 10, "Got unexpected segment count %u.\n", count);
     ID2D1GeometrySink_Release(sink);
 
+    set_matrix_identity(&matrix);
+    scale_matrix(&matrix, 0.5f, 2.0f);
+    translate_matrix(&matrix, 240.0f, -33.0f);
+    rotate_matrix(&matrix, M_PI / 4.0f);
+    scale_matrix(&matrix, 2.0f, 0.5f);
+    hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)geometry, &matrix, &transformed_geometry);
+    ok(SUCCEEDED(hr), "Failed to create transformed geometry, hr %#x.\n", hr);
+
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
+    ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
     match = compare_figure(surface, 0, 0, 160, 160, 0xff652e89, 64,
@@ -1494,6 +1566,19 @@ static void test_path_geometry(void)
             "EBVnFBAUaRQOFGsTDhJvEgwSchAMEHYPCg96DQoMggEICgiLAQQIBJQBCJgBCJkBBpoBBpoBBpoB"
             "BpsBBJwBBJwBBJwBBJwBBJ0BAp4BAp4BAp4BAp4BAp4BAp4BAp4BAgAA");
     todo_wine ok(match, "Figure does not match.\n");
+    match = compare_figure(surface, 160, 0, 320, 160, 0xff652e89, 64,
+            "4VIBwAIBWgHlAQFYAecBAVYB6QEBVAHrAQEjDCMB7AECHhQeAu0BAxoYGgPvAQMWHhYD8QEDFCAU"
+            "A/MBBBAkEAT0AQUOJw0F9QEGCioKBvcBBggsCAb4AQgFLgUI+QEJATIBCfsBCAIwAgj8AQcFLAUH"
+            "/QEFCCgIBf4BBAwiDAT/AQIQHBAClwISlwIBPgGAAgI8Av8BAzwD/QEEPAT7AQY6BvkBBzoH+AEI"
+            "OAj3AQk4CfYBCTgK9AELNgvzAQw2DPIBDDYM8QEONA7wAQ40DvABDjQO7wEPNA/uAQ80D+4BEDIQ"
+            "7QERMhHsAREyEewBETIR7AERMhHsAREyEewBETIR7AERMhHsAREyEewBETIR7AERMhHsAREyEewB"
+            "ETIR7AERMhHsAREyEe0BEDIQ7gEQMw/uAQ80D+4BDzQP7wEONA7wAQ40DvEBDDYM8gEMNgzzAQs2"
+            "C/QBCzcK9QEJOAn3AQg4CfcBBzoH+QEGOgb7AQU6BfwBBDwE/QEDPAP/AQE+AZkCDpkCAhIYEgKA"
+            "AgMNIA0D/wEFCSYJBf4BBgYqBgf8AQgDLgMI+wFG+gEIAzADCPkBBwYuBgf3AQYKKgoG9gEFDCgM"
+            "BfUBBBAlDwTzAQQSIhIE8QEDFh4WA/ABAhkaGQLvAQIcFhwC7QECIBAgAusBASgEKAHpAQFWAecB"
+            "AVgB5QEBWgHAAgEA");
+    todo_wine ok(match, "Figure does not match.\n");
+    ID2D1TransformedGeometry_Release(transformed_geometry);
     ID2D1PathGeometry_Release(geometry);
 
     hr = ID2D1Factory_CreatePathGeometry(factory, &geometry);
@@ -1512,9 +1597,18 @@ static void test_path_geometry(void)
     ok(count == 10, "Got unexpected segment count %u.\n", count);
     ID2D1GeometrySink_Release(sink);
 
+    set_matrix_identity(&matrix);
+    scale_matrix(&matrix, 0.5f, 2.0f);
+    translate_matrix(&matrix, 127.0f, 80.0f);
+    rotate_matrix(&matrix, M_PI / -4.0f);
+    scale_matrix(&matrix, 2.0f, 0.5f);
+    hr = ID2D1Factory_CreateTransformedGeometry(factory, (ID2D1Geometry *)geometry, &matrix, &transformed_geometry);
+    ok(SUCCEEDED(hr), "Failed to create transformed geometry, hr %#x.\n", hr);
+
     ID2D1RenderTarget_BeginDraw(rt);
     ID2D1RenderTarget_Clear(rt, &color);
     ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
+    ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)transformed_geometry, (ID2D1Brush *)brush, NULL);
     hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
     ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
     match = compare_figure(surface, 0, 0, 160, 160, 0xff652e89, 64,
@@ -1524,6 +1618,16 @@ static void test_path_geometry(void)
             "TFRMVEtWSlZKV0hYSFlGWkZbRFxDXkJfQGE+YzxlOmc4aTZrM28wcix2KHojggEaiwEQlAEImAEI"
             "mQEGmgEGmgEGmgEGmwEEnAEEnAEEnAEEnAEEnQECngECngECngECngECngECngECngEC");
     ok(match, "Figure does not match.\n");
+    match = compare_figure(surface, 160, 0, 320, 160, 0xff652e89, 64,
+            "4VIBwAIBWgHlAQFYAecBAVYB6QEBVAHrAQIhDiIB7QECHRUdAu4BAhkaGQPvAQMWHhYD8QEEEyET"
+            "A/MBBBAkEAT1AQUMKA0F9QEGCioKBvcBBwctBwb5AQgELwQI+QEJATIBCfsBRP0BQ/0BQv8BQf8B"
+            "QIECP4ACQIACQf4BQ/wBRPsBRvoBR/gBSPcBSvYBS/QBTPMBTvIBTvIBT/ABUPABUe4BUu4BUu4B"
+            "U+0BU+wBVOwBVOwBVOwBVOwBVesBVesBVesBVesBVOwBVOwBVOwBVO0BU+0BU+0BUu4BUu8BUe8B"
+            "UPEBT/EBTvIBTvMBTPUBS/UBSvcBSfcBSPkBRvsBRP0BQ/4BQf8BQIECP4ACQIACQf4BQv4BQ/wB"
+            "RPsBCQEyAQn6AQgELwQI+AEHBy0GB/cBBgoqCgb2AQUMKA0F9AEEECUPBPMBBBIiEwPxAQMWHhYD"
+            "8AECGRoZA+4BAh0VHQLsAQIhDiIB6wEBVAHpAQFWAecBAVgB5QEBWgHAAgEA");
+    ok(match, "Figure does not match.\n");
+    ID2D1TransformedGeometry_Release(transformed_geometry);
     ID2D1PathGeometry_Release(geometry);
 
     ID2D1SolidColorBrush_Release(brush);
@@ -1998,6 +2102,110 @@ static void test_shared_bitmap(void)
     CoUninitialize();
 }
 
+static void test_bitmap_updates(void)
+{
+    D2D1_BITMAP_PROPERTIES bitmap_desc;
+    IDXGISwapChain *swapchain;
+    ID2D1RenderTarget *rt;
+    ID3D10Device1 *device;
+    IDXGISurface *surface;
+    D2D1_RECT_U dst_rect;
+    ID2D1Bitmap *bitmap;
+    D2D1_COLOR_F color;
+    D2D1_RECT_F rect;
+    D2D1_SIZE_U size;
+    HWND window;
+    HRESULT hr;
+    BOOL match;
+
+    static const DWORD bitmap_data[] =
+    {
+        0xffff0000, 0xffffff00, 0xff00ff00, 0xff00ffff,
+        0xff0000ff, 0xffff00ff, 0xff000000, 0xff7f7f7f,
+        0xffffffff, 0xffffffff, 0xffffffff, 0xff000000,
+        0xffffffff, 0xff000000, 0xff000000, 0xff000000,
+    };
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+    window = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    swapchain = create_swapchain(device, window, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain, 0, &IID_IDXGISurface, (void **)&surface);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+    rt = create_render_target(surface);
+    ok(!!rt, "Failed to create render target.\n");
+
+    ID2D1RenderTarget_SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_ALIASED);
+
+    ID2D1RenderTarget_BeginDraw(rt);
+    set_color(&color, 0.0f, 0.0f, 1.0f, 1.0f);
+    ID2D1RenderTarget_Clear(rt, &color);
+
+    set_size_u(&size, 4, 4);
+    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    bitmap_desc.dpiX = 96.0f;
+    bitmap_desc.dpiY = 96.0f;
+    hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+
+    set_rect(&rect, 0.0f, 0.0f, 320.0f, 240.0f);
+    ID2D1RenderTarget_DrawBitmap(rt, bitmap, &rect, 1.0f,
+            D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, NULL);
+
+    ID2D1Bitmap_Release(bitmap);
+
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    hr = ID2D1RenderTarget_CreateBitmap(rt, size, NULL, 0, &bitmap_desc, &bitmap);
+    ok(SUCCEEDED(hr), "Failed to create bitmap, hr %#x.\n", hr);
+
+    set_rect(&rect, 0.0f, 240.0f, 320.0f, 480.0f);
+    ID2D1RenderTarget_DrawBitmap(rt, bitmap, &rect, 1.0f,
+            D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, NULL);
+
+    set_rect_u(&dst_rect, 1, 1, 3, 3);
+    hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, bitmap_data, 4 * sizeof(*bitmap_data));
+    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    set_rect_u(&dst_rect, 0, 3, 3, 4);
+    hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, &bitmap_data[6], 4 * sizeof(*bitmap_data));
+    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    set_rect_u(&dst_rect, 0, 0, 4, 1);
+    hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, &bitmap_data[10], 4 * sizeof(*bitmap_data));
+    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    set_rect_u(&dst_rect, 0, 1, 1, 3);
+    hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, &bitmap_data[2], sizeof(*bitmap_data));
+    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    set_rect_u(&dst_rect, 4, 4, 3, 1);
+    hr = ID2D1Bitmap_CopyFromMemory(bitmap, &dst_rect, bitmap_data, sizeof(*bitmap_data));
+    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    set_rect(&rect, 320.0f, 240.0f, 640.0f, 480.0f);
+    ID2D1RenderTarget_DrawBitmap(rt, bitmap, &rect, 1.0f,
+            D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, NULL);
+
+    hr = ID2D1Bitmap_CopyFromMemory(bitmap, NULL, bitmap_data, 4 * sizeof(*bitmap_data));
+    ok(SUCCEEDED(hr), "Failed to update bitmap, hr %#x.\n", hr);
+    set_rect(&rect, 320.0f, 0.0f, 640.0f, 240.0f);
+    ID2D1RenderTarget_DrawBitmap(rt, bitmap, &rect, 1.0f,
+            D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, NULL);
+
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to end draw, hr %#x.\n", hr);
+
+    match = compare_surface(surface, "cb8136c91fbbdc76bb83b8c09edc1907b0a5d0a6");
+    ok(match, "Surface does not match.\n");
+
+    ID2D1Bitmap_Release(bitmap);
+    ID2D1RenderTarget_Release(rt);
+    IDXGISurface_Release(surface);
+    IDXGISwapChain_Release(swapchain);
+    ID3D10Device1_Release(device);
+    DestroyWindow(window);
+}
+
 START_TEST(d2d1)
 {
     test_clip();
@@ -2008,4 +2216,5 @@ START_TEST(d2d1)
     test_bitmap_formats();
     test_alpha_mode();
     test_shared_bitmap();
+    test_bitmap_updates();
 }

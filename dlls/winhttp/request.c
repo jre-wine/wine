@@ -672,11 +672,8 @@ static BOOL query_headers( request_t *request, DWORD level, LPCWSTR name, LPVOID
         if (!(p = headers)) return FALSE;
         for (len = 0; *p; p++) if (*p != '\r') len++;
 
-        if (!buffer || (len + 1) * sizeof(WCHAR) > *buflen)
-        {
-            len++;
+        if (!buffer || len * sizeof(WCHAR) > *buflen)
             set_last_error( ERROR_INSUFFICIENT_BUFFER );
-        }
         else
         {
             for (p = headers, q = buffer; *p; p++, q++)
@@ -688,8 +685,8 @@ static BOOL query_headers( request_t *request, DWORD level, LPCWSTR name, LPVOID
                     p++; /* skip '\n' */
                 }
             }
-            *q = 0;
             TRACE("returning data: %s\n", debugstr_wn(buffer, len));
+            if (len) len--;
             ret = TRUE;
         }
         *buflen = len * sizeof(WCHAR);
@@ -2092,19 +2089,17 @@ static BOOL read_reply( request_t *request )
     static const WCHAR crlf[] = {'\r','\n',0};
 
     char buffer[MAX_REPLY_LEN];
-    DWORD buflen, len, offset, received_len, crlf_len = 2; /* strlenW(crlf) */
+    DWORD buflen, len, offset, crlf_len = 2; /* strlenW(crlf) */
     char *status_code, *status_text;
     WCHAR *versionW, *status_textW, *raw_headers;
     WCHAR status_codeW[4]; /* sizeof("nnn") */
 
     if (!netconn_connected( &request->netconn )) return FALSE;
 
-    received_len = 0;
     do
     {
         buflen = MAX_REPLY_LEN;
         if (!read_line( request, buffer, &buflen )) return FALSE;
-        received_len += buflen;
 
         /* first line should look like 'HTTP/1.x nnn OK' where nnn is the status code */
         if (!(status_code = strchr( buffer, ' ' ))) return FALSE;
@@ -2157,8 +2152,7 @@ static BOOL read_reply( request_t *request )
 
         buflen = MAX_REPLY_LEN;
         if (!read_line( request, buffer, &buflen )) return TRUE;
-        received_len += buflen;
-        if (!*buffer) break;
+        if (!*buffer) buflen = 1;
 
         while (len - offset < buflen + crlf_len)
         {
@@ -2166,6 +2160,11 @@ static BOOL read_reply( request_t *request )
             len *= 2;
             if (!(tmp = heap_realloc( raw_headers, len * sizeof(WCHAR) ))) return FALSE;
             request->raw_headers = raw_headers = tmp;
+        }
+        if (!*buffer)
+        {
+            memcpy( raw_headers + offset, crlf, sizeof(crlf) );
+            break;
         }
         MultiByteToWideChar( CP_ACP, 0, buffer, buflen, raw_headers + offset, buflen );
 

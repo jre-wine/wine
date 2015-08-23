@@ -31,6 +31,9 @@ static BOOL   (WINAPI *pActivateActCtx)(HANDLE, ULONG_PTR*);
 static BOOL   (WINAPI *pDeactivateActCtx)(DWORD, ULONG_PTR);
 static VOID   (WINAPI *pReleaseActCtx)(HANDLE);
 
+typedef CRITICAL_SECTION *omp_lock_t;
+typedef CRITICAL_SECTION *omp_nest_lock_t;
+
 static void  (CDECL   *p_vcomp_atomic_add_i4)(int *dest, int val);
 static void  (CDECL   *p_vcomp_atomic_add_r4)(float *dest, float val);
 static void  (CDECL   *p_vcomp_atomic_add_r8)(double *dest, double val);
@@ -52,6 +55,7 @@ static void  (CDECL   *p_vcomp_atomic_sub_r8)(double *dest, double val);
 static void  (CDECL   *p_vcomp_atomic_xor_i4)(int *dest, int val);
 static void  (CDECL   *p_vcomp_barrier)(void);
 static void  (CDECL   *p_vcomp_enter_critsect)(CRITICAL_SECTION **critsect);
+static void  (CDECL   *p_vcomp_flush)(void);
 static void  (CDECL   *p_vcomp_for_dynamic_init)(unsigned int flags, unsigned int first, unsigned int last,
                                                  int step, unsigned int chunksize);
 static int   (CDECL   *p_vcomp_for_dynamic_next)(unsigned int *begin, unsigned int *end);
@@ -69,13 +73,23 @@ static int   (CDECL   *p_vcomp_sections_next)(void);
 static void  (CDECL   *p_vcomp_set_num_threads)(int num_threads);
 static int   (CDECL   *p_vcomp_single_begin)(int flags);
 static void  (CDECL   *p_vcomp_single_end)(void);
+static void  (CDECL   *pomp_destroy_lock)(omp_lock_t *lock);
+static void  (CDECL   *pomp_destroy_nest_lock)(omp_nest_lock_t *lock);
 static int   (CDECL   *pomp_get_max_threads)(void);
 static int   (CDECL   *pomp_get_nested)(void);
 static int   (CDECL   *pomp_get_num_threads)(void);
 static int   (CDECL   *pomp_get_thread_num)(void);
 static int   (CDECL   *pomp_in_parallel)(void);
+static void  (CDECL   *pomp_init_lock)(omp_lock_t *lock);
+static void  (CDECL   *pomp_init_nest_lock)(omp_nest_lock_t *lock);
+static void  (CDECL   *pomp_set_lock)(omp_lock_t *lock);
+static void  (CDECL   *pomp_set_nest_lock)(omp_nest_lock_t *lock);
 static void  (CDECL   *pomp_set_nested)(int nested);
 static void  (CDECL   *pomp_set_num_threads)(int num_threads);
+static int   (CDECL   *pomp_test_lock)(omp_lock_t *lock);
+static int   (CDECL   *pomp_test_nest_lock)(omp_nest_lock_t *lock);
+static void  (CDECL   *pomp_unset_lock)(omp_lock_t *lock);
+static void  (CDECL   *pomp_unset_nest_lock)(omp_nest_lock_t *lock);
 
 #define VCOMP_DYNAMIC_FLAGS_STATIC      0x01
 #define VCOMP_DYNAMIC_FLAGS_CHUNKED     0x02
@@ -86,6 +100,10 @@ static void  (CDECL   *pomp_set_num_threads)(int num_threads);
 #define ARCH "x86"
 #elif defined(__x86_64__)
 #define ARCH "amd64"
+#elif defined __arm__
+#define ARCH "arm"
+#elif defined __aarch64__
+#define ARCH "arm64"
 #else
 #define ARCH "none"
 #endif
@@ -229,6 +247,7 @@ static BOOL init_vcomp(void)
     VCOMP_GET_PROC(_vcomp_atomic_xor_i4);
     VCOMP_GET_PROC(_vcomp_barrier);
     VCOMP_GET_PROC(_vcomp_enter_critsect);
+    VCOMP_GET_PROC(_vcomp_flush);
     VCOMP_GET_PROC(_vcomp_for_dynamic_init);
     VCOMP_GET_PROC(_vcomp_for_dynamic_next);
     VCOMP_GET_PROC(_vcomp_for_static_end);
@@ -243,13 +262,23 @@ static BOOL init_vcomp(void)
     VCOMP_GET_PROC(_vcomp_set_num_threads);
     VCOMP_GET_PROC(_vcomp_single_begin);
     VCOMP_GET_PROC(_vcomp_single_end);
+    VCOMP_GET_PROC(omp_destroy_lock);
+    VCOMP_GET_PROC(omp_destroy_nest_lock);
     VCOMP_GET_PROC(omp_get_max_threads);
     VCOMP_GET_PROC(omp_get_nested);
     VCOMP_GET_PROC(omp_get_num_threads);
     VCOMP_GET_PROC(omp_get_thread_num);
     VCOMP_GET_PROC(omp_in_parallel);
+    VCOMP_GET_PROC(omp_init_lock);
+    VCOMP_GET_PROC(omp_init_nest_lock);
+    VCOMP_GET_PROC(omp_set_lock);
+    VCOMP_GET_PROC(omp_set_nest_lock);
     VCOMP_GET_PROC(omp_set_nested);
     VCOMP_GET_PROC(omp_set_num_threads);
+    VCOMP_GET_PROC(omp_test_lock);
+    VCOMP_GET_PROC(omp_test_nest_lock);
+    VCOMP_GET_PROC(omp_unset_lock);
+    VCOMP_GET_PROC(omp_unset_nest_lock);
 
     return TRUE;
 }
@@ -415,6 +444,7 @@ static void CDECL fork_uintptr_cb(UINT_PTR a, UINT_PTR b, UINT_PTR c, UINT_PTR d
     ok(e == 5, "expected e == 5, got %p\n", (void *)e);
 }
 
+#ifdef __i386__
 static void CDECL fork_float_cb(float a, float b, float c, float d, float e)
 {
     ok(1.4999 < a && a < 1.5001, "expected a == 1.5, got %f\n", a);
@@ -423,6 +453,7 @@ static void CDECL fork_float_cb(float a, float b, float c, float d, float e)
     ok(4.4999 < d && d < 4.5001, "expected d == 4.5, got %f\n", d);
     ok(5.4999 < e && e < 5.5001, "expected e == 5.5, got %f\n", e);
 }
+#endif
 
 static void test_vcomp_fork(void)
 {
@@ -449,13 +480,14 @@ static void test_vcomp_fork(void)
     p_vcomp_fork(TRUE, 5, fork_uintptr_cb, (UINT_PTR)1, (UINT_PTR)(MAXUINT_PTR - 2),
         (UINT_PTR)3, (UINT_PTR)(MAXUINT_PTR - 4), (UINT_PTR)5);
 
-    if (sizeof(int) < sizeof(void *))
-        skip("skipping float test on x86_64\n");
-    else
+#ifdef __i386__
     {
         void (CDECL *func)(BOOL, int, void *, float, float, float, float, float) = (void *)p_vcomp_fork;
         func(TRUE, 5, fork_float_cb, 1.5f, 2.5f, 3.5f, 4.5f, 5.5f);
     }
+#else
+    skip("skipping float test on non-x86\n");
+#endif
 
     pomp_set_num_threads(max_threads);
 }
@@ -1269,6 +1301,87 @@ static void test_vcomp_enter_critsect(void)
     pomp_set_num_threads(max_threads);
 }
 
+static void test_vcomp_flush(void)
+{
+    p_vcomp_flush();
+    p_vcomp_flush();
+    p_vcomp_flush();
+}
+
+static void test_omp_init_lock(void)
+{
+    omp_lock_t lock;
+    int ret;
+
+    pomp_init_lock(&lock);
+
+    /* test omp_set_lock */
+    pomp_set_lock(&lock);
+    pomp_unset_lock(&lock);
+
+    /* test omp_test_lock */
+    ret = pomp_test_lock(&lock);
+    ok(ret == 1, "expected ret == 1, got %d\n", ret);
+    ret = pomp_test_lock(&lock);
+    ok(ret == 0, "expected ret == 0, got %d\n", ret);
+    pomp_unset_lock(&lock);
+
+    /* test with EnterCriticalSection */
+    EnterCriticalSection(lock);
+    ret = pomp_test_lock(&lock);
+    todo_wine
+    ok(ret == 1, "expected ret == 1, got %d\n", ret);
+    if (ret)
+    {
+        ret = pomp_test_lock(&lock);
+        ok(ret == 0, "expected ret == 0, got %d\n", ret);
+        pomp_unset_lock(&lock);
+    }
+    LeaveCriticalSection(lock);
+
+    pomp_destroy_lock(&lock);
+}
+
+static void test_omp_init_nest_lock(void)
+{
+    omp_nest_lock_t lock;
+    int ret;
+
+    ok(pomp_init_nest_lock == pomp_init_lock, "expected omp_init_nest_lock == %p, got %p\n",
+       pomp_init_lock, pomp_init_nest_lock);
+    ok(pomp_destroy_nest_lock == pomp_destroy_lock, "expected omp_destroy_nest_lock == %p, got %p\n",
+       pomp_destroy_lock, pomp_destroy_nest_lock);
+
+    pomp_init_nest_lock(&lock);
+
+    /* test omp_set_nest_lock */
+    pomp_set_nest_lock(&lock);
+    pomp_set_nest_lock(&lock);
+    pomp_unset_nest_lock(&lock);
+    pomp_unset_nest_lock(&lock);
+
+    /* test omp_test_nest_lock */
+    ret = pomp_test_nest_lock(&lock);
+    ok(ret == 1, "expected ret == 1, got %d\n", ret);
+    ret = pomp_test_nest_lock(&lock);
+    ok(ret == 2, "expected ret == 2, got %d\n", ret);
+    ret = pomp_test_nest_lock(&lock);
+    ok(ret == 3, "expected ret == 3, got %d\n", ret);
+    pomp_unset_nest_lock(&lock);
+    pomp_unset_nest_lock(&lock);
+    pomp_unset_nest_lock(&lock);
+
+    /* test with EnterCriticalSection */
+    EnterCriticalSection(lock);
+    ret = pomp_test_nest_lock(&lock);
+    todo_wine
+    ok(ret == 1, "expected ret == 1, got %d\n", ret);
+    pomp_unset_nest_lock(&lock);
+    LeaveCriticalSection(lock);
+
+    pomp_destroy_nest_lock(&lock);
+}
+
 static void test_atomic_integer32(void)
 {
     struct
@@ -1286,10 +1399,10 @@ static void test_atomic_integer32(void)
         { p_vcomp_atomic_mul_i4,  0x11223344, -0x77665544,   0xecccdf0 },
         { p_vcomp_atomic_or_i4,   0x11223344,  0x77665544,  0x77667744 },
         { p_vcomp_atomic_shl_i4,  0x11223344,           3, -0x76ee65e0 },
-        { p_vcomp_atomic_shl_i4,  0x11223344,          35, -0x76ee65e0 },
+     /* { p_vcomp_atomic_shl_i4,  0x11223344,          35, -0x76ee65e0 }, */ /* depends on Architecture */
         { p_vcomp_atomic_shl_i4, -0x11223344,           3,  0x76ee65e0 },
         { p_vcomp_atomic_shr_i4,  0x11223344,           3,   0x2244668 },
-        { p_vcomp_atomic_shr_i4,  0x11223344,          35,   0x2244668 },
+     /* { p_vcomp_atomic_shr_i4,  0x11223344,          35,   0x2244668 }, */ /* depends on Architecture */
         { p_vcomp_atomic_shr_i4, -0x11223344,           3,  -0x2244669 },
         { p_vcomp_atomic_sub_i4,  0x11223344,  0x77665544, -0x66442200 },
         { p_vcomp_atomic_xor_i4,  0x11223344,  0x77665544,  0x66446600 },
@@ -1304,7 +1417,7 @@ static void test_atomic_integer32(void)
         { p_vcomp_atomic_div_ui4, 0x77665544, 0x11223344,          6 },
         { p_vcomp_atomic_div_ui4, 0x77665544, 0xeeddccbc,          0 },
         { p_vcomp_atomic_shr_ui4, 0x11223344,          3,  0x2244668 },
-        { p_vcomp_atomic_shr_ui4, 0x11223344,         35,  0x2244668 },
+     /* { p_vcomp_atomic_shr_ui4, 0x11223344,         35,  0x2244668 }, */ /* depends on Architecture */
         { p_vcomp_atomic_shr_ui4, 0xeeddccbc,          3, 0x1ddbb997 },
     };
     int i;
@@ -1388,6 +1501,9 @@ START_TEST(vcomp)
     test_vcomp_master_begin();
     test_vcomp_single_begin();
     test_vcomp_enter_critsect();
+    test_vcomp_flush();
+    test_omp_init_lock();
+    test_omp_init_nest_lock();
     test_atomic_integer32();
     test_atomic_float();
     test_atomic_double();
