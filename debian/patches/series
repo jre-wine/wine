@@ -2,7 +2,7 @@ makefile.patch
 manpages.patch
 
 disable/shlib-exit-calls.patch
-disable/downloading.patch
+disable/external-installers.patch
 
 development/winegcc.patch
 development/winemenubuilder.patch
