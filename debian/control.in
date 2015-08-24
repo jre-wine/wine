@@ -89,7 +89,7 @@ Depends:
 Recommends:
  wineVERSION,
  libgl1-mesa-dri,
- libwine-gecko-2.36 [!armhf !arm64],
+ libwine-gecko-2.40 [!armhf !arm64],
  libasound2-plugins,
 Suggests:
  wine32VERSION-preloader,
