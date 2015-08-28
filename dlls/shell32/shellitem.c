@@ -143,8 +143,15 @@ static HRESULT ShellItem_get_parent_shellfolder(ShellItem *This, IShellFolder **
         ret = SHGetDesktopFolder(&desktop);
         if (SUCCEEDED(ret))
         {
-            ret = IShellFolder_BindToObject(desktop, parent_pidl, NULL, &IID_IShellFolder, (void**)ppsf);
-            IShellFolder_Release(desktop);
+            if (_ILIsDesktop(parent_pidl))
+            {
+                *ppsf = desktop;
+            }
+            else
+            {
+                ret = IShellFolder_BindToObject(desktop, parent_pidl, NULL, &IID_IShellFolder, (void**)ppsf);
+                IShellFolder_Release(desktop);
+            }
         }
         ILFree(parent_pidl);
     }
@@ -271,10 +278,13 @@ static HRESULT WINAPI ShellItem_GetAttributes(IShellItem2 *iface, SFGAOF sfgaoMa
         *psfgaoAttribs &= sfgaoMask;
         IShellFolder_Release(parent_folder);
 
-        if(sfgaoMask == *psfgaoAttribs)
-            return S_OK;
-        else
-            return S_FALSE;
+        if (SUCCEEDED(ret))
+        {
+            if(sfgaoMask == *psfgaoAttribs)
+                return S_OK;
+            else
+                return S_FALSE;
+        }
     }
 
     return ret;

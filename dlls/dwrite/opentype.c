@@ -33,6 +33,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 #define MS_TTCF_TAG DWRITE_MAKE_OPENTYPE_TAG('t','t','c','f')
 #define MS_GPOS_TAG DWRITE_MAKE_OPENTYPE_TAG('G','P','O','S')
 #define MS_GSUB_TAG DWRITE_MAKE_OPENTYPE_TAG('G','S','U','B')
+#define MS_NAME_TAG DWRITE_MAKE_OPENTYPE_TAG('n','a','m','e')
 
 #ifdef WORDS_BIGENDIAN
 #define GET_BE_WORD(x) (x)
@@ -130,6 +131,17 @@ typedef struct
     SHORT index_format;
     SHORT glyphdata_format;
 } TT_HEAD;
+
+enum TT_HEAD_MACSTYLE
+{
+    TT_HEAD_MACSTYLE_BOLD      = 1 << 0,
+    TT_HEAD_MACSTYLE_ITALIC    = 1 << 1,
+    TT_HEAD_MACSTYLE_UNDERLINE = 1 << 2,
+    TT_HEAD_MACSTYLE_OUTLINE   = 1 << 3,
+    TT_HEAD_MACSTYLE_SHADOW    = 1 << 4,
+    TT_HEAD_MACSTYLE_CONDENSED = 1 << 5,
+    TT_HEAD_MACSTYLE_EXTENDED  = 1 << 6,
+};
 
 typedef struct
 {
@@ -768,11 +780,12 @@ HRESULT opentype_get_font_table(IDWriteFontFileStream *stream, DWRITE_FONT_FACE_
         void * ttc_context;
         hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&ttc_header, 0, sizeof(*ttc_header), &ttc_context);
         if (SUCCEEDED(hr)) {
-            table_offset = GET_BE_DWORD(ttc_header->OffsetTable[0]);
             if (font_index >= GET_BE_DWORD(ttc_header->numFonts))
                 hr = E_INVALIDARG;
-            else
+            else {
+                table_offset = GET_BE_DWORD(ttc_header->OffsetTable[font_index]);
                 hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&font_header, table_offset, sizeof(*font_header), &sfnt_context);
+            }
             IDWriteFontFileStream_ReleaseFileFragment(stream, ttc_context);
         }
     }
@@ -1028,20 +1041,43 @@ void opentype_get_font_properties(IDWriteFontFileStream *stream, DWRITE_FONT_FAC
 
     /* DWRITE_FONT_STRETCH enumeration values directly match font data values */
     if (tt_os2) {
+        USHORT version = GET_BE_WORD(tt_os2->version);
+        USHORT fsSelection = GET_BE_WORD(tt_os2->fsSelection);
+        USHORT usWeightClass = GET_BE_WORD(tt_os2->usWeightClass);
+
         if (GET_BE_WORD(tt_os2->usWidthClass) <= DWRITE_FONT_STRETCH_ULTRA_EXPANDED)
             props->stretch = GET_BE_WORD(tt_os2->usWidthClass);
 
-        props->weight = GET_BE_WORD(tt_os2->usWeightClass);
+        if (usWeightClass >= 1 && usWeightClass <= 9)
+            usWeightClass *= 100;
+
+        if (usWeightClass > DWRITE_FONT_WEIGHT_ULTRA_BLACK)
+            props->weight = DWRITE_FONT_WEIGHT_ULTRA_BLACK;
+        else
+            props->weight = usWeightClass;
+
+        if (version >= 4 && (fsSelection & OS2_FSSELECTION_OBLIQUE))
+            props->style = DWRITE_FONT_STYLE_OBLIQUE;
+        else if (fsSelection & OS2_FSSELECTION_ITALIC)
+            props->style = DWRITE_FONT_STYLE_ITALIC;
         memcpy(&props->panose, &tt_os2->panose, sizeof(props->panose));
-
-        TRACE("stretch=%d, weight=%d\n", props->stretch, props->weight);
     }
-
-    if (tt_head) {
+    else if (tt_head) {
         USHORT macStyle = GET_BE_WORD(tt_head->macStyle);
-        if (macStyle & 0x0002)
+
+        if (macStyle & TT_HEAD_MACSTYLE_CONDENSED)
+            props->stretch = DWRITE_FONT_STRETCH_CONDENSED;
+        else if (macStyle & TT_HEAD_MACSTYLE_EXTENDED)
+            props->stretch = DWRITE_FONT_STRETCH_EXPANDED;
+
+        if (macStyle & TT_HEAD_MACSTYLE_BOLD)
+            props->weight = DWRITE_FONT_WEIGHT_BOLD;
+
+        if (macStyle & TT_HEAD_MACSTYLE_ITALIC)
             props->style = DWRITE_FONT_STYLE_ITALIC;
     }
+
+    TRACE("stretch=%d, weight=%d, style %d\n", props->stretch, props->weight, props->style);
 
     if (tt_os2)
         IDWriteFontFileStream_ReleaseFileFragment(stream, os2_context);
@@ -1160,12 +1196,12 @@ static void get_name_record_locale(enum OPENTYPE_PLATFORM_ID platform, USHORT la
     }
 }
 
-HRESULT opentype_get_font_strings_from_id(const void *table_data, DWRITE_INFORMATIONAL_STRING_ID id, IDWriteLocalizedStrings **strings)
+HRESULT opentype_get_font_strings_from_id(const void *table_data, enum OPENTYPE_STRING_ID id, IDWriteLocalizedStrings **strings)
 {
     const TT_NAME_V0 *header;
     BYTE *storage_area = 0;
     USHORT count = 0;
-    UINT16 name_id;
+    WORD format;
     BOOL exists;
     HRESULT hr;
     int i;
@@ -1177,25 +1213,26 @@ HRESULT opentype_get_font_strings_from_id(const void *table_data, DWRITE_INFORMA
     if (FAILED(hr)) return hr;
 
     header = table_data;
+    format = GET_BE_WORD(header->format);
 
-    switch (header->format) {
+    switch (format) {
     case 0:
+    case 1:
         break;
     default:
-        FIXME("unsupported NAME format %d\n", header->format);
+        FIXME("unsupported NAME format %d\n", format);
     }
+
 
     storage_area = (LPBYTE)table_data + GET_BE_WORD(header->stringOffset);
     count = GET_BE_WORD(header->count);
-
-    name_id = dwriteid_to_opentypeid[id];
 
     exists = FALSE;
     for (i = 0; i < count; i++) {
         const TT_NameRecord *record = &header->nameRecord[i];
         USHORT lang_id, length, offset, encoding, platform;
 
-        if (GET_BE_WORD(record->nameID) != name_id)
+        if (GET_BE_WORD(record->nameID) != id)
             continue;
 
         exists = TRUE;
@@ -1258,6 +1295,80 @@ HRESULT opentype_get_font_strings_from_id(const void *table_data, DWRITE_INFORMA
         IDWriteLocalizedStrings_Release(*strings);
         *strings = NULL;
     }
+
+    return exists ? S_OK : E_FAIL;
+}
+
+/* Provides a conversion from DWRITE to OpenType name ids, input id be valid, it's not checked. */
+HRESULT opentype_get_font_info_strings(const void *table_data, DWRITE_INFORMATIONAL_STRING_ID id, IDWriteLocalizedStrings **strings)
+{
+    return opentype_get_font_strings_from_id(table_data, dwriteid_to_opentypeid[id], strings);
+}
+
+/* FamilyName locating order is WWS Family Name -> Preferred Family Name -> Family Name. If font claims to
+   have 'Preferred Family Name' in WWS format, then WWS name is not used. */
+HRESULT opentype_get_font_familyname(IDWriteFontFileStream *stream, DWRITE_FONT_FACE_TYPE facetype, UINT32 index,
+    IDWriteLocalizedStrings **names)
+{
+    const TT_OS2_V2 *tt_os2;
+    void *os2_context, *name_context;
+    const void *name_table;
+    HRESULT hr;
+
+    opentype_get_font_table(stream, facetype, index, MS_OS2_TAG,  (const void**)&tt_os2, &os2_context, NULL, NULL);
+    opentype_get_font_table(stream, facetype, index, MS_NAME_TAG, &name_table, &name_context, NULL, NULL);
+
+    *names = NULL;
+
+    /* if Preferred Family doesn't conform to WWS model try WWS name */
+    if (tt_os2 && !(GET_BE_WORD(tt_os2->fsSelection) & OS2_FSSELECTION_WWS))
+        hr = opentype_get_font_strings_from_id(name_table, OPENTYPE_STRING_WWS_FAMILY_NAME, names);
+    else
+        hr = E_FAIL;
+
+    if (FAILED(hr))
+        hr = opentype_get_font_strings_from_id(name_table, OPENTYPE_STRING_PREFERRED_FAMILY_NAME, names);
+    if (FAILED(hr))
+        hr = opentype_get_font_strings_from_id(name_table, OPENTYPE_STRING_FAMILY_NAME, names);
+
+    if (tt_os2)
+        IDWriteFontFileStream_ReleaseFileFragment(stream, os2_context);
+    if (name_context)
+        IDWriteFontFileStream_ReleaseFileFragment(stream, name_context);
+
+    return hr;
+}
+
+/* FaceName locating order is WWS Face Name -> Preferred Face Name -> Face Name. If font claims to
+   have 'Preferred Face Name' in WWS format, then WWS name is not used. */
+HRESULT opentype_get_font_facename(IDWriteFontFileStream *stream, DWRITE_FONT_FACE_TYPE facetype, UINT32 index,
+    IDWriteLocalizedStrings **names)
+{
+    const TT_OS2_V2 *tt_os2;
+    void *os2_context, *name_context;
+    const void *name_table;
+    HRESULT hr;
+
+    opentype_get_font_table(stream, facetype, index, MS_OS2_TAG,  (const void**)&tt_os2, &os2_context, NULL, NULL);
+    opentype_get_font_table(stream, facetype, index, MS_NAME_TAG, &name_table, &name_context, NULL, NULL);
+
+    *names = NULL;
+
+    /* if Preferred Family doesn't conform to WWS model try WWS name */
+    if (tt_os2 && !(GET_BE_WORD(tt_os2->fsSelection) & OS2_FSSELECTION_WWS))
+        hr = opentype_get_font_strings_from_id(name_table, OPENTYPE_STRING_WWS_SUBFAMILY_NAME, names);
+    else
+        hr = E_FAIL;
+
+    if (FAILED(hr))
+        hr = opentype_get_font_strings_from_id(name_table, OPENTYPE_STRING_PREFERRED_SUBFAMILY_NAME, names);
+    if (FAILED(hr))
+        hr = opentype_get_font_strings_from_id(name_table, OPENTYPE_STRING_SUBFAMILY_NAME, names);
+
+    if (tt_os2)
+        IDWriteFontFileStream_ReleaseFileFragment(stream, os2_context);
+    if (name_context)
+        IDWriteFontFileStream_ReleaseFileFragment(stream, name_context);
 
     return hr;
 }

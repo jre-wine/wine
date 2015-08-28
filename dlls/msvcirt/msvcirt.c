@@ -45,9 +45,9 @@ const int filebuf_sh_write = 0xc00;
 /* ?openprot@filebuf@@2HB */
 const int filebuf_openprot = 420;
 /* ?binary@filebuf@@2HB */
-const int filebuf_binary = 0x8000;
+const int filebuf_binary = _O_BINARY;
 /* ?text@filebuf@@2HB */
-const int filebuf_text = 0x4000;
+const int filebuf_text = _O_TEXT;
 
 /* ?adjustfield@ios@@2JB */
 const LONG ios_adjustfield = FLAGS_left | FLAGS_right | FLAGS_internal;
@@ -968,11 +968,13 @@ filebuf* __thiscall filebuf_open(filebuf *this, const char *name, ios_open_mode 
 
     streambuf_lock(&this->base);
     this->close = 1;
+    this->fd = fd;
     if ((mode & OPENMODE_ate) &&
             call_streambuf_seekoff(&this->base, 0, SEEKDIR_end, mode & (OPENMODE_in|OPENMODE_out)) == EOF) {
         _close(fd);
-    } else
-        this->fd = fd;
+        this->fd = -1;
+    }
+    streambuf_allocate(&this->base);
     streambuf_unlock(&this->base);
     return (this->fd == -1) ? NULL : this;
 }
@@ -982,8 +984,19 @@ filebuf* __thiscall filebuf_open(filebuf *this, const char *name, ios_open_mode 
 DEFINE_THISCALL_WRAPPER(filebuf_overflow, 8)
 int __thiscall filebuf_overflow(filebuf *this, int c)
 {
-    FIXME("(%p %d) stub\n", this, c);
-    return EOF;
+    TRACE("(%p %d)\n", this, c);
+    if (call_streambuf_sync(&this->base) == EOF)
+        return EOF;
+    if (this->base.unbuffered)
+        return (c == EOF) ? 1 : _write(this->fd, &c, 1);
+    if (streambuf_allocate(&this->base) == EOF)
+        return EOF;
+
+    this->base.pbase = this->base.pptr = this->base.base;
+    this->base.epptr = this->base.ebuf;
+    if (c != EOF)
+        *this->base.pptr++ = c;
+    return 1;
 }
 
 /* ?seekoff@filebuf@@UAEJJW4seek_dir@ios@@H@Z */
@@ -991,8 +1004,10 @@ int __thiscall filebuf_overflow(filebuf *this, int c)
 DEFINE_THISCALL_WRAPPER(filebuf_seekoff, 16)
 streampos __thiscall filebuf_seekoff(filebuf *this, streamoff offset, ios_seek_dir dir, int mode)
 {
-    FIXME("(%p %d %d %d) stub\n", this, offset, dir, mode);
-    return 0;
+    TRACE("(%p %d %d %d)\n", this, offset, dir, mode);
+    if (call_streambuf_sync(&this->base) == EOF)
+        return EOF;
+    return _lseek(this->fd, offset, dir);
 }
 
 /* ?setbuf@filebuf@@UAEPAVstreambuf@@PADH@Z */
@@ -1000,8 +1015,16 @@ streampos __thiscall filebuf_seekoff(filebuf *this, streamoff offset, ios_seek_d
 DEFINE_THISCALL_WRAPPER(filebuf_setbuf, 12)
 streambuf* __thiscall filebuf_setbuf(filebuf *this, char *buffer, int length)
 {
-    FIXME("(%p %p %d) stub\n", this, buffer, length);
-    return NULL;
+    streambuf *ret;
+
+    TRACE("(%p %p %d)\n", this, buffer, length);
+    if (this->base.base != NULL)
+        return NULL;
+
+    streambuf_lock(&this->base);
+    ret = streambuf_setbuf(&this->base, buffer, length);
+    streambuf_unlock(&this->base);
+    return ret;
 }
 
 /* ?setmode@filebuf@@QAEHH@Z */
@@ -1009,8 +1032,16 @@ streambuf* __thiscall filebuf_setbuf(filebuf *this, char *buffer, int length)
 DEFINE_THISCALL_WRAPPER(filebuf_setmode, 8)
 int __thiscall filebuf_setmode(filebuf *this, int mode)
 {
-    FIXME("(%p %d) stub\n", this, mode);
-    return 0;
+    int ret;
+
+    TRACE("(%p %d)\n", this, mode);
+    if (mode != filebuf_text && mode != filebuf_binary)
+        return -1;
+
+    streambuf_lock(&this->base);
+    ret = (call_streambuf_sync(&this->base) == EOF) ? -1 : _setmode(this->fd, mode);
+    streambuf_unlock(&this->base);
+    return ret;
 }
 
 /* ?sync@filebuf@@UAEHXZ */
@@ -1018,7 +1049,40 @@ int __thiscall filebuf_setmode(filebuf *this, int mode)
 DEFINE_THISCALL_WRAPPER(filebuf_sync, 4)
 int __thiscall filebuf_sync(filebuf *this)
 {
-    FIXME("(%p) stub\n", this);
+    int count, mode;
+    char *ptr;
+    LONG offset;
+
+    TRACE("(%p)\n", this);
+    if (this->fd == -1)
+        return EOF;
+    if (this->base.unbuffered)
+        return 0;
+
+    /* flush output buffer */
+    if (this->base.pptr != NULL) {
+        count = this->base.pptr - this->base.pbase;
+        if (count > 0 && _write(this->fd, this->base.pbase, count) != count)
+            return EOF;
+        this->base.pbase = this->base.pptr = this->base.epptr = NULL;
+    }
+    /* flush input buffer */
+    if (this->base.egptr != NULL) {
+        offset = this->base.egptr - this->base.gptr;
+        if (offset > 0) {
+            mode = _setmode(this->fd, _O_TEXT);
+            _setmode(this->fd, mode);
+            if (mode & _O_TEXT) {
+                /* in text mode, '\n' in the buffer means '\r\n' in the file */
+                for (ptr = this->base.gptr; ptr < this->base.egptr; ptr++)
+                    if (*ptr == '\n')
+                        offset++;
+            }
+            if (_lseek(this->fd, -offset, SEEK_CUR) < 0)
+                return EOF;
+        }
+        this->base.eback = this->base.gptr = this->base.egptr = NULL;
+    }
     return 0;
 }
 
@@ -1027,8 +1091,25 @@ int __thiscall filebuf_sync(filebuf *this)
 DEFINE_THISCALL_WRAPPER(filebuf_underflow, 4)
 int __thiscall filebuf_underflow(filebuf *this)
 {
-    FIXME("(%p) stub\n", this);
-    return EOF;
+    int buffer_size, read_bytes;
+    char c;
+
+    TRACE("(%p)\n", this);
+
+    if (this->base.unbuffered)
+        return (_read(this->fd, &c, 1) < 1) ? EOF : c;
+
+    if (this->base.gptr >= this->base.egptr) {
+        if (call_streambuf_sync(&this->base) == EOF)
+            return EOF;
+        buffer_size = this->base.ebuf - this->base.base;
+        read_bytes = _read(this->fd, this->base.base, buffer_size);
+        if (read_bytes <= 0)
+            return EOF;
+        this->base.eback = this->base.gptr = this->base.base;
+        this->base.egptr = this->base.base + read_bytes;
+    }
+    return *this->base.gptr;
 }
 
 /* ??0ios@@IAE@ABV0@@Z */

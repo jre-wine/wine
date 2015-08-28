@@ -651,6 +651,10 @@ static unsigned int process_map_access( struct object *obj, unsigned int access 
                                             PROCESS_VM_WRITE | PROCESS_DUP_HANDLE | PROCESS_CREATE_PROCESS | PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION;
     if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE;
     if (access & GENERIC_ALL)     access |= PROCESS_ALL_ACCESS;
+
+    if (access & PROCESS_QUERY_INFORMATION) access |= PROCESS_QUERY_LIMITED_INFORMATION;
+    if (access & PROCESS_SET_INFORMATION) access |= PROCESS_SET_LIMITED_INFORMATION;
+
     return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
@@ -1339,7 +1343,7 @@ DECL_HANDLER(get_process_info)
 {
     struct process *process;
 
-    if ((process = get_process_from_handle( req->handle, PROCESS_QUERY_INFORMATION )))
+    if ((process = get_process_from_handle( req->handle, PROCESS_QUERY_LIMITED_INFORMATION )))
     {
         reply->pid              = get_process_id( process );
         reply->ppid             = process->parent ? get_process_id( process->parent ) : 0;

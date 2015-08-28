@@ -106,7 +106,6 @@ typedef struct _IDocHostContainerVtbl
     void (WINAPI* GetDocObjRect)(DocHost*,RECT*);
     HRESULT (WINAPI* SetStatusText)(DocHost*,LPCWSTR);
     void (WINAPI* SetURL)(DocHost*,LPCWSTR);
-    HRESULT (*exec)(DocHost*,const GUID*,DWORD,DWORD,VARIANT*,VARIANT*);
 } IDocHostContainerVtbl;
 
 struct DocHost {
@@ -128,6 +127,7 @@ struct DocHost {
     IDispatch *client_disp;
     IDocHostUIHandler *hostui;
     IOleInPlaceFrame *frame;
+    IOleCommandTarget *olecmd;
 
     IUnknown *document;
     IOleDocumentView *view;
@@ -277,6 +277,8 @@ void set_doc_state(DocHost*,READYSTATE) DECLSPEC_HIDDEN;
 void deactivate_document(DocHost*) DECLSPEC_HIDDEN;
 void create_doc_view_hwnd(DocHost*) DECLSPEC_HIDDEN;
 void on_commandstate_change(DocHost*,LONG,VARIANT_BOOL) DECLSPEC_HIDDEN;
+void notify_download_state(DocHost*,BOOL) DECLSPEC_HIDDEN;
+void update_navigation_commands(DocHost *dochost) DECLSPEC_HIDDEN;
 
 #define WM_DOCHOSTTASK (WM_USER+0x300)
 void push_dochost_task(DocHost*,task_header_t*,task_proc_t,task_destr_t,BOOL) DECLSPEC_HIDDEN;

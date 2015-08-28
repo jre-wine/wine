@@ -330,6 +330,7 @@ static struct object *create_console_input( struct thread* renderer, int fd )
     if (!console_input->history || (renderer && !console_input->evt) || !console_input->event)
     {
         if (fd != -1) close( fd );
+        console_input->history_size = 0;
         release_object( console_input );
         return NULL;
     }
@@ -409,6 +410,9 @@ static struct screen_buffer *create_console_output( struct console_input *consol
     screen_buffer->win.right      = screen_buffer->max_width - 1;
     screen_buffer->win.top        = 0;
     screen_buffer->win.bottom     = screen_buffer->max_height - 1;
+    screen_buffer->data           = NULL;
+    list_add_head( &screen_buffer_list, &screen_buffer->entry );
+
     if (fd == -1)
         screen_buffer->fd = NULL;
     else
@@ -421,8 +425,6 @@ static struct screen_buffer *create_console_output( struct console_input *consol
         }
         allow_fd_caching(screen_buffer->fd);
     }
-
-    list_add_head( &screen_buffer_list, &screen_buffer->entry );
 
     if (!(screen_buffer->data = malloc( screen_buffer->width * screen_buffer->height *
                                         sizeof(*screen_buffer->data) )))
@@ -1110,7 +1112,8 @@ static void console_input_destroy( struct object *obj )
         release_object( console_in->evt );
         console_in->evt = NULL;
     }
-    release_object( console_in->event );
+    if (console_in->event)
+        release_object( console_in->event );
     if (console_in->fd)
         release_object( console_in->fd );
 

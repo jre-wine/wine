@@ -147,16 +147,16 @@ static const WELLKNOWNRID WellKnownRids[] = {
     { {'L','A'}, WinAccountAdministratorSid,    DOMAIN_USER_RID_ADMIN },
     { {'L','G'}, WinAccountGuestSid,            DOMAIN_USER_RID_GUEST },
     { {0,0}, WinAccountKrbtgtSid,           DOMAIN_USER_RID_KRBTGT },
-    { {0,0}, WinAccountDomainAdminsSid,     DOMAIN_GROUP_RID_ADMINS },
-    { {0,0}, WinAccountDomainUsersSid,      DOMAIN_GROUP_RID_USERS },
-    { {0,0}, WinAccountDomainGuestsSid,     DOMAIN_GROUP_RID_GUESTS },
-    { {0,0}, WinAccountComputersSid,        DOMAIN_GROUP_RID_COMPUTERS },
-    { {0,0}, WinAccountControllersSid,      DOMAIN_GROUP_RID_CONTROLLERS },
-    { {0,0}, WinAccountCertAdminsSid,       DOMAIN_GROUP_RID_CERT_ADMINS },
-    { {0,0}, WinAccountSchemaAdminsSid,     DOMAIN_GROUP_RID_SCHEMA_ADMINS },
-    { {0,0}, WinAccountEnterpriseAdminsSid, DOMAIN_GROUP_RID_ENTERPRISE_ADMINS },
-    { {0,0}, WinAccountPolicyAdminsSid,     DOMAIN_GROUP_RID_POLICY_ADMINS },
-    { {0,0}, WinAccountRasAndIasServersSid, DOMAIN_ALIAS_RID_RAS_SERVERS },
+    { {'D','A'}, WinAccountDomainAdminsSid,     DOMAIN_GROUP_RID_ADMINS },
+    { {'D','U'}, WinAccountDomainUsersSid,      DOMAIN_GROUP_RID_USERS },
+    { {'D','G'}, WinAccountDomainGuestsSid,     DOMAIN_GROUP_RID_GUESTS },
+    { {'D','C'}, WinAccountComputersSid,        DOMAIN_GROUP_RID_COMPUTERS },
+    { {'D','D'}, WinAccountControllersSid,      DOMAIN_GROUP_RID_CONTROLLERS },
+    { {'C','A'}, WinAccountCertAdminsSid,       DOMAIN_GROUP_RID_CERT_ADMINS },
+    { {'S','A'}, WinAccountSchemaAdminsSid,     DOMAIN_GROUP_RID_SCHEMA_ADMINS },
+    { {'E','A'}, WinAccountEnterpriseAdminsSid, DOMAIN_GROUP_RID_ENTERPRISE_ADMINS },
+    { {'P','A'}, WinAccountPolicyAdminsSid,     DOMAIN_GROUP_RID_POLICY_ADMINS },
+    { {'R','S'}, WinAccountRasAndIasServersSid, DOMAIN_ALIAS_RID_RAS_SERVERS },
 };
 
 
@@ -4512,12 +4512,14 @@ static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
 {
     BOOL bret = FALSE;
     WCHAR toktype;
-    WCHAR tok[MAX_PATH];
+    WCHAR *tok;
     LPCWSTR lptoken;
     LPBYTE lpNext = NULL;
     DWORD len;
 
     *cBytes = sizeof(SECURITY_DESCRIPTOR);
+
+    tok = heap_alloc( (lstrlenW(StringSecurityDescriptor) + 1) * sizeof(WCHAR));
 
     if (SecurityDescriptor)
         lpNext = (LPBYTE)(SecurityDescriptor + 1);
@@ -4640,6 +4642,7 @@ static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
     bret = TRUE;
 
 lend:
+    heap_free(tok);
     return bret;
 }
 

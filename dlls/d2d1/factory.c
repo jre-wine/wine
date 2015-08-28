@@ -150,10 +150,20 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_CreateTransformedGeometry(ID2D1Fact
         ID2D1Geometry *src_geometry, const D2D1_MATRIX_3X2_F *transform,
         ID2D1TransformedGeometry **transformed_geometry)
 {
-    FIXME("iface %p, src_geometry %p, transform %p, transformed_geometry %p stub!\n",
+    struct d2d_geometry *object;
+
+    TRACE("iface %p, src_geometry %p, transform %p, transformed_geometry %p.\n",
             iface, src_geometry, transform, transformed_geometry);
 
-    return E_NOTIMPL;
+    if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    d2d_transformed_geometry_init(object, iface, src_geometry, transform);
+
+    TRACE("Created transformed geometry %p.\n", object);
+    *transformed_geometry = (ID2D1TransformedGeometry *)&object->ID2D1Geometry_iface;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_factory_CreatePathGeometry(ID2D1Factory *iface, ID2D1PathGeometry **geometry)
@@ -310,7 +320,10 @@ static const struct ID2D1FactoryVtbl d2d_factory_vtbl =
 static void d2d_factory_init(struct d2d_factory *factory, D2D1_FACTORY_TYPE factory_type,
         const D2D1_FACTORY_OPTIONS *factory_options)
 {
-    FIXME("Ignoring factory type and options.\n");
+    if (factory_type != D2D1_FACTORY_TYPE_SINGLE_THREADED)
+        FIXME("Ignoring factory type %#x.\n", factory_type);
+    if (factory_options && factory_options->debugLevel != D2D1_DEBUG_LEVEL_NONE)
+        WARN("Ignoring debug level %#x.\n", factory_options->debugLevel);
 
     factory->ID2D1Factory_iface.lpVtbl = &d2d_factory_vtbl;
     factory->refcount = 1;

@@ -57,6 +57,7 @@ PUBLIC_IDL_H_SRCS = \
 	iads.idl \
 	icftypes.idl \
 	iextag.idl \
+	iimgctx.idl \
 	imnact.idl \
 	imnxport.idl \
 	indexsrv.idl \
@@ -579,6 +580,7 @@ SRCDIR_INCLUDES = \
 	t2embapi.h \
 	tapi.h \
 	tchar.h \
+	tcpestats.h \
 	tcpmib.h \
 	textserv.h \
 	tlhelp32.h \

@@ -1,7 +1,5 @@
 /*
- * Uninstaller resource definitions
- *
- * Copyright 2005 Jonathan Ernst
+ * Copyright (C) 2015 Bruno Jesus
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,15 +16,22 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <windef.h>
+#ifndef _TCPESTATS_
+#define _TCPESTATS_
 
-#define IDS_APPNAME                     1000
-#define IDS_UNINSTALLFAILED             1001
+/* Values used in Get/SetPerTcpConnectionEStats */
+typedef enum
+{
+    TcpConnectionEstatsSynOpts,
+    TcpConnectionEstatsData,
+    TcpConnectionEstatsSndCong,
+    TcpConnectionEstatsPath,
+    TcpConnectionEstatsSendBuff,
+    TcpConnectionEstatsRec,
+    TcpConnectionEstatsObsRec,
+    TcpConnectionEstatsBandwidth,
+    TcpConnectionEstatsFineRtt,
+    TcpConnectionEstatsMaximum
+} TCP_ESTATS_TYPE;
 
-#define STRING_NO_APP_MATCH             2000
-#define STRING_PARAMETER_REQUIRED       2001
-#define STRING_INVALID_OPTION           2002
-#define STRING_HEADER                   2003
-#define STRING_USAGE                    2004
-
-#define MAX_STRING_LEN                  255
+#endif /* _TCPESTATS_ */

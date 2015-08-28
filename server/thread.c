@@ -338,11 +338,15 @@ static int thread_signaled( struct object *obj, struct wait_queue_entry *entry )
 
 static unsigned int thread_map_access( struct object *obj, unsigned int access )
 {
-    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | THREAD_QUERY_INFORMATION | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION;
+    if (access & GENERIC_READ)    access |= STANDARD_RIGHTS_READ | THREAD_QUERY_INFORMATION | THREAD_GET_CONTEXT;
     if (access & GENERIC_WRITE)   access |= STANDARD_RIGHTS_WRITE | THREAD_SET_INFORMATION | THREAD_SET_CONTEXT |
-                                            THREAD_TERMINATE | THREAD_SUSPEND_RESUME | THREAD_SET_LIMITED_INFORMATION;
+                                            THREAD_TERMINATE | THREAD_SUSPEND_RESUME;
     if (access & GENERIC_EXECUTE) access |= STANDARD_RIGHTS_EXECUTE | SYNCHRONIZE | THREAD_QUERY_LIMITED_INFORMATION;
     if (access & GENERIC_ALL)     access |= THREAD_ALL_ACCESS;
+
+    if (access & THREAD_QUERY_INFORMATION) access |= THREAD_QUERY_LIMITED_INFORMATION;
+    if (access & THREAD_SET_INFORMATION) access |= THREAD_SET_LIMITED_INFORMATION;
+
     return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
@@ -1368,7 +1372,7 @@ DECL_HANDLER(get_thread_info)
     obj_handle_t handle = req->handle;
 
     if (!handle) thread = get_thread_from_id( req->tid_in );
-    else thread = get_thread_from_handle( req->handle, THREAD_QUERY_INFORMATION );
+    else thread = get_thread_from_handle( req->handle, THREAD_QUERY_LIMITED_INFORMATION );
 
     if (thread)
     {

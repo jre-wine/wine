@@ -34,6 +34,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(vcomp);
 
+typedef CRITICAL_SECTION *omp_lock_t;
+typedef CRITICAL_SECTION *omp_nest_lock_t;
+
 static struct list vcomp_idle_threads = LIST_INIT(vcomp_idle_threads);
 static DWORD   vcomp_context_tls = TLS_OUT_OF_INDEXES;
 static HMODULE vcomp_module;
@@ -188,6 +191,42 @@ __ASM_GLOBAL_FUNC( _vcomp_fork_call_wrapper,
                    __ASM_CFI(".cfi_adjust_cfa_offset -8\n\t")
                    __ASM_CFI(".cfi_same_value %rbp\n\t")
                    "ret")
+
+#elif defined(__arm__)
+
+extern void CDECL _vcomp_fork_call_wrapper(void *wrapper, int nargs, __ms_va_list args);
+__ASM_GLOBAL_FUNC( _vcomp_fork_call_wrapper,
+                   ".arm\n\t"
+                   "push {r4, r5, LR}\n\t"
+                   "mov r4, r0\n\t"
+                   "mov r5, SP\n\t"
+                   "lsl r3, r1, #2\n\t"
+                   "cmp r3, #0\n\t"
+                   "beq 5f\n\t"
+                   "sub SP, SP, r3\n\t"
+                   "tst r1, #1\n\t"
+                   "subeq SP, SP, #4\n\t"
+                   "1:\tsub r3, r3, #4\n\t"
+                   "ldr r0, [r2, r3]\n\t"
+                   "str r0, [SP, r3]\n\t"
+                   "cmp r3, #0\n\t"
+                   "bgt 1b\n\t"
+                   "cmp r1, #1\n\t"
+                   "bgt 2f\n\t"
+                   "pop {r0}\n\t"
+                   "b 5f\n\t"
+                   "2:\tcmp r1, #2\n\t"
+                   "bgt 3f\n\t"
+                   "pop {r0-r1}\n\t"
+                   "b 5f\n\t"
+                   "3:\tcmp r1, #3\n\t"
+                   "bgt 4f\n\t"
+                   "pop {r0-r2}\n\t"
+                   "b 5f\n\t"
+                   "4:\tpop {r0-r3}\n\t"
+                   "5:\tblx r4\n\t"
+                   "mov SP, r5\n\t"
+                   "pop {r4, r5, PC}" )
 
 #else
 
@@ -463,6 +502,11 @@ void CDECL omp_set_num_threads(int num_threads)
     TRACE("(%d)\n", num_threads);
     if (num_threads >= 1)
         vcomp_num_threads = num_threads;
+}
+
+void CDECL _vcomp_flush(void)
+{
+    TRACE("(): stub\n");
 }
 
 void CDECL _vcomp_barrier(void)
@@ -979,29 +1023,102 @@ void WINAPIV _vcomp_fork(BOOL ifval, int nargs, void *wrapper, ...)
     __ms_va_end(team_data.valist);
 }
 
+static CRITICAL_SECTION *alloc_critsect(void)
+{
+    CRITICAL_SECTION *critsect;
+    if (!(critsect = HeapAlloc(GetProcessHeap(), 0, sizeof(*critsect))))
+    {
+        ERR("could not allocate critical section\n");
+        ExitProcess(1);
+    }
+
+    InitializeCriticalSection(critsect);
+    critsect->DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": critsect");
+    return critsect;
+}
+
+static void destroy_critsect(CRITICAL_SECTION *critsect)
+{
+    if (!critsect) return;
+    critsect->DebugInfo->Spare[0] = 0;
+    DeleteCriticalSection(critsect);
+    HeapFree(GetProcessHeap(), 0, critsect);
+}
+
+static BOOL critsect_is_locked(CRITICAL_SECTION *critsect)
+{
+    return critsect->OwningThread == ULongToHandle(GetCurrentThreadId()) &&
+           critsect->RecursionCount;
+}
+
+void CDECL omp_init_lock(omp_lock_t *lock)
+{
+    TRACE("(%p)\n", lock);
+    *lock = alloc_critsect();
+}
+
+void CDECL omp_destroy_lock(omp_lock_t *lock)
+{
+    TRACE("(%p)\n", lock);
+    destroy_critsect(*lock);
+}
+
+void CDECL omp_set_lock(omp_lock_t *lock)
+{
+    TRACE("(%p)\n", lock);
+
+    if (critsect_is_locked(*lock))
+    {
+        ERR("omp_set_lock called while holding lock %p\n", *lock);
+        ExitProcess(1);
+    }
+
+    EnterCriticalSection(*lock);
+}
+
+void CDECL omp_unset_lock(omp_lock_t *lock)
+{
+    TRACE("(%p)\n", lock);
+    LeaveCriticalSection(*lock);
+}
+
+int CDECL omp_test_lock(omp_lock_t *lock)
+{
+    TRACE("(%p)\n", lock);
+
+    if (critsect_is_locked(*lock))
+        return 0;
+
+    return TryEnterCriticalSection(*lock);
+}
+
+void CDECL omp_set_nest_lock(omp_nest_lock_t *lock)
+{
+    TRACE("(%p)\n", lock);
+    EnterCriticalSection(*lock);
+}
+
+void CDECL omp_unset_nest_lock(omp_nest_lock_t *lock)
+{
+    TRACE("(%p)\n", lock);
+    LeaveCriticalSection(*lock);
+}
+
+int CDECL omp_test_nest_lock(omp_nest_lock_t *lock)
+{
+    TRACE("(%p)\n", lock);
+    return TryEnterCriticalSection(*lock) ? (*lock)->RecursionCount : 0;
+}
+
 void CDECL _vcomp_enter_critsect(CRITICAL_SECTION **critsect)
 {
     TRACE("(%p)\n", critsect);
 
     if (!*critsect)
     {
-        CRITICAL_SECTION *new_critsect;
-        if (!(new_critsect = HeapAlloc(GetProcessHeap(), 0, sizeof(*new_critsect))))
-        {
-            ERR("could not allocate critical section\n");
-            ExitProcess(1);
-        }
-
-        InitializeCriticalSection(new_critsect);
-        new_critsect->DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": critsect");
-
+        CRITICAL_SECTION *new_critsect = alloc_critsect();
         if (interlocked_cmpxchg_ptr((void **)critsect, new_critsect, NULL) != NULL)
-        {
-            /* someone beat us to it */
-            new_critsect->DebugInfo->Spare[0] = 0;
-            DeleteCriticalSection(new_critsect);
-            HeapFree(GetProcessHeap(), 0, new_critsect);
-        }
+            destroy_critsect(new_critsect);  /* someone beat us to it */
     }
 
     EnterCriticalSection(*critsect);

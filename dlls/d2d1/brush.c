@@ -304,8 +304,6 @@ static const struct ID2D1SolidColorBrushVtbl d2d_solid_color_brush_vtbl =
 void d2d_solid_color_brush_init(struct d2d_brush *brush, ID2D1Factory *factory,
         const D2D1_COLOR_F *color, const D2D1_BRUSH_PROPERTIES *desc)
 {
-    FIXME("Ignoring brush properties.\n");
-
     d2d_brush_init(brush, factory, D2D_BRUSH_TYPE_SOLID, desc,
             (ID2D1BrushVtbl *)&d2d_solid_color_brush_vtbl);
     brush->u.solid.color = *color;
@@ -685,12 +683,9 @@ static const struct ID2D1BitmapBrushVtbl d2d_bitmap_brush_vtbl =
     d2d_bitmap_brush_GetBitmap,
 };
 
-HRESULT d2d_bitmap_brush_init(struct d2d_brush *brush, ID2D1Factory *factory, ID2D1Bitmap *bitmap,
+void d2d_bitmap_brush_init(struct d2d_brush *brush, ID2D1Factory *factory, ID2D1Bitmap *bitmap,
         const D2D1_BITMAP_BRUSH_PROPERTIES *bitmap_brush_desc, const D2D1_BRUSH_PROPERTIES *brush_desc)
 {
-
-    FIXME("Ignoring brush properties.\n");
-
     d2d_brush_init(brush, factory, D2D_BRUSH_TYPE_BITMAP,
             brush_desc, (ID2D1BrushVtbl *)&d2d_bitmap_brush_vtbl);
     if ((brush->u.bitmap.bitmap = unsafe_impl_from_ID2D1Bitmap(bitmap)))
@@ -707,8 +702,6 @@ HRESULT d2d_bitmap_brush_init(struct d2d_brush *brush, ID2D1Factory *factory, ID
         brush->u.bitmap.extend_mode_y = D2D1_EXTEND_MODE_CLAMP;
         brush->u.bitmap.interpolation_mode = D2D1_BITMAP_INTERPOLATION_MODE_LINEAR;
     }
-
-    return S_OK;
 }
 
 struct d2d_brush *unsafe_impl_from_ID2D1Brush(ID2D1Brush *iface)

@@ -37,6 +37,11 @@ struct d3drm_device
     IDirect3DRMDevice2 IDirect3DRMDevice2_iface;
     IDirect3DRMDevice3 IDirect3DRMDevice3_iface;
     IDirect3DRMWinDevice IDirect3DRMWinDevice_iface;
+    IDirect3DRM *d3drm;
+    IDirectDraw *ddraw;
+    IDirectDrawSurface *primary_surface, *render_target;
+    IDirectDrawClipper *clipper;
+    IDirect3DDevice *device;
     LONG ref;
     BOOL dither;
     D3DRMRENDERQUALITY quality;
@@ -60,9 +65,190 @@ static inline struct d3drm_device *impl_from_IDirect3DRMDevice3(IDirect3DRMDevic
     return CONTAINING_RECORD(iface, struct d3drm_device, IDirect3DRMDevice3_iface);
 }
 
+IDirect3DRMDevice *IDirect3DRMDevice_from_impl(struct d3drm_device *device)
+{
+    return &device->IDirect3DRMDevice_iface;
+}
+
+IDirect3DRMDevice2 *IDirect3DRMDevice2_from_impl(struct d3drm_device *device)
+{
+    return &device->IDirect3DRMDevice2_iface;
+}
+
+IDirect3DRMDevice3 *IDirect3DRMDevice3_from_impl(struct d3drm_device *device)
+{
+    return &device->IDirect3DRMDevice3_iface;
+}
+
+void d3drm_device_destroy(struct d3drm_device *device)
+{
+    if (device->device)
+    {
+        TRACE("Releasing attached ddraw interfaces.\n");
+        IDirect3DDevice_Release(device->device);
+    }
+    if (device->render_target)
+        IDirectDrawSurface_Release(device->render_target);
+    if (device->primary_surface)
+    {
+        TRACE("Releasing primary surface and attached clipper.\n");
+        IDirectDrawSurface_Release(device->primary_surface);
+        IDirectDrawClipper_Release(device->clipper);
+    }
+    if (device->ddraw)
+    {
+        IDirectDraw_Release(device->ddraw);
+        IDirect3DRM_Release(device->d3drm);
+    }
+    HeapFree(GetProcessHeap(), 0, device);
+}
+
 static inline struct d3drm_device *impl_from_IDirect3DRMWinDevice(IDirect3DRMWinDevice *iface)
 {
     return CONTAINING_RECORD(iface, struct d3drm_device, IDirect3DRMWinDevice_iface);
+}
+
+HRESULT d3drm_device_create_surfaces_from_clipper(struct d3drm_device *object, IDirectDraw *ddraw, IDirectDrawClipper *clipper, int width, int height, IDirectDrawSurface **surface)
+{
+    DDSURFACEDESC surface_desc;
+    IDirectDrawSurface *primary_surface, *render_target;
+    HWND window;
+    HRESULT hr;
+
+    hr = IDirectDrawClipper_GetHWnd(clipper, &window);
+    if (FAILED(hr))
+        return hr;
+
+    hr = IDirectDraw_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    if (FAILED(hr))
+        return hr;
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
+    hr = IDirectDraw_CreateSurface(ddraw, &surface_desc, &primary_surface, NULL);
+    if (FAILED(hr))
+        return hr;
+    hr = IDirectDrawSurface_SetClipper(primary_surface, clipper);
+    if (FAILED(hr))
+    {
+        IDirectDrawSurface_Release(primary_surface);
+        return hr;
+    }
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | DDSCAPS_3DDEVICE;
+    surface_desc.dwWidth = width;
+    surface_desc.dwHeight = height;
+
+    hr = IDirectDraw_CreateSurface(ddraw, &surface_desc, &render_target, NULL);
+    if (FAILED(hr))
+    {
+        IDirectDrawSurface_Release(primary_surface);
+        return hr;
+    }
+
+    object->primary_surface = primary_surface;
+    object->clipper = clipper;
+    IDirectDrawClipper_AddRef(clipper);
+    *surface = render_target;
+
+    return D3DRM_OK;
+}
+
+HRESULT d3drm_device_init(struct d3drm_device *device, UINT version, IDirect3DRM *d3drm, IDirectDraw *ddraw, IDirectDrawSurface *surface,
+            BOOL create_z_surface)
+{
+    DDSCAPS caps = { DDSCAPS_ZBUFFER };
+    IDirectDrawSurface *ds = NULL;
+    IDirect3DDevice *device1 = NULL;
+    IDirect3DDevice2 *device2 = NULL;
+    IDirect3D2 *d3d2 = NULL;
+    DDSURFACEDESC desc, surface_desc;
+    HRESULT hr;
+
+    device->ddraw = ddraw;
+    IDirectDraw_AddRef(ddraw);
+    device->d3drm = d3drm;
+    IDirect3DRM_AddRef(d3drm);
+    device->render_target = surface;
+    IDirectDrawSurface_AddRef(surface);
+
+    desc.dwSize = sizeof(desc);
+    hr = IDirectDrawSurface_GetSurfaceDesc(surface, &desc);
+    if (FAILED(hr))
+        return hr;
+
+    if (!(desc.ddsCaps.dwCaps & DDSCAPS_3DDEVICE))
+        return DDERR_INVALIDCAPS;
+
+    hr = IDirectDrawSurface_GetAttachedSurface(surface, &caps, &ds);
+    if (SUCCEEDED(hr))
+    {
+        create_z_surface = FALSE;
+        IDirectDrawSurface_Release(ds);
+        ds = NULL;
+    }
+
+    if (create_z_surface)
+    {
+        memset(&surface_desc, 0, sizeof(surface_desc));
+        surface_desc.dwSize = sizeof(surface_desc);
+        surface_desc.dwFlags = DDSD_CAPS | DDSD_ZBUFFERBITDEPTH | DDSD_WIDTH | DDSD_HEIGHT;
+        surface_desc.ddsCaps.dwCaps = DDSCAPS_ZBUFFER;
+        surface_desc.dwZBufferBitDepth = 16;
+        surface_desc.dwWidth = desc.dwWidth;
+        surface_desc.dwHeight = desc.dwHeight;
+        hr = IDirectDraw_CreateSurface(ddraw, &surface_desc, &ds, NULL);
+        if (FAILED(hr))
+            return hr;
+
+        hr = IDirectDrawSurface_AddAttachedSurface(surface, ds);
+        IDirectDrawSurface_Release(ds);
+        if (FAILED(hr))
+            return hr;
+    }
+
+    if (version == 1)
+        hr = IDirectDrawSurface_QueryInterface(surface, &IID_IDirect3DRGBDevice, (void **)&device1);
+    else
+    {
+        IDirectDraw_QueryInterface(ddraw, &IID_IDirect3D2, (void**)&d3d2);
+        hr = IDirect3D2_CreateDevice(d3d2, &IID_IDirect3DRGBDevice, surface, &device2);
+        IDirect3D2_Release(d3d2);
+    }
+    if (FAILED(hr))
+    {
+        IDirectDrawSurface_DeleteAttachedSurface(surface, 0, ds);
+        return hr;
+    }
+
+    if (version != 1)
+    {
+        hr = IDirect3DDevice2_QueryInterface(device2, &IID_IDirect3DDevice, (void**)&device1);
+        IDirect3DDevice2_Release(device2);
+        if (FAILED(hr))
+        {
+            IDirectDrawSurface_DeleteAttachedSurface(surface, 0, ds);
+            return hr;
+        }
+    }
+    device->device = device1;
+
+    return hr;
+}
+
+HRESULT d3drm_device_set_ddraw_device_d3d(struct d3drm_device *device, IDirect3DRM *d3drm, IDirect3D *d3d, IDirect3DDevice *d3d_device)
+{
+    device->d3drm = d3drm;
+    IDirect3DRM_AddRef(d3drm);
+    device->device = d3d_device;
+    IDirect3DDevice_AddRef(d3d_device);
+
+    return IDirect3D_QueryInterface(d3d, &IID_IDirectDraw, (void **)&device->ddraw);
 }
 
 static HRESULT WINAPI d3drm_device1_QueryInterface(IDirect3DRMDevice *iface, REFIID riid, void **out)
@@ -811,6 +997,7 @@ static HRESULT WINAPI d3drm_device3_QueryInterface(IDirect3DRMDevice3 *iface, RE
     TRACE("iface %p, riid %s, out %p.\n", iface, debugstr_guid(riid), out);
 
     if (IsEqualGUID(riid, &IID_IDirect3DRMDevice3)
+            || IsEqualGUID(riid, &IID_IDirect3DRMObject)
             || IsEqualGUID(riid, &IID_IUnknown))
     {
         *out = &device->IDirect3DRMDevice3_iface;
@@ -830,8 +1017,8 @@ static HRESULT WINAPI d3drm_device3_QueryInterface(IDirect3DRMDevice3 *iface, RE
     else
     {
         *out = NULL;
-        WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(riid));
-        return E_NOINTERFACE;
+        WARN("%s not implemented, returning CLASS_E_CLASSNOTAVAILABLE.\n", debugstr_guid(riid));
+        return CLASS_E_CLASSNOTAVAILABLE;
     }
 
     IUnknown_AddRef((IUnknown *)*out);
@@ -856,7 +1043,7 @@ static ULONG WINAPI d3drm_device3_Release(IDirect3DRMDevice3 *iface)
     TRACE("%p decreasing refcount to %u.\n", iface, refcount);
 
     if (!refcount)
-        HeapFree(GetProcessHeap(), 0, device);
+        d3drm_device_destroy(device);
 
     return refcount;
 }
@@ -1113,9 +1300,13 @@ static D3DRMTEXTUREQUALITY WINAPI d3drm_device3_GetTextureQuality(IDirect3DRMDev
 
 static HRESULT WINAPI d3drm_device3_GetDirect3DDevice(IDirect3DRMDevice3 *iface, IDirect3DDevice **d3d_device)
 {
-    FIXME("iface %p, d3d_device %p stub!\n", iface, d3d_device);
+    struct d3drm_device *device = impl_from_IDirect3DRMDevice3(iface);
+    TRACE("iface %p, d3d_device %p!\n", iface, d3d_device);
 
-    return E_NOTIMPL;
+    *d3d_device = device->device;
+    IDirect3DDevice_AddRef(*d3d_device);
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI d3drm_device3_InitFromD3D2(IDirect3DRMDevice3 *iface,
@@ -1157,9 +1348,13 @@ static DWORD WINAPI d3drm_device3_GetRenderMode(IDirect3DRMDevice3 *iface)
 
 static HRESULT WINAPI d3drm_device3_GetDirect3DDevice2(IDirect3DRMDevice3 *iface, IDirect3DDevice2 **d3d_device)
 {
-    FIXME("iface %p, d3d_device %p stub!\n", iface, d3d_device);
+    struct d3drm_device *device = impl_from_IDirect3DRMDevice3(iface);
 
-    return E_NOTIMPL;
+    TRACE("iface %p, d3d_device %p.\n", iface, d3d_device);
+
+    IDirect3DDevice_QueryInterface(device->device, &IID_IDirect3DDevice2, (void**)d3d_device);
+
+    return D3DRM_OK;
 }
 
 static HRESULT WINAPI d3drm_device3_FindPreferredTextureFormat(IDirect3DRMDevice3 *iface,
@@ -1381,12 +1576,11 @@ static const struct IDirect3DRMWinDeviceVtbl d3drm_device_win_vtbl =
     d3drm_device_win_HandleActivate,
 };
 
-HRESULT Direct3DRMDevice_create(REFIID riid, IUnknown **out)
+HRESULT d3drm_device_create(struct d3drm_device **out)
 {
     struct d3drm_device *object;
-    HRESULT hr;
 
-    TRACE("riid %s, out %p.\n", debugstr_guid(riid), out);
+    TRACE("out %p.\n", out);
 
     if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
         return E_OUTOFMEMORY;
@@ -1397,8 +1591,7 @@ HRESULT Direct3DRMDevice_create(REFIID riid, IUnknown **out)
     object->IDirect3DRMWinDevice_iface.lpVtbl = &d3drm_device_win_vtbl;
     object->ref = 1;
 
-    hr = IDirect3DRMDevice_QueryInterface(&object->IDirect3DRMDevice3_iface, riid, (void **)out);
-    IDirect3DRMDevice3_Release(&object->IDirect3DRMDevice3_iface);
+    *out = object;
 
-    return hr;
+    return D3DRM_OK;
 }

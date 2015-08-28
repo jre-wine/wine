@@ -91,7 +91,7 @@
 @ stub GetIfEntryFromStack
 #@ stub GetIfStackTable
 @ stdcall GetIfTable( ptr ptr long )
-#@ stub GetIfTable2
+@ stdcall GetIfTable2( ptr )
 #@ stub GetIfTable2Ex
 @ stub GetIfTableFromStack
 @ stub GetIgmpList
@@ -285,7 +285,7 @@
 #@ stub SetNetworkInformation
 #@ stub SetPerTcp6ConnectionEStats
 #@ stub SetPerTcp6ConnectionStats
-#@ stub SetPerTcpConnectionEStats
+@ stdcall SetPerTcpConnectionEStats( ptr long ptr long long long )
 #@ stub SetPerTcpConnectionStats
 @ stub SetProxyArpEntryToStack
 @ stub SetRouteWithRef

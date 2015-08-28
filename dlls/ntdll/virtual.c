@@ -61,12 +61,6 @@ WINE_DECLARE_DEBUG_CHANNEL(module);
 #define MAP_NORESERVE 0
 #endif
 
-#ifdef _WIN64
-#define DEFAULT_SECURITY_COOKIE_64  (((ULONGLONG)0x00002b99 << 32) | 0x2ddfa232)
-#endif
-#define DEFAULT_SECURITY_COOKIE_32  0xbb40e64e
-#define DEFAULT_SECURITY_COOKIE_16  (DEFAULT_SECURITY_COOKIE_32 >> 16)
-
 /* File view */
 struct file_view
 {
@@ -1060,37 +1054,6 @@ static NTSTATUS stat_mapping_file( struct file_view *view, struct stat *st )
 }
 
 /***********************************************************************
- *           set_security_cookie
- *
- * Create a random security cookie for buffer overflow protection. Make
- * sure it does not accidentally match the default cookie value.
- */
-static void set_security_cookie(ULONG_PTR *cookie)
-{
-    static ULONG seed;
-
-    if (!cookie) return;
-    if (!seed) seed = NtGetTickCount() ^ GetCurrentProcessId();
-    while (1)
-    {
-        if (*cookie == DEFAULT_SECURITY_COOKIE_16)
-            *cookie = RtlRandom( &seed ) >> 16; /* leave the high word clear */
-        else if (*cookie == DEFAULT_SECURITY_COOKIE_32)
-            *cookie = RtlRandom( &seed );
-#ifdef DEFAULT_SECURITY_COOKIE_64
-        else if (*cookie == DEFAULT_SECURITY_COOKIE_64)
-        {
-            *cookie = RtlRandom( &seed );
-            /* fill up, but keep the highest word clear */
-            *cookie ^= (ULONG_PTR)RtlRandom( &seed ) << 16;
-        }
-#endif
-        else
-            break;
-    }
-}
-
-/***********************************************************************
  *           map_image
  *
  * Map an executable (PE format) image into memory.
@@ -1103,8 +1066,6 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
     IMAGE_SECTION_HEADER sections[96];
     IMAGE_SECTION_HEADER *sec;
     IMAGE_DATA_DIRECTORY *imports;
-    IMAGE_LOAD_CONFIG_DIRECTORY *loadcfg;
-    ULONG loadcfg_size;
     NTSTATUS status = STATUS_CONFLICTING_ADDRESSES;
     int i;
     off_t pos;
@@ -1112,7 +1073,6 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
     struct stat st;
     struct file_view *view = NULL;
     char *ptr, *header_end, *header_start;
-    INT_PTR delta = 0;
 
     /* zero-map the whole range */
 
@@ -1275,57 +1235,6 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
         }
     }
 
-
-    /* perform base relocation, if necessary */
-
-    if (ptr != base &&
-        ((nt->FileHeader.Characteristics & IMAGE_FILE_DLL) ||
-          !NtCurrentTeb()->Peb->ImageBaseAddress) )
-    {
-        IMAGE_BASE_RELOCATION *rel, *end;
-        const IMAGE_DATA_DIRECTORY *relocs;
-
-        if (nt->FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED)
-        {
-            WARN_(module)( "Need to relocate module from %p to %p, but there are no relocation records\n",
-                           base, ptr );
-            status = STATUS_CONFLICTING_ADDRESSES;
-            goto error;
-        }
-
-        TRACE_(module)( "relocating from %p-%p to %p-%p\n",
-                        base, base + total_size, ptr, ptr + total_size );
-
-        relocs = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
-        rel = (IMAGE_BASE_RELOCATION *)(ptr + relocs->VirtualAddress);
-        end = (IMAGE_BASE_RELOCATION *)(ptr + relocs->VirtualAddress + relocs->Size);
-        delta = ptr - base;
-
-        while (rel < end - 1 && rel->SizeOfBlock)
-        {
-            if (rel->VirtualAddress >= total_size)
-            {
-                WARN_(module)( "invalid address %p in relocation %p\n", ptr + rel->VirtualAddress, rel );
-                status = STATUS_ACCESS_VIOLATION;
-                goto error;
-            }
-            rel = LdrProcessRelocationBlock( ptr + rel->VirtualAddress,
-                                             (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT),
-                                             (USHORT *)(rel + 1), delta );
-            if (!rel) goto error;
-        }
-    }
-
-    /* randomize security cookie */
-
-    loadcfg = RtlImageDirectoryEntryToData( (HMODULE)ptr, TRUE,
-                                            IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG, &loadcfg_size );
-    if (loadcfg && loadcfg_size >= offsetof(IMAGE_LOAD_CONFIG_DIRECTORY, SecurityCookie) + sizeof(loadcfg->SecurityCookie) &&
-        (ULONG_PTR)ptr <= loadcfg->SecurityCookie && loadcfg->SecurityCookie <= (ULONG_PTR)ptr + total_size - sizeof(ULONG_PTR))
-    {
-        set_security_cookie((ULONG_PTR *)loadcfg->SecurityCookie);
-    }
-
     /* set the image protections */
 
     VIRTUAL_SetProt( view, ptr, ROUND_SIZE( 0, header_size ), VPROT_COMMITTED | VPROT_READ );
@@ -1362,7 +1271,7 @@ static NTSTATUS map_image( HANDLE hmapping, int fd, char *base, SIZE_T total_siz
 
     *addr_ptr = ptr;
 #ifdef VALGRIND_LOAD_PDB_DEBUGINFO
-    VALGRIND_LOAD_PDB_DEBUGINFO(fd, ptr, total_size, delta);
+    VALGRIND_LOAD_PDB_DEBUGINFO(fd, ptr, total_size, ptr - base);
 #endif
     if (ptr != base) return STATUS_IMAGE_NOT_AT_BASE;
     return STATUS_SUCCESS;

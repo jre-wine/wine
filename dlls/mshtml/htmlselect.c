@@ -205,40 +205,33 @@ static HRESULT WINAPI HTMLSelectElement_get_multiple(IHTMLSelectElement *iface, 
 static HRESULT WINAPI HTMLSelectElement_put_name(IHTMLSelectElement *iface, BSTR v)
 {
     HTMLSelectElement *This = impl_from_IHTMLSelectElement(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsAString str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+    nsAString_InitDepend(&str, v);
+    nsres = nsIDOMHTMLSelectElement_SetName(This->nsselect, &str);
+    nsAString_Finish(&str);
+
+    if(NS_FAILED(nsres)) {
+        ERR("SetName failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLSelectElement_get_name(IHTMLSelectElement *iface, BSTR *p)
 {
     HTMLSelectElement *This = impl_from_IHTMLSelectElement(iface);
     nsAString name_str;
-    const PRUnichar *name = NULL;
     nsresult nsres;
 
     TRACE("(%p)->(%p)\n", This, p);
 
     nsAString_Init(&name_str, NULL);
-
     nsres = nsIDOMHTMLSelectElement_GetName(This->nsselect, &name_str);
-    if(NS_SUCCEEDED(nsres)) {
-        static const WCHAR wszGarbage[] = {'g','a','r','b','a','g','e',0};
 
-        nsAString_GetData(&name_str, &name);
-
-        /*
-         * Native never returns empty string here. If an element has no name,
-         * name of previous element or ramdom data is returned.
-         */
-        *p = SysAllocString(*name ? name : wszGarbage);
-    }else {
-        ERR("GetName failed: %08x\n", nsres);
-    }
-
-    nsAString_Finish(&name_str);
-
-    TRACE("name=%s\n", debugstr_w(*p));
-    return S_OK;
+    return return_nsstr(nsres, &name_str, p);
 }
 
 static HRESULT WINAPI HTMLSelectElement_get_options(IHTMLSelectElement *iface, IDispatch **p)
@@ -378,8 +371,43 @@ static HRESULT WINAPI HTMLSelectElement_get_disabled(IHTMLSelectElement *iface, 
 static HRESULT WINAPI HTMLSelectElement_get_form(IHTMLSelectElement *iface, IHTMLFormElement **p)
 {
     HTMLSelectElement *This = impl_from_IHTMLSelectElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsIDOMHTMLFormElement *nsform;
+    nsIDOMNode *form_node;
+    HTMLDOMNode *node;
+    HRESULT hres;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
+    nsres = nsIDOMHTMLSelectElement_GetForm(This->nsselect, &nsform);
+    FIXME("get form %08x : %p\n", nsres, nsform);
+    if (NS_FAILED(nsres)) {
+        ERR("GetForm failed: %08x, nsform: %p\n", nsres, nsform);
+        *p = NULL;
+        return E_FAIL;
+    }
+    if (nsform == NULL) {
+        TRACE("nsform not found\n");
+        *p = NULL;
+        return S_OK;
+    }
+
+    nsres = nsIDOMHTMLFormElement_QueryInterface(nsform, &IID_nsIDOMNode, (void**)&form_node);
+    nsIDOMHTMLFormElement_Release(nsform);
+    assert(nsres == NS_OK);
+
+    hres = get_node(This->element.node.doc, form_node, TRUE, &node);
+    nsIDOMNode_Release(form_node);
+    if (FAILED(hres))
+        return hres;
+
+    hres = IHTMLDOMNode_QueryInterface(&node->IHTMLDOMNode_iface, &IID_IHTMLElement, (void**)p);
+
+    node_release(node);
+    return hres;
 }
 
 static HRESULT WINAPI HTMLSelectElement_add(IHTMLSelectElement *iface, IHTMLElement *element,
