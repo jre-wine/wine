@@ -1,8 +1,13 @@
-wine-development (1.7.50-2) UNRELEASED; urgency=medium
+wine-development (1.7.50-2) unstable; urgency=medium
 
-  * 
+  [ Jens Reyer ]
+  * Update recommends libwine-gecko to 2.40.
 
- -- Michael Gilbert <mgilbert@debian.org>  Mon, 24 Aug 2015 01:55:57 +0000
+  [ Michael Gilbert ]
+  * Tighten dependencies (closes: #797299).
+  * Apply upstream patch fixing World of Warcraft (closes: #796819).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 29 Aug 2015 14:20:54 +0000
 
 wine-development (1.7.50-1) unstable; urgency=medium
 
