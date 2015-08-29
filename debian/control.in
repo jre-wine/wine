@@ -69,7 +69,7 @@ Multi-Arch: foreign
 Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
- wine64VERSION (<< ${source:Version}).1~ | wine32VERSION (<< ${source:Version}.1~),
+ wine64VERSION (<< ${source:Version}.1~) | wine32VERSION (<< ${source:Version}.1~),
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
