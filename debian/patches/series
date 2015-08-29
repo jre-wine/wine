@@ -2,7 +2,7 @@ makefile.patch
 manpages.patch
 
 disable/shlib-exit-calls.patch
-disable/downloading.patch
+disable/external-installers.patch
 
 development/winegcc.patch
 development/winemenubuilder.patch
@@ -19,3 +19,5 @@ opengl.patch
 
 kfreebsd-include.patch
 font-divbyzero.patch
+
+world-of-warcraft.patch

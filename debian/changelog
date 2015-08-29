@@ -1,3 +1,20 @@
+wine-development (1.7.50-3) unstable; urgency=medium
+
+  * Fix typo in dependencies.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 29 Aug 2015 21:21:45 +0000
+
+wine-development (1.7.50-2) unstable; urgency=medium
+
+  [ Jens Reyer ]
+  * Update recommends libwine-gecko to 2.40.
+
+  [ Michael Gilbert ]
+  * Tighten dependencies (closes: #797299).
+  * Apply upstream patch fixing World of Warcraft (closes: #796819).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 29 Aug 2015 14:20:54 +0000
+
 wine-development (1.7.50-1~bpo8+1) jessie-backports; urgency=medium
 
   [ Jens Reyer ]
