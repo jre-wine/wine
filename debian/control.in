@@ -111,7 +111,7 @@ Depends:
 Recommends:
  wineVERSION,
  wine32VERSION (>= ${source:Version}),
- libwine-gecko-2.36 [!armhf !arm64],
+ libwine-gecko-2.40 [!armhf !arm64],
  libasound2-plugins,
 Suggests:
  wine64VERSION-preloader,
