@@ -102,6 +102,7 @@ Description: Windows API implementation - 32-bit binary loader
 
 Package: wine64VERSION
 Architecture: amd64 arm64
+Multi-Arch: foreign
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
@@ -123,6 +124,7 @@ Description: Windows API implementation - 64-bit binary loader
 
 Package: wine32VERSION-preloader
 Architecture: i386 powerpc armhf
+Multi-Arch: foreign
 Depends:
  ${misc:Depends},
  wine32VERSION,
@@ -134,6 +136,7 @@ Description: Windows API implementation - prelinked 32-bit binary loader
 
 Package: wine64VERSION-preloader
 Architecture: amd64
+Multi-Arch: foreign
 Depends:
  ${misc:Depends},
  wine64VERSION,
@@ -162,6 +165,7 @@ Description: Windows API implementation - 32-bit developer tools
 Package: wine64VERSION-tools
 Architecture: amd64 arm64
 Section: libdevel
+Multi-Arch: foreign
 Depends:
  gcc [amd64],
  ${perl:Depends},
