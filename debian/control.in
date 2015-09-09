@@ -93,6 +93,9 @@ Recommends:
  libasound2-plugins,
 Suggests:
  wine32VERSION-preloader (= ${binary:Version}),
+Breaks:
+ wineVERSION (<< 1.7.50-3~),
+ wine32VERSION-preloader (<< 1.7.51-2~),
 Description: Windows API implementation - 32-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -115,6 +118,9 @@ Recommends:
  libasound2-plugins,
 Suggests:
  wine64VERSION-preloader (= ${binary:Version}),
+Breaks:
+ wineVERSION (<< 1.7.50-3~),
+ wine64VERSION-preloader (<< 1.7.51-2~),
 Description: Windows API implementation - 64-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
