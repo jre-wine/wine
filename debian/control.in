@@ -85,15 +85,14 @@ Depends:
  x11-utils,
  libncurses5,
  libfreetype6,
- libwineVERSION (>= ${source:Version}),
- libwineVERSION (<< ${source:Version}.1~),
+ libwineVERSION (= ${binary:Version}),
 Recommends:
- wineVERSION,
+ wineVERSION (= ${source:Version}),
  libgl1-mesa-dri,
  libwine-gecko-2.40 [!armhf !arm64],
  libasound2-plugins,
 Suggests:
- wine32VERSION-preloader,
+ wine32VERSION-preloader (= ${binary:Version}),
 Description: Windows API implementation - 32-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -107,15 +106,15 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  x11-utils,
- libwineVERSION (>= ${source:Version}),
- libwineVERSION (<< ${source:Version}.1~),
+ libwineVERSION (= ${binary:Version}),
 Recommends:
- wineVERSION,
+ wineVERSION (= ${source:Version}),
  wine32VERSION (>= ${source:Version}),
+ wine32VERSION (<< ${source:Version}.1~),
  libwine-gecko-2.40 [!armhf !arm64],
  libasound2-plugins,
 Suggests:
- wine64VERSION-preloader,
+ wine64VERSION-preloader (= ${binary:Version}),
 Description: Windows API implementation - 64-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -127,7 +126,7 @@ Architecture: i386 powerpc armhf
 Multi-Arch: foreign
 Depends:
  ${misc:Depends},
- wine32VERSION,
+ wine32VERSION (= ${binary:Version}),
 Description: Windows API implementation - prelinked 32-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -139,7 +138,7 @@ Architecture: amd64
 Multi-Arch: foreign
 Depends:
  ${misc:Depends},
- wine64VERSION,
+ wine64VERSION (= ${binary:Version}),
 Description: Windows API implementation - prelinked 64-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -204,7 +203,7 @@ Depends:
 Recommends:
  libxcursor1,
  fonts-liberation,
- fonts-wineVERSION,
+ fonts-wineVERSION (= ${source:Version}),
 Suggests:
  cups-bsd,
  ttf-mscorefonts-installer,
@@ -225,7 +224,7 @@ Depends:
  libwineVERSION (= ${binary:Version}),
  libc6-dev,
 Recommends:
- wine32VERSION-tools | wine64VERSION-tools,
+ wine32VERSION-tools (= ${binary:Version}) | wine64VERSION-tools (= ${binary:Version}),
 Description: Windows API implementation - development files
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
