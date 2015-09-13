@@ -209,14 +209,12 @@ Depends:
 Recommends:
  libxcursor1,
  fonts-liberation,
- fonts-wineVERSION (= ${source:Version}),
+ fonts-wineVERSION,
 Suggests:
  cups-bsd,
  ttf-mscorefonts-installer,
 Pre-Depends:
  ${misc:Pre-Depends},
-Breaks:
- fonts-wineVERSION (<< ${source:Version}),
 Description: Windows API implementation - library
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
