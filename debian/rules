@@ -7,7 +7,7 @@ VERSION=$(shell dpkg-parsechangelog -S Source | sed s/wine//g)
 
 MANDIR=usr/share/man
 DATDIR=usr/share/wine$(VERSION)
-INCDIR=usr/include/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
+INCDIR=usr/include/wine$(VERSION)
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
 
 # enable verbose build log
