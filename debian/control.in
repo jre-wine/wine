@@ -92,6 +92,7 @@ Recommends:
  libwine-gecko-2.40 [!armhf !arm64],
  libasound2-plugins,
 Suggests:
+ dosbox (>= 0.74-4.2~),
  wine32VERSION-preloader (= ${binary:Version}),
 Breaks:
  wineVERSION (<< 1.7.50-3~),
