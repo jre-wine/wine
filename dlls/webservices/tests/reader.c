@@ -24,6 +24,37 @@
 static const char data1[] =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>";
 
+static const char data2[] =
+    "<text>test</text>";
+
+static const char data3[] =
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+    "<text>test</text>";
+
+static const char data4[] =
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n"
+    "<o:OfficeConfig xmlns:o=\"urn:schemas-microsoft-com:office:office\">\r\n"
+    " <o:services o:GenerationTime=\"2015-09-03T18:47:54\">\r\n"
+    "  <!--Build: 16.0.6202.6852-->\r\n"
+    "  <o:default>\r\n"
+    "   <o:ticket o:headerName=\"Authorization\" o:headerValue=\"{}\" />\r\n"
+    "  </o:default>\r\n"
+    "  <o:service o:name=\"LiveOAuthLoginStart\">\r\n"
+    "   <o:url>https://login.[Live.WebHost]/oauth20_authorize.srf</o:url>\r\n"
+    "  </o:service>\r\n"
+    "</o:services>\r\n"
+    "</o:OfficeConfig>\r\n";
+
+static const char data5[] =
+    "</text>";
+
+static const char data6[] =
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+    "<text attr= \"value\" attr2='value2'>test</text>";
+
+static const char data8[] =
+    "<node1><node2>test</node2></node1>";
+
 static void test_WsCreateError(void)
 {
     HRESULT hr;
@@ -450,6 +481,707 @@ static void test_WsFillReader(void)
     WsFreeReader( reader );
 }
 
+static void test_WsReadToStartElement(void)
+{
+    HRESULT hr;
+    WS_XML_READER *reader;
+    const WS_XML_NODE *node, *node2;
+    int found;
+
+    hr = WsCreateReader( NULL, 0, &reader, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = set_input( reader, data1, sizeof(data1) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data1) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node) ok( node->nodeType == WS_XML_NODE_TYPE_BOF, "got %u\n", node->nodeType );
+
+    hr = WsFillReader( reader, sizeof(data1) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsReadToStartElement( NULL, NULL, NULL, NULL, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    found = -1;
+    hr = WsReadToStartElement( reader, NULL, NULL, &found, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( found == FALSE, "got %d\n", found );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node) ok( node->nodeType == WS_XML_NODE_TYPE_EOF, "got %u\n", node->nodeType );
+
+    hr = set_input( reader, data2, sizeof(data2) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data2) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node) ok( node->nodeType == WS_XML_NODE_TYPE_BOF, "got %u\n", node->nodeType );
+
+    found = -1;
+    hr = WsReadToStartElement( reader, NULL, NULL, &found, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( found == TRUE, "got %d\n", found );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node)
+    {
+        WS_XML_ELEMENT_NODE *elem = (WS_XML_ELEMENT_NODE *)node;
+
+        ok( elem->node.nodeType == WS_XML_NODE_TYPE_ELEMENT, "got %u\n", elem->node.nodeType );
+        ok( elem->prefix != NULL, "prefix not set\n" );
+        if (elem->prefix)
+        {
+            ok( !elem->prefix->length, "got %u\n", elem->prefix->length );
+        }
+        ok( elem->localName != NULL, "localName not set\n" );
+        if (elem->localName)
+        {
+            ok( elem->localName->length == 4, "got %u\n", elem->localName->length );
+            ok( !memcmp( elem->localName->bytes, "text", 4 ), "wrong data\n" );
+        }
+        ok( elem->ns != NULL, "ns not set\n" );
+        if (elem->ns)
+        {
+            ok( !elem->ns->length, "got %u\n", elem->ns->length );
+        }
+        ok( !elem->attributeCount, "got %u\n", elem->attributeCount );
+        ok( elem->attributes == NULL, "attributes set\n" );
+        ok( !elem->isEmpty, "isEmpty not zero\n" );
+    }
+
+    found = -1;
+    hr = WsReadToStartElement( reader, NULL, NULL, &found, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( found == TRUE, "got %d\n", found );
+
+    node2 = NULL;
+    hr = WsGetReaderNode( reader, &node2, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( node2 == node, "different node\n" );
+
+    hr = set_input( reader, data3, sizeof(data3) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data3) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    found = -1;
+    hr = WsReadToStartElement( reader, NULL, NULL, &found, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( found == TRUE, "got %d\n", found );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node)
+    {
+        WS_XML_ELEMENT_NODE *elem = (WS_XML_ELEMENT_NODE *)node;
+
+        ok( elem->node.nodeType == WS_XML_NODE_TYPE_ELEMENT, "got %u\n", elem->node.nodeType );
+        ok( elem->localName != NULL, "localName not set\n" );
+        if (elem->localName)
+        {
+            ok( elem->localName->length == 4, "got %u\n", elem->localName->length );
+            ok( !memcmp( elem->localName->bytes, "text", 4 ), "wrong data\n" );
+        }
+    }
+
+    hr = set_input( reader, data4, sizeof(data4) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data4) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    found = -1;
+    hr = WsReadToStartElement( reader, NULL, NULL, &found, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( found == TRUE, "got %d\n", found );
+    WsFreeReader( reader );
+}
+
+static void test_WsReadStartElement(void)
+{
+    HRESULT hr;
+    WS_XML_READER *reader;
+    const WS_XML_NODE *node, *node2;
+    int found;
+
+    hr = WsCreateReader( NULL, 0, &reader, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = set_input( reader, data2, sizeof(data2) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data2) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    found = -1;
+    hr = WsReadToStartElement( reader, NULL, NULL, &found, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( found == TRUE, "got %d\n", found );
+
+    hr = WsReadStartElement( NULL, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node) ok( node->nodeType == WS_XML_NODE_TYPE_ELEMENT, "got %u\n", node->nodeType );
+
+    hr = WsReadStartElement( reader, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node)
+    {
+        WS_XML_TEXT_NODE *text = (WS_XML_TEXT_NODE *)node;
+        ok( text->node.nodeType == WS_XML_NODE_TYPE_TEXT, "got %u\n", text->node.nodeType );
+        ok( text->text != NULL, "text not set\n" );
+        if (text->text)
+        {
+            WS_XML_UTF8_TEXT *utf8 = (WS_XML_UTF8_TEXT *)text->text;
+            ok( text->text->textType == WS_XML_TEXT_TYPE_UTF8, "got %u\n", text->text->textType );
+            ok( utf8->value.length == 4, "got %u\n", utf8->value.length );
+            ok( !memcmp( utf8->value.bytes, "test", 4 ), "wrong data\n" );
+        }
+    }
+
+    hr = WsReadStartElement( reader, NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+
+    node2 = NULL;
+    hr = WsGetReaderNode( reader, &node2, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( node2 == node, "different node\n" );
+
+    hr = set_input( reader, data8, sizeof(data8) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data8) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    found = -1;
+    hr = WsReadToStartElement( reader, NULL, NULL, &found, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( found == TRUE, "got %d\n", found );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node) ok( node->nodeType == WS_XML_NODE_TYPE_ELEMENT, "got %u\n", node->nodeType );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node)
+    {
+        WS_XML_ELEMENT_NODE *elem = (WS_XML_ELEMENT_NODE *)node;
+        ok( node->nodeType == WS_XML_NODE_TYPE_ELEMENT, "got %u\n", node->nodeType );
+        ok( !memcmp( elem->localName->bytes, "node1", 5), "wrong name\n" );
+    }
+
+    hr = WsReadStartElement( reader, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node)
+    {
+        WS_XML_ELEMENT_NODE *elem = (WS_XML_ELEMENT_NODE *)node;
+        ok( node->nodeType == WS_XML_NODE_TYPE_ELEMENT, "got %u\n", node->nodeType );
+        ok( !memcmp( elem->localName->bytes, "node2", 5), "wrong name\n" );
+    }
+    WsFreeReader( reader );
+}
+
+static void test_WsReadEndElement(void)
+{
+    HRESULT hr;
+    WS_XML_READER *reader;
+    const WS_XML_NODE *node;
+
+    hr = WsCreateReader( NULL, 0, &reader, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = set_input( reader, data2, sizeof(data2) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data2) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsReadEndElement( reader, NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+
+    hr = set_input( reader, data2, sizeof(data2) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data2) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsReadNode( reader, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node) ok( node->nodeType == WS_XML_NODE_TYPE_ELEMENT, "got %u\n", node->nodeType );
+
+    hr = WsReadNode( reader, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node) ok( node->nodeType == WS_XML_NODE_TYPE_TEXT, "got %u\n", node->nodeType );
+
+    hr = WsReadNode( reader, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node) ok( node->nodeType == WS_XML_NODE_TYPE_END_ELEMENT, "got %u\n", node->nodeType );
+
+    hr = WsReadNode( reader, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node) ok( node->nodeType == WS_XML_NODE_TYPE_EOF, "got %u\n", node->nodeType );
+
+    hr = set_input( reader, data5, sizeof(data5) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data5) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsReadEndElement( reader, NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    WsFreeReader( reader );
+}
+
+static void test_WsReadNode(void)
+{
+    static const char str1[] = "<a>";
+    static const char str2[] = "< a>";
+    static const char str3[] = "<a >";
+    static const char str4[] = "<<a>>";
+    static const char str5[] = "<>";
+    static const char str6[] = "</a>";
+    static const char str7[] = " <a>";
+    static const char str8[] = "<?xml>";
+    static const char str9[] = "<?xml?>";
+    static const char str10[] = "<?xml ?>";
+    static const char str11[] = "<?xml version=\"1.0\"?>";
+    static const char str12[] = "<text>test</text>";
+    static const char str13[] = "<?xml version=\"1.0\"?><text>test</text>";
+    static const char str14[] = "";
+    HRESULT hr;
+    WS_XML_READER *reader;
+    const WS_XML_NODE *node;
+    unsigned int i;
+    int found;
+    static const struct
+    {
+        const char      *text;
+        HRESULT          hr;
+        WS_XML_NODE_TYPE type;
+        int              todo;
+    }
+    tests[] =
+    {
+        { str1, S_OK, WS_XML_NODE_TYPE_ELEMENT },
+        { str2, WS_E_INVALID_FORMAT, 0 },
+        { str3, S_OK, WS_XML_NODE_TYPE_ELEMENT },
+        { str4, WS_E_INVALID_FORMAT, 0 },
+        { str5, WS_E_INVALID_FORMAT, 0 },
+        { str6, WS_E_INVALID_FORMAT, 0 },
+        { str7, S_OK, WS_XML_NODE_TYPE_TEXT },
+        { str8, WS_E_INVALID_FORMAT, 0 },
+        { str9, WS_E_INVALID_FORMAT, 0 },
+        { str10, WS_E_INVALID_FORMAT, 0, 1 },
+        { str11, S_OK, WS_XML_NODE_TYPE_EOF },
+        { str12, S_OK, WS_XML_NODE_TYPE_ELEMENT },
+        { str13, S_OK, WS_XML_NODE_TYPE_ELEMENT },
+        { str14, WS_E_INVALID_FORMAT, 0, 1 },
+    };
+
+    hr = WsCreateReader( NULL, 0, &reader, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++)
+    {
+        hr = set_input( reader, tests[i].text, strlen(tests[i].text) );
+        ok( hr == S_OK, "got %08x\n", hr );
+
+        hr = WsFillReader( reader, strlen(tests[i].text), NULL, NULL );
+        ok( hr == S_OK, "%u: got %08x\n", i, hr );
+
+        hr = WsReadNode( reader, NULL );
+        if (tests[i].todo)
+            todo_wine ok( hr == tests[i].hr, "%u: got %08x\n", i, hr );
+        else
+            ok( hr == tests[i].hr, "%u: got %08x\n", i, hr );
+        if (hr == S_OK)
+        {
+            node = NULL;
+            hr = WsGetReaderNode( reader, &node, NULL );
+            ok( hr == S_OK, "%u: got %08x\n", i, hr );
+            ok( node != NULL, "%u: node not set\n", i );
+            if (node)
+            {
+                if (tests[i].todo)
+                    todo_wine
+                    ok( node->nodeType == tests[i].type, "%u: got %u\n", i, node->nodeType );
+                else
+                    ok( node->nodeType == tests[i].type, "%u: got %u\n", i, node->nodeType );
+            }
+        }
+    }
+
+    hr = set_input( reader, data6, sizeof(data6) - 1 );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, sizeof(data6) - 1, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    found = -1;
+    hr = WsReadToStartElement( reader, NULL, NULL, &found, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( found == TRUE, "got %d\n", found );
+
+    hr = WsGetReaderNode( reader, &node, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    if (node)
+    {
+        WS_XML_ELEMENT_NODE *elem = (WS_XML_ELEMENT_NODE *)node;
+        WS_XML_ATTRIBUTE *attr;
+        WS_XML_UTF8_TEXT *text;
+
+        ok( elem->node.nodeType == WS_XML_NODE_TYPE_ELEMENT, "got %u\n", elem->node.nodeType );
+        ok( elem->prefix != NULL, "prefix not set\n" );
+        ok( !elem->prefix->length, "got %u\n", elem->prefix->length );
+        ok( elem->prefix->bytes == NULL, "bytes set\n" );
+        ok( elem->localName != NULL, "localName not set\n" );
+        ok( elem->localName->length == 4, "got %u\n", elem->localName->length );
+        ok( !memcmp( elem->localName->bytes, "text", 4 ), "wrong data\n" );
+        ok( elem->ns != NULL, "ns not set\n" );
+        ok( !elem->ns->length, "got %u\n", elem->ns->length );
+        ok( elem->ns->bytes != NULL, "bytes not set\n" );
+        ok( elem->attributeCount == 2, "got %u\n", elem->attributeCount );
+        ok( elem->attributes != NULL, "attributes not set\n" );
+        ok( !elem->isEmpty, "isEmpty not zero\n" );
+
+        attr = elem->attributes[0];
+        ok( !attr->singleQuote, "got %u\n", attr->singleQuote );
+        ok( !attr->isXmlNs, "got %u\n", attr->isXmlNs );
+        ok( attr->prefix != NULL, "prefix not set\n" );
+        ok( !attr->prefix->length, "got %u\n", attr->prefix->length );
+        ok( attr->prefix->bytes == NULL, "bytes set\n" );
+        ok( attr->localName != NULL, "localName not set\n" );
+        ok( attr->localName->length == 4, "got %u\n", attr->localName->length );
+        ok( !memcmp( attr->localName->bytes, "attr", 4 ), "wrong data\n" );
+        ok( attr->ns != NULL, "ns not set\n" );
+        ok( !attr->ns->length, "got %u\n", attr->ns->length );
+        ok( attr->ns->bytes == NULL, "bytes set\n" );
+        ok( attr->value != NULL, "value not set\n" );
+
+        text = (WS_XML_UTF8_TEXT *)attr->value;
+        ok( attr->value->textType == WS_XML_TEXT_TYPE_UTF8, "got %u\n", attr->value->textType );
+        ok( text->value.length == 5, "got %u\n", text->value.length );
+        ok( !memcmp( text->value.bytes, "value", 5 ), "wrong data\n" );
+
+        attr = elem->attributes[1];
+        ok( attr->singleQuote == 1, "got %u\n", attr->singleQuote );
+        ok( !attr->isXmlNs, "got %u\n", attr->isXmlNs );
+        ok( attr->prefix != NULL, "prefix not set\n" );
+        ok( !attr->prefix->length, "got %u\n", attr->prefix->length );
+        ok( attr->prefix->bytes == NULL, "bytes set\n" );
+        ok( attr->localName != NULL, "localName not set\n" );
+        ok( attr->localName->length == 5, "got %u\n", attr->localName->length );
+        ok( !memcmp( attr->localName->bytes, "attr2", 5 ), "wrong data\n" );
+        ok( attr->ns != NULL, "ns not set\n" );
+        ok( !attr->ns->length, "got %u\n", attr->ns->length );
+        ok( attr->ns->bytes == NULL, "bytes set\n" );
+        ok( attr->value != NULL, "value not set\n" );
+
+        text = (WS_XML_UTF8_TEXT *)attr->value;
+        ok( attr->value->textType == WS_XML_TEXT_TYPE_UTF8, "got %u\n", attr->value->textType );
+        ok( text->value.length == 6, "got %u\n", text->value.length );
+        ok( !memcmp( text->value.bytes, "value2", 6 ), "wrong data\n" );
+    }
+
+    WsFreeReader( reader );
+}
+
+static void prepare_type_test( WS_XML_READER *reader, const char *data, ULONG size )
+{
+    HRESULT hr;
+
+    hr = set_input( reader, data, size );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsFillReader( reader, size, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsReadToStartElement( reader, NULL, NULL, NULL, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsReadStartElement( reader, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+}
+
+static void test_WsReadType(void)
+{
+    static const WCHAR testW[] = {'t','e','s','t',0};
+    HRESULT hr;
+    WS_XML_READER *reader;
+    WS_HEAP *heap;
+    WCHAR *val_str;
+    BOOL val_bool;
+    INT8 val_int8;
+    INT16 val_int16;
+    INT32 val_int32;
+    INT64 val_int64;
+    UINT8 val_uint8;
+    UINT16 val_uint16;
+    UINT32 val_uint32;
+    UINT64 val_uint64;
+
+    hr = WsCreateHeap( 1 << 16, 0, NULL, 0, &heap, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsCreateReader( NULL, 0, &reader, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    prepare_type_test( reader, data2, sizeof(data2) - 1 );
+    hr = WsReadType( NULL, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_WSZ_TYPE, NULL,
+                     WS_READ_REQUIRED_POINTER, heap, &val_str, sizeof(val_str), NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_WSZ_TYPE, NULL,
+                     WS_READ_REQUIRED_POINTER, heap, &val_str, 0, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_WSZ_TYPE, NULL,
+                     WS_READ_REQUIRED_POINTER, heap, NULL, sizeof(val_str), NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_WSZ_TYPE, NULL,
+                     WS_READ_REQUIRED_POINTER, heap, &val_str, sizeof(val_str) + 1, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    val_str = NULL;
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_WSZ_TYPE, NULL,
+                     WS_READ_REQUIRED_POINTER, heap, &val_str, sizeof(val_str), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_str != NULL, "pointer not set\n" );
+    if (val_str) ok( !lstrcmpW( val_str, testW ), "wrong data\n" );
+
+    val_bool = -1;
+    prepare_type_test( reader, "<t>true</t>", sizeof("<t>true</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_BOOL_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_bool, sizeof(BOOL), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_bool == TRUE, "got %d\n", val_bool );
+
+    val_bool = -1;
+    prepare_type_test( reader, "<t>false</t>", sizeof("<t>false</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_BOOL_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_bool, sizeof(BOOL), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_bool == FALSE, "got %d\n", val_bool );
+
+    val_bool = -1;
+    prepare_type_test( reader, "<t>FALSE</t>", sizeof("<t>FALSE</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_BOOL_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_bool, sizeof(val_bool), NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    ok( val_bool == -1, "got %d\n", val_bool );
+
+    val_bool = -1;
+    prepare_type_test( reader, "<t>1</t>", sizeof("<t>1</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_BOOL_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_bool, sizeof(val_bool), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_bool == TRUE, "got %d\n", val_bool );
+
+    val_bool = -1;
+    prepare_type_test( reader, "<t>2</t>", sizeof("<t>2</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_BOOL_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_bool, sizeof(val_bool), NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    ok( val_bool == -1, "got %d\n", val_bool );
+
+    val_bool = -1;
+    prepare_type_test( reader, "<t>0</t>", sizeof("<t>0</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_BOOL_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_bool, sizeof(val_bool), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_bool == FALSE, "got %d\n", val_bool );
+
+    val_int8 = 0;
+    prepare_type_test( reader, "<t>-128</t>", sizeof("<t>-128</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int8, sizeof(val_int8), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_int8 == -128, "got %d\n", val_int8 );
+
+    val_int8 = 0;
+    prepare_type_test( reader, "<t> </t>", sizeof("<t> </t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int8, sizeof(val_int8), NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    ok( !val_int8, "got %d\n", val_int8 );
+
+    val_int8 = 0;
+    prepare_type_test( reader, "<t>-</t>", sizeof("<t>-</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int8, sizeof(val_int8), NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    ok( !val_int8, "got %d\n", val_int8 );
+
+    val_int8 = -1;
+    prepare_type_test( reader, "<t>-0</t>", sizeof("<t>-0</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int8, sizeof(val_int8), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( !val_int8, "got %d\n", val_int8 );
+
+    val_int8 = 0;
+    prepare_type_test( reader, "<t>-129</t>", sizeof("<t>-129</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int8, sizeof(val_int8), NULL );
+    ok( hr == WS_E_NUMERIC_OVERFLOW, "got %08x\n", hr );
+    ok( !val_int8, "got %d\n", val_int8 );
+
+    val_int16 = 0;
+    prepare_type_test( reader, "<t>-32768</t>", sizeof("<t>-32768</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT16_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int16, sizeof(val_int16), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_int16 == -32768, "got %d\n", val_int16 );
+
+    val_int16 = 0;
+    prepare_type_test( reader, "<t>-32769</t>", sizeof("<t>-32769</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT16_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int16, sizeof(val_int16), NULL );
+    ok( hr == WS_E_NUMERIC_OVERFLOW, "got %08x\n", hr );
+    ok( !val_int16, "got %d\n", val_int16 );
+
+    val_int32 = 0;
+    prepare_type_test( reader, "<t>-2147483648</t>", sizeof("<t>-2147483648</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT32_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int32, sizeof(val_int32), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_int32 == -2147483647 - 1, "got %d\n", val_int32 );
+
+    val_int32 = 0;
+    prepare_type_test( reader, "<t>-2147483649</t>", sizeof("<t>-2147483649</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT32_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int32, sizeof(val_int32), NULL );
+    todo_wine ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    ok( !val_int32, "got %d\n", val_int32 );
+
+    val_int64 = 0;
+    prepare_type_test( reader, "<t>-9223372036854775808</t>", sizeof("<t>-9223372036854775808</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT64_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int64, sizeof(val_int64), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_int64 == -9223372036854775807 - 1, "wrong value\n" );
+
+    val_int64 = 0;
+    prepare_type_test( reader, "<t>-9223372036854775809</t>", sizeof("<t>-9223372036854775809</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_INT64_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_int64, sizeof(val_int64), NULL );
+    todo_wine ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    ok( !val_int64, "wrong value\n" );
+
+    val_uint8 = 0;
+    prepare_type_test( reader, "<t> 255 </t>", sizeof("<t> 255 </t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint8, sizeof(val_uint8), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_uint8 == 255, "got %u\n", val_uint8 );
+
+    val_uint8 = 0;
+    prepare_type_test( reader, "<t>+255</t>", sizeof("<t>+255</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint8, sizeof(val_uint8), NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    ok( !val_uint8, "got %u\n", val_uint8 );
+
+    val_uint8 = 0;
+    prepare_type_test( reader, "<t>-255</t>", sizeof("<t>-255</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint8, sizeof(val_uint8), NULL );
+    todo_wine ok( hr == WS_E_NUMERIC_OVERFLOW, "got %08x\n", hr );
+    ok( !val_uint8, "got %u\n", val_uint8 );
+
+    val_uint8 = 0;
+    prepare_type_test( reader, "<t>0xff</t>", sizeof("<t>0xff</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint8, sizeof(val_uint8), NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    ok( !val_uint8, "got %u\n", val_uint8 );
+
+    val_uint8 = 0;
+    prepare_type_test( reader, "<t>256</t>", sizeof("<t>256</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT8_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint8, sizeof(val_uint8), NULL );
+    ok( hr == WS_E_NUMERIC_OVERFLOW, "got %08x\n", hr );
+    ok( !val_uint8, "got %u\n", val_uint8 );
+
+    val_uint16 = 0;
+    prepare_type_test( reader, "<t>65535</t>", sizeof("<t>65535</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT16_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint16, sizeof(val_uint16), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_uint16 == 65535, "got %u\n", val_uint16 );
+
+    val_uint16 = 0;
+    prepare_type_test( reader, "<t>65536</t>", sizeof("<t>65536</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT16_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint16, sizeof(val_uint16), NULL );
+    ok( hr == WS_E_NUMERIC_OVERFLOW, "got %08x\n", hr );
+    ok( !val_uint16, "got %u\n", val_uint16 );
+
+    val_uint32 = 0;
+    prepare_type_test( reader, "<t>4294967295</t>", sizeof("<t>4294967295</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT32_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint32, sizeof(val_uint32), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_uint32 == ~0, "got %u\n", val_uint32 );
+
+    val_uint32 = 0;
+    prepare_type_test( reader, "<t>4294967296</t>", sizeof("<t>4294967296</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT32_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint32, sizeof(val_uint32), NULL );
+    ok( hr == WS_E_NUMERIC_OVERFLOW, "got %08x\n", hr );
+    ok( !val_uint32, "got %u\n", val_uint32 );
+
+    val_uint64 = 0;
+    prepare_type_test( reader, "<t>18446744073709551615</t>", sizeof("<t>18446744073709551615</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT64_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint64, sizeof(val_uint64), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    ok( val_uint64 == ~0, "wrong value\n" );
+
+    val_uint64 = 0;
+    prepare_type_test( reader, "<t>18446744073709551616</t>", sizeof("<t>18446744073709551616</t>") - 1 );
+    hr = WsReadType( reader, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_UINT64_TYPE, NULL,
+                     WS_READ_REQUIRED_VALUE, heap, &val_uint64, sizeof(val_uint64), NULL );
+    todo_wine ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+    ok( !val_uint64, "wrong value\n" );
+
+    WsFreeReader( reader );
+    WsFreeHeap( heap );
+}
+
 START_TEST(reader)
 {
     test_WsCreateError();
@@ -457,4 +1189,9 @@ START_TEST(reader)
     test_WsCreateReader();
     test_WsSetInput();
     test_WsFillReader();
+    test_WsReadToStartElement();
+    test_WsReadStartElement();
+    test_WsReadEndElement();
+    test_WsReadNode();
+    test_WsReadType();
 }

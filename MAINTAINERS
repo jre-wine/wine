@@ -40,6 +40,17 @@ F:	dlls/x3daudio*/
 F:	dlls/xapofx*/
 F:	dlls/xaudio*/
 
+ARM, ARM64
+M:	André Hentschel <nerv@dawncrow.de>
+F:	dlls/dbghelp/cpu_arm*
+F:	dlls/msvcrt/except_arm.c
+F:	dlls/ntdll/signal_arm*
+F:	programs/winedbg/be_arm*
+
+Common Controls Library
+P:	Nikolay Sivov <nsivov@codeweavers.com>
+F:	dlls/comctl32/
+
 Direct2D
 M:	Henri Verbeet <hverbeet@codeweavers.com>
 F:	dlls/d2d*/
@@ -49,12 +60,32 @@ M:	Henri Verbeet <hverbeet@codeweavers.com>
 P:	Stefan Dösinger <stefan@codeweavers.com>
 P:	Józef Kucia <jkucia@codeweavers.com>
 P:	Matteo Bruni <mbruni@codeweavers.com>
-F:	dlls/d3d*/
+F:	dlls/d3d10*/
+F:	dlls/d3d11/
+F:	dlls/d3d8/
+F:	dlls/d3d9/
+F:	dlls/d3drm/
+F:	dlls/ddraw*/
+F:	dlls/dxgi/
 F:	dlls/wined3d/
+
+Direct3D helper libraries
+M:	Matteo Bruni <mbruni@codeweavers.com>
+P:	Henri Verbeet <hverbeet@codeweavers.com>
+P:	Stefan Dösinger <stefan@codeweavers.com>
+P:	Józef Kucia <jkucia@codeweavers.com>
+F:	dlls/d3dcompiler*/
+F:	dlls/d3dx10*/
+F:	dlls/d3dx11*/
+F:	dlls/d3dx9*/
 
 DirectInput
 P:	Andrew Eikum <aeikum@codeweavers.com>
 F:	dlls/dinput/
+
+DirectWrite
+M:	Nikolay Sivov <nsivov@codeweavers.com>
+F:	dlls/dwrite/
 
 HID support
 M:	Aric Stewart <aric@codeweavers.com>
@@ -92,13 +123,38 @@ MSI installers
 M:	Hans Leidekker <hans@codeweavers.com>
 F:	dlls/msi/
 
+Netstat
+M:	André Hentschel <nerv@dawncrow.de>
+F:	programs/netstat/
+
 OLE Typelibs
 P:	Andrew Eikum <aeikum@codeweavers.com>
 F:	dlls/oleaut32/typelib.c
 
+OpenMP
+M:	Sebastian Lackner <sebastian@fds-team.de>
+F:	dlls/vcomp*/
+
+Threadpool
+M:	Sebastian Lackner <sebastian@fds-team.de>
+F:	dlls/ntdll/threadpool.c
+
+Uniscribe
+M:	Aric Stewart <aric@codeweavers.com>
+F:	dlls/usp10/
+
 Wine server, IPC
 M:	Alexandre Julliard <julliard@winehq.org>
+P:	Sebastian Lackner <sebastian@fds-team.de>
 F:	server/
+
+Winemaker
+M:	André Hentschel <nerv@dawncrow.de>
+F:	tools/winemaker
+
+WPcap
+M:	André Hentschel <nerv@dawncrow.de>
+F:	dlls/wpcap/
 
 VB Script
 M:	Jacek Caban <jacek@codeweavers.com>

@@ -2725,6 +2725,40 @@ static BOOL WINAPI WS2_AcceptEx(SOCKET listener, SOCKET acceptor, PVOID dest, DW
 }
 
 /***********************************************************************
+ *     TransmitFile
+ */
+static BOOL WINAPI WS2_TransmitFile( SOCKET s, HANDLE h, DWORD file_bytes, DWORD bytes_per_send,
+                                     LPOVERLAPPED overlapped, LPTRANSMIT_FILE_BUFFERS buffers,
+                                     DWORD flags )
+{
+    union generic_unix_sockaddr uaddr;
+    unsigned int uaddrlen = sizeof(uaddr);
+    int fd;
+
+    FIXME("(%lx, %p, %d, %d, %p, %p, %d): stub !\n", s, h, file_bytes, bytes_per_send, overlapped,
+          buffers, flags );
+
+    fd = get_sock_fd( s, 0, NULL );
+    if (fd == -1)
+    {
+        WSASetLastError( WSAENOTSOCK );
+        return FALSE;
+    }
+    if (getpeername( fd, &uaddr.addr, &uaddrlen ) != 0)
+    {
+        release_sock_fd( s, fd );
+        WSASetLastError( WSAENOTCONN );
+        return FALSE;
+    }
+    release_sock_fd( s, fd );
+    if (flags)
+        FIXME("Flags are not currently supported (0x%x).\n", flags);
+
+    WSASetLastError( WSAEOPNOTSUPP );
+    return FALSE;
+}
+
+/***********************************************************************
  *     GetAcceptExSockaddrs
  */
 static void WINAPI WS2_GetAcceptExSockaddrs(PVOID buffer, DWORD data_size, DWORD local_size, DWORD remote_size,
@@ -4430,7 +4464,8 @@ INT WINAPI WSAIoctl(SOCKET s, DWORD code, LPVOID in_buff, DWORD in_size, LPVOID 
         }
         else if ( IsEqualGUID(&transmitfile_guid, in_buff) )
         {
-            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented TransmitFile\n");
+            *(LPFN_TRANSMITFILE *)out_buff = WS2_TransmitFile;
+            break;
         }
         else if ( IsEqualGUID(&transmitpackets_guid, in_buff) )
         {
@@ -7431,7 +7466,7 @@ INT WINAPI WS_inet_pton( INT family, PCSTR addr, PVOID buffer)
 #ifdef HAVE_INET_PTON
     int unixaf, ret;
 
-    TRACE("family %d, addr '%s', buffer (%p)\n", family, addr ? addr : "(null)", buffer);
+    TRACE("family %d, addr %s, buffer (%p)\n", family, debugstr_a(addr), buffer);
 
     if (!addr || !buffer)
     {
@@ -7456,6 +7491,36 @@ INT WINAPI WS_inet_pton( INT family, PCSTR addr, PVOID buffer)
 #endif
 }
 
+/***********************************************************************
+*              InetPtonW                      (WS2_32.@)
+*/
+INT WINAPI InetPtonW(INT family, PCWSTR addr, PVOID buffer)
+{
+    char *addrA;
+    int len;
+    INT ret;
+
+    TRACE("family %d, addr %s, buffer (%p)\n", family, debugstr_w(addr), buffer);
+
+    if (!addr)
+    {
+        SetLastError(WSAEFAULT);
+        return SOCKET_ERROR;
+    }
+
+    len = WideCharToMultiByte(CP_ACP, 0, addr, -1, NULL, 0, NULL, NULL);
+    if (!(addrA = HeapAlloc(GetProcessHeap(), 0, len)))
+    {
+        SetLastError(WSA_NOT_ENOUGH_MEMORY);
+        return SOCKET_ERROR;
+    }
+    WideCharToMultiByte(CP_ACP, 0, addr, -1, addrA, len, NULL, NULL);
+
+    ret = WS_inet_pton(family, addrA, buffer);
+
+    HeapFree(GetProcessHeap(), 0, addrA);
+    return ret;
+}
 
 /***********************************************************************
  *              WSAStringToAddressA                      (WS2_32.80)

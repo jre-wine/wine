@@ -1194,6 +1194,20 @@ void context_release(struct wined3d_context *context)
     }
 }
 
+/* This is used when a context for render target A is active, but a separate context is
+ * needed to access the WGL framebuffer for render target B. Re-acquire a context for rt
+ * A to avoid breaking caller code. */
+void context_restore(struct wined3d_context *context, struct wined3d_surface *restore)
+{
+    if (context->current_rt != restore)
+    {
+        context_release(context);
+        context = context_acquire(restore->resource.device, restore);
+    }
+
+    context_release(context);
+}
+
 static void context_enter(struct wined3d_context *context)
 {
     TRACE("Entering context %p, level %u.\n", context, context->level + 1);
@@ -2263,7 +2277,7 @@ static BOOL match_depth_stencil_format(const struct wined3d_format *existing,
     return TRUE;
 }
 
-/* The caller provides a context */
+/* Context activation is done by the caller. */
 static void context_validate_onscreen_formats(struct wined3d_context *context,
         const struct wined3d_rendertarget_view *depth_stencil)
 {
@@ -2279,7 +2293,7 @@ static void context_validate_onscreen_formats(struct wined3d_context *context,
     WARN("Depth stencil format is not supported by WGL, rendering the backbuffer in an FBO\n");
 
     /* The currently active context is the necessary context to access the swapchain's onscreen buffers */
-    surface_load_location(context->current_rt, WINED3D_LOCATION_TEXTURE_RGB);
+    surface_load_location(context->current_rt, context, WINED3D_LOCATION_TEXTURE_RGB);
     swapchain->render_to_fbo = TRUE;
     swapchain_update_draw_bindings(swapchain);
     context_set_render_offscreen(context, TRUE);

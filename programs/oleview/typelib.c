@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define NONAMELESSUNION
+
 #include "main.h"
 
 #include "wine/debug.h"
@@ -1626,6 +1628,7 @@ BOOL TypeLibRegisterClassW(void)
     memset(&wcc, 0, sizeof(WNDCLASSW));
     wcc.lpfnWndProc = TypeLibProc;
     wcc.hbrBackground = (HBRUSH)(COLOR_WINDOW+1);
+    wcc.hCursor       = LoadCursorW(0, (LPCWSTR)IDC_ARROW);
     wcc.lpszMenuName = MAKEINTRESOURCEW(IDM_TYPELIB);
     wcc.lpszClassName = wszTypeLib;
 

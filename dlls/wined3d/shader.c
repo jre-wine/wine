@@ -889,16 +889,15 @@ static HRESULT shader_get_registers_used(struct wined3d_shader *shader, const st
                         shader_version.type, constf_size))
                     return WINED3DERR_INVALIDCALL;
 
-                /* WINED3DSPR_TEXCRDOUT is the same as WINED3DSPR_OUTPUT. _OUTPUT can be > MAX_REG_TEXCRD and
-                 * is used in >= 3.0 shaders. Filter 3.0 shaders to prevent overflows, and also filter pixel
-                 * shaders because TECRDOUT isn't used in them, but future register types might cause issues */
-                if (shader_version.type == WINED3D_SHADER_TYPE_VERTEX && shader_version.major < 3)
+                if (shader_version.type == WINED3D_SHADER_TYPE_VERTEX)
                 {
                     UINT idx = ins.dst[i].reg.idx[0].offset;
 
                     switch (ins.dst[i].reg.type)
                     {
                         case WINED3DSPR_RASTOUT:
+                            if (shader_version.major >= 3)
+                                break;
                             switch (idx)
                             {
                                 case 0: /* oPos */
@@ -922,6 +921,8 @@ static HRESULT shader_get_registers_used(struct wined3d_shader *shader, const st
                             break;
 
                         case WINED3DSPR_ATTROUT:
+                            if (shader_version.major >= 3)
+                                break;
                             if (idx < 2)
                             {
                                 idx += 8;
@@ -939,8 +940,12 @@ static HRESULT shader_get_registers_used(struct wined3d_shader *shader, const st
                             break;
 
                         case WINED3DSPR_TEXCRDOUT:
-
-                            reg_maps->texcoord_mask[idx] |= ins.dst[i].write_mask;
+                            if (shader_version.major >= 3)
+                            {
+                                reg_maps->u.output_registers_mask[idx] |= ins.dst[i].write_mask;
+                                break;
+                            }
+                            reg_maps->u.texcoord_mask[idx] |= ins.dst[i].write_mask;
                             if (reg_maps->output_registers & (1u << idx))
                             {
                                 output_signature_elements[idx].mask |= ins.dst[i].write_mask;
@@ -1989,6 +1994,7 @@ static void shader_none_get_caps(const struct wined3d_gl_info *gl_info, struct s
     caps->vs_uniform_count = 0;
     caps->ps_uniform_count = 0;
     caps->ps_1x_max_value = 0.0f;
+    caps->varying_count = 0;
     caps->wined3d_caps = 0;
 }
 
@@ -2396,8 +2402,9 @@ static HRESULT geometryshader_init(struct wined3d_shader *shader, struct wined3d
 }
 
 void find_ps_compile_args(const struct wined3d_state *state, const struct wined3d_shader *shader,
-        BOOL position_transformed, struct ps_compile_args *args, const struct wined3d_gl_info *gl_info)
+        BOOL position_transformed, struct ps_compile_args *args, const struct wined3d_context *context)
 {
+    const struct wined3d_gl_info *gl_info = context->gl_info;
     const struct wined3d_texture *texture;
     UINT i;
 
@@ -2568,6 +2575,35 @@ void find_ps_compile_args(const struct wined3d_state *state, const struct wined3
         {
             args->fog = WINED3D_FFP_PS_FOG_OFF;
         }
+    }
+
+    if (context->d3d_info->limits.varying_count < wined3d_max_compat_varyings(context->gl_info))
+    {
+        const struct wined3d_shader *vs = state->shader[WINED3D_SHADER_TYPE_VERTEX];
+
+        args->texcoords_initialized = 0;
+        for (i = 0; i < MAX_TEXTURES; ++i)
+        {
+            if (vs)
+            {
+                if (state->shader[WINED3D_SHADER_TYPE_VERTEX]->reg_maps.output_registers & (1u << i))
+                    args->texcoords_initialized |= 1u << i;
+            }
+            else
+            {
+                const struct wined3d_stream_info *si = &context->stream_info;
+                unsigned int coord_idx = state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX];
+
+                if ((state->texture_states[i][WINED3D_TSS_TEXCOORD_INDEX] >> WINED3D_FFP_TCI_SHIFT)
+                        & WINED3D_FFP_TCI_MASK
+                        || (coord_idx < MAX_TEXTURES && (si->use_map & (1u << (WINED3D_FFP_TEXCOORD0 + coord_idx)))))
+                    args->texcoords_initialized |= 1u << i;
+            }
+        }
+    }
+    else
+    {
+        args->texcoords_initialized = (1u << MAX_TEXTURES) - 1;
     }
 
     args->pointsprite = state->render_states[WINED3D_RS_POINTSPRITEENABLE]

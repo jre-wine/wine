@@ -67,10 +67,13 @@ static int   (WINAPI *pgetaddrinfo)(LPCSTR,LPCSTR,const struct addrinfo *,struct
 static void  (WINAPI *pFreeAddrInfoW)(PADDRINFOW);
 static int   (WINAPI *pGetAddrInfoW)(LPCWSTR,LPCWSTR,const ADDRINFOW *,PADDRINFOW *);
 static PCSTR (WINAPI *pInetNtop)(INT,LPVOID,LPSTR,ULONG);
-static int   (WINAPI *pInetPton)(INT,LPSTR,LPVOID);
+static int   (WINAPI *pInetPtonA)(INT,LPCSTR,LPVOID);
+static int   (WINAPI *pInetPtonW)(INT,LPWSTR,LPVOID);
 static int   (WINAPI *pWSALookupServiceBeginW)(LPWSAQUERYSETW,DWORD,LPHANDLE);
 static int   (WINAPI *pWSALookupServiceEnd)(HANDLE);
 static int   (WINAPI *pWSALookupServiceNextW)(HANDLE,DWORD,LPDWORD,LPWSAQUERYSETW);
+static int   (WINAPI *pWSAEnumNameSpaceProvidersA)(LPDWORD,LPWSANAMESPACE_INFOA);
+static int   (WINAPI *pWSAEnumNameSpaceProvidersW)(LPDWORD,LPWSANAMESPACE_INFOW);
 
 /**************** Structs and typedefs ***************/
 
@@ -1159,10 +1162,13 @@ static void Init (void)
     pFreeAddrInfoW = (void *)GetProcAddress(hws2_32, "FreeAddrInfoW");
     pGetAddrInfoW = (void *)GetProcAddress(hws2_32, "GetAddrInfoW");
     pInetNtop = (void *)GetProcAddress(hws2_32, "inet_ntop");
-    pInetPton = (void *)GetProcAddress(hws2_32, "inet_pton");
+    pInetPtonA = (void *)GetProcAddress(hws2_32, "inet_pton");
+    pInetPtonW = (void *)GetProcAddress(hws2_32, "InetPtonW");
     pWSALookupServiceBeginW = (void *)GetProcAddress(hws2_32, "WSALookupServiceBeginW");
     pWSALookupServiceEnd = (void *)GetProcAddress(hws2_32, "WSALookupServiceEnd");
     pWSALookupServiceNextW = (void *)GetProcAddress(hws2_32, "WSALookupServiceNextW");
+    pWSAEnumNameSpaceProvidersA = (void *)GetProcAddress(hws2_32, "WSAEnumNameSpaceProvidersA");
+    pWSAEnumNameSpaceProvidersW = (void *)GetProcAddress(hws2_32, "WSAEnumNameSpaceProvidersW");
 
     ok ( WSAStartup ( ver, &data ) == 0, "WSAStartup failed\n" );
     tls = TlsAlloc();
@@ -4698,10 +4704,11 @@ static void test_inet_pton(void)
     int i, ret;
     DWORD err;
     char buffer[64],str[64];
+    WCHAR printableW[64];
     const char *ptr;
 
     /* InetNtop and InetPton became available in Vista and Win2008 */
-    if (!pInetNtop || !pInetPton)
+    if (!pInetNtop || !pInetPtonA || !pInetPtonW)
     {
         win_skip("InetNtop and/or InetPton not present, not executing tests\n");
         return;
@@ -4710,7 +4717,7 @@ static void test_inet_pton(void)
     for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
     {
         WSASetLastError(0xdeadbeef);
-        ret = pInetPton(tests[i].family, (char *)tests[i].printable, buffer);
+        ret = pInetPtonA(tests[i].family, tests[i].printable, buffer);
         ok (ret == tests[i].ret, "Test [%d]: Expected %d, got %d\n", i, tests[i].ret, ret);
         if (tests[i].ret == -1)
         {
@@ -4730,6 +4737,25 @@ static void test_inet_pton(void)
         if (!ptr) continue;
         ok (strcmp(ptr, tests[i].collapsed) == 0, "Test [%d]: Expected '%s', got '%s'\n",
             i, tests[i].collapsed, ptr);
+    }
+
+    for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++)
+    {
+        if (tests[i].printable)
+            MultiByteToWideChar(CP_ACP, 0, tests[i].printable, -1, printableW,
+                                sizeof(printableW) / sizeof(printableW[0]));
+        WSASetLastError(0xdeadbeef);
+        ret = pInetPtonW(tests[i].family, tests[i].printable ? printableW : NULL, buffer);
+        ok(ret == tests[i].ret, "Test [%d]: Expected %d, got %d\n", i, tests[i].ret, ret);
+        if (tests[i].ret == -1)
+        {
+            err = WSAGetLastError();
+            ok(tests[i].err == err, "Test [%d]: Expected 0x%x, got 0x%x\n", i, tests[i].err, err);
+        }
+        if (tests[i].ret != 1) continue;
+        ok(memcmp(buffer, tests[i].raw_data,
+           tests[i].family == AF_INET ? sizeof(struct in_addr) : sizeof(struct in6_addr)) == 0,
+           "Test [%d]: Expected binary data differs\n", i);
     }
 }
 
@@ -7403,6 +7429,108 @@ end:
         closesocket(connector2);
 }
 
+static void test_TransmitFile(void)
+{
+    GUID transmitFileGuid = WSAID_TRANSMITFILE;
+    LPFN_TRANSMITFILE pTransmitFile = NULL;
+    HANDLE file = INVALID_HANDLE_VALUE;
+    char system_ini_path[MAX_PATH];
+    struct sockaddr_in bindAddress;
+    SOCKET client, server, dest;
+    DWORD num_bytes, err;
+    int iret, len;
+    BOOL bret;
+
+    /* Setup sockets for testing TransmitFile */
+    client = socket(AF_INET, SOCK_STREAM, 0);
+    server = socket(AF_INET, SOCK_STREAM, 0);
+    if (client == INVALID_SOCKET || server == INVALID_SOCKET)
+    {
+        skip("could not create acceptor socket, error %d\n", WSAGetLastError());
+        goto cleanup;
+    }
+    iret = WSAIoctl(client, SIO_GET_EXTENSION_FUNCTION_POINTER, &transmitFileGuid, sizeof(transmitFileGuid),
+                    &pTransmitFile, sizeof(pTransmitFile), &num_bytes, NULL, NULL);
+    if (iret)
+    {
+        skip("WSAIoctl failed to get TransmitFile with ret %d + errno %d\n", iret, WSAGetLastError());
+        goto cleanup;
+    }
+    GetSystemWindowsDirectoryA(system_ini_path, MAX_PATH );
+    strcat(system_ini_path, "\\system.ini");
+    file = CreateFileA(system_ini_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_ALWAYS, 0x0, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        skip("Unable to open a file to transmit.\n");
+        goto cleanup;
+    }
+
+    /* Test TransmitFile with an invalid socket */
+    bret = pTransmitFile(INVALID_SOCKET, file, 0, 0, NULL, NULL, 0);
+    err = WSAGetLastError();
+    ok(!bret, "TransmitFile succeeded unexpectedly.\n");
+    ok(err == WSAENOTSOCK, "TransmitFile triggered unexpected errno (%d != %d)\n", err, WSAENOTSOCK);
+
+    /* Test a bogus TransmitFile without a connected socket */
+    bret = pTransmitFile(client, NULL, 0, 0, NULL, NULL, TF_REUSE_SOCKET);
+    err = WSAGetLastError();
+    ok(!bret, "TransmitFile succeeded unexpectedly.\n");
+    ok(err == WSAENOTCONN, "TransmitFile triggered unexpected errno (%d != %d)\n", err, WSAENOTCONN);
+
+    /* Setup a properly connected socket for transfers */
+    memset(&bindAddress, 0, sizeof(bindAddress));
+    bindAddress.sin_family = AF_INET;
+    bindAddress.sin_port = htons(9375);
+    bindAddress.sin_addr.s_addr = inet_addr("127.0.0.1");
+    iret = bind(server, (struct sockaddr*)&bindAddress, sizeof(bindAddress));
+    if (iret != 0)
+    {
+        skip("failed to bind(), error %d\n", WSAGetLastError());
+        goto cleanup;
+    }
+    iret = listen(server, 1);
+    if (iret != 0)
+    {
+        skip("failed to listen(), error %d\n", WSAGetLastError());
+        goto cleanup;
+    }
+    iret = connect(client, (struct sockaddr*)&bindAddress, sizeof(bindAddress));
+    if (iret != 0)
+    {
+        skip("failed to connect(), error %d\n", WSAGetLastError());
+        goto cleanup;
+    }
+    len = sizeof(bindAddress);
+    dest = accept(server, (struct sockaddr*)&bindAddress, &len);
+    if (dest == INVALID_SOCKET)
+    {
+        skip("failed to accept(), error %d\n", WSAGetLastError());
+        goto cleanup;
+    }
+    if (set_blocking(dest, FALSE))
+    {
+        skip("couldn't make socket non-blocking, error %d\n", WSAGetLastError());
+        goto cleanup;
+    }
+
+    /* Test TransmitFile with no possible buffer */
+    bret = pTransmitFile(client, NULL, 0, 0, NULL, NULL, 0);
+    todo_wine ok(bret, "TransmitFile failed unexpectedly.\n");
+
+    /* Test TransmitFile with a UDP datagram socket */
+    closesocket(client);
+    client = socket(AF_INET, SOCK_DGRAM, 0);
+    bret = pTransmitFile(client, NULL, 0, 0, NULL, NULL, 0);
+    err = WSAGetLastError();
+    ok(!bret, "TransmitFile succeeded unexpectedly.\n");
+    ok(err == WSAENOTCONN, "TransmitFile triggered unexpected errno (%d != %d)\n", err, WSAENOTCONN);
+
+cleanup:
+    CloseHandle(file);
+    closesocket(client);
+    closesocket(server);
+}
+
 static void test_getpeername(void)
 {
     SOCKET sock;
@@ -8710,6 +8838,160 @@ todo_wine
     ok(!ret, "WSALookupServiceEnd failed unexpectedly\n");
 }
 
+static void test_WSAEnumNameSpaceProvidersA(void)
+{
+    LPWSANAMESPACE_INFOA name = NULL;
+    DWORD ret, error, blen = 0, i;
+    if (!pWSAEnumNameSpaceProvidersA)
+    {
+        win_skip("WSAEnumNameSpaceProvidersA not found\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = pWSAEnumNameSpaceProvidersA(&blen, name);
+    error = WSAGetLastError();
+todo_wine
+    ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
+todo_wine
+    ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
+
+    /* Invalid parameter tests */
+    SetLastError(0xdeadbeef);
+    ret = pWSAEnumNameSpaceProvidersA(NULL, name);
+    error = WSAGetLastError();
+todo_wine
+    ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
+todo_wine
+    ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = pWSAEnumNameSpaceProvidersA(NULL, NULL);
+    error = WSAGetLastError();
+todo_wine
+    ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
+todo_wine
+    ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = pWSAEnumNameSpaceProvidersA(&blen, NULL);
+    error = WSAGetLastError();
+todo_wine
+    ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
+todo_wine
+    ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
+
+    name = HeapAlloc(GetProcessHeap(), 0, blen);
+    if (!name)
+    {
+        skip("Failed to alloc memory\n");
+        return;
+    }
+
+    ret = pWSAEnumNameSpaceProvidersA(&blen, name);
+todo_wine
+    ok(ret > 0, "Expected more than zero name space providers\n");
+
+    for (i = 0;i < ret; i++)
+    {
+        trace("Name space Identifier (%p): %s\n", name[i].lpszIdentifier,
+              name[i].lpszIdentifier);
+        switch (name[i].dwNameSpace)
+        {
+            case NS_DNS:
+                trace("\tName space ID: NS_DNS (%u)\n", name[i].dwNameSpace);
+                break;
+            case NS_NLA:
+                trace("\tName space ID: NS_NLA (%u)\n", name[i].dwNameSpace);
+                break;
+            default:
+                trace("\tName space ID: Unknown (%u)\n", name[i].dwNameSpace);
+                break;
+        }
+        trace("\tActive:  %d\n", name[i].fActive);
+        trace("\tVersion: %d\n", name[i].dwVersion);
+    }
+
+    HeapFree(GetProcessHeap(), 0, name);
+}
+
+static void test_WSAEnumNameSpaceProvidersW(void)
+{
+    LPWSANAMESPACE_INFOW name = NULL;
+    DWORD ret, error, blen = 0, i;
+    if (!pWSAEnumNameSpaceProvidersW)
+    {
+        win_skip("WSAEnumNameSpaceProvidersW not found\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = pWSAEnumNameSpaceProvidersW(&blen, name);
+    error = WSAGetLastError();
+todo_wine
+    ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
+todo_wine
+    ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
+
+    /* Invalid parameter tests */
+    SetLastError(0xdeadbeef);
+    ret = pWSAEnumNameSpaceProvidersW(NULL, name);
+    error = WSAGetLastError();
+todo_wine
+    ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
+todo_wine
+    ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = pWSAEnumNameSpaceProvidersW(NULL, NULL);
+    error = WSAGetLastError();
+todo_wine
+    ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
+todo_wine
+    ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
+
+    SetLastError(0xdeadbeef);
+    ret = pWSAEnumNameSpaceProvidersW(&blen, NULL);
+    error = WSAGetLastError();
+todo_wine
+    ok(ret == SOCKET_ERROR, "Expected failure, got %u\n", ret);
+todo_wine
+    ok(error == WSAEFAULT, "Expected 10014, got %u\n", error);
+
+    name = HeapAlloc(GetProcessHeap(), 0, blen);
+    if (!name)
+    {
+        skip("Failed to alloc memory\n");
+        return;
+    }
+
+    ret = pWSAEnumNameSpaceProvidersW(&blen, name);
+todo_wine
+    ok(ret > 0, "Expected more than zero name space providers\n");
+
+    for (i = 0;i < ret; i++)
+    {
+        trace("Name space Identifier (%p): %s\n", name[i].lpszIdentifier,
+               wine_dbgstr_w(name[i].lpszIdentifier));
+        switch (name[i].dwNameSpace)
+        {
+            case NS_DNS:
+                trace("\tName space ID: NS_DNS (%u)\n", name[i].dwNameSpace);
+                break;
+            case NS_NLA:
+                trace("\tName space ID: NS_NLA (%u)\n", name[i].dwNameSpace);
+                break;
+            default:
+                trace("\tName space ID: Unknown (%u)\n", name[i].dwNameSpace);
+                break;
+        }
+        trace("\tActive:  %d\n", name[i].fActive);
+        trace("\tVersion: %d\n", name[i].dwVersion);
+    }
+
+    HeapFree(GetProcessHeap(), 0, name);
+}
+
 /**************** Main program  ***************/
 
 START_TEST( sock )
@@ -8771,6 +9053,7 @@ START_TEST( sock )
     test_events(1);
 
     test_ipv6only();
+    test_TransmitFile();
     test_GetAddrInfoW();
     test_getaddrinfo();
     test_AcceptEx();
@@ -8780,6 +9063,8 @@ START_TEST( sock )
     test_sioAddressListChange();
 
     test_WSALookupService();
+    test_WSAEnumNameSpaceProvidersA();
+    test_WSAEnumNameSpaceProvidersW();
 
     test_WSAAsyncGetServByPort();
     test_WSAAsyncGetServByName();

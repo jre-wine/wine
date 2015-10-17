@@ -34,7 +34,7 @@
 @ stub WsCreateServiceHost
 @ stub WsCreateServiceProxy
 @ stub WsCreateServiceProxyFromTemplate
-@ stub WsCreateWriter
+@ stdcall WsCreateWriter(ptr long ptr ptr)
 @ stub WsCreateXmlBuffer
 @ stub WsCreateXmlSecurityToken
 @ stub WsDateTimeToFileTime
@@ -58,12 +58,12 @@
 @ stub WsFreeSecurityToken
 @ stub WsFreeServiceHost
 @ stub WsFreeServiceProxy
-@ stub WsFreeWriter
+@ stdcall WsFreeWriter(ptr)
 @ stub WsGetChannelProperty
 @ stub WsGetCustomHeader
 @ stub WsGetDictionary
 @ stdcall WsGetErrorProperty(ptr long ptr long)
-@ stub WsGetErrorString
+@ stdcall WsGetErrorString(ptr long ptr)
 @ stub WsGetFaultErrorDetail
 @ stub WsGetFaultErrorProperty
 @ stub WsGetHeader
@@ -88,7 +88,7 @@
 @ stub WsGetServiceHostProperty
 @ stub WsGetServiceProxyProperty
 @ stub WsGetWriterPosition
-@ stub WsGetWriterProperty
+@ stdcall WsGetWriterProperty(ptr long ptr long ptr)
 @ stub WsGetXmlAttribute
 @ stub WsInitializeMessage
 @ stub WsMarkHeaderAsUnderstood
@@ -109,19 +109,19 @@
 @ stub WsReadCharsUtf8
 @ stub WsReadElement
 @ stub WsReadEndAttribute
-@ stub WsReadEndElement
+@ stdcall WsReadEndElement(ptr ptr)
 @ stub WsReadEndpointAddressExtension
 @ stub WsReadEnvelopeEnd
 @ stub WsReadEnvelopeStart
 @ stub WsReadMessageEnd
 @ stub WsReadMessageStart
 @ stub WsReadMetadata
-@ stub WsReadNode
+@ stdcall WsReadNode(ptr ptr)
 @ stub WsReadQualifiedName
 @ stub WsReadStartAttribute
-@ stub WsReadStartElement
-@ stub WsReadToStartElement
-@ stub WsReadType
+@ stdcall WsReadStartElement(ptr ptr)
+@ stdcall WsReadToStartElement(ptr ptr ptr ptr ptr)
+@ stdcall WsReadType(ptr long long ptr long ptr ptr long ptr)
 @ stub WsReadValue
 @ stub WsReadXmlBuffer
 @ stub WsReadXmlBufferFromBytes
@@ -154,7 +154,7 @@
 @ stub WsSetInputToBuffer
 @ stub WsSetListenerProperty
 @ stub WsSetMessageProperty
-@ stub WsSetOutput
+@ stdcall WsSetOutput(ptr ptr ptr ptr long ptr)
 @ stub WsSetOutputToBuffer
 @ stub WsSetReaderPosition
 @ stub WsSetWriterPosition

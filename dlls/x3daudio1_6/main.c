@@ -23,6 +23,8 @@
 #include "windef.h"
 #include "winbase.h"
 
+#include "x3daudio.h"
+
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
     switch (fdwReason)
@@ -37,4 +39,11 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
     }
 
     return TRUE;
+}
+
+void CDECL X3DA16_X3DAudioInitialize(UINT32 chanmask, float speedofsound,
+        X3DAUDIO_HANDLE handle)
+{
+    /* forward to 1.7 */
+    X3DAudioInitialize(chanmask, speedofsound, handle);
 }

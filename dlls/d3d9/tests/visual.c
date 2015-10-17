@@ -65,13 +65,13 @@ static HWND create_window(void)
 
 static BOOL color_match(D3DCOLOR c1, D3DCOLOR c2, BYTE max_diff)
 {
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
+    if (abs((int)(c1 & 0xff) - (int)(c2 & 0xff)) > max_diff) return FALSE;
     c1 >>= 8; c2 >>= 8;
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
+    if (abs((int)(c1 & 0xff) - (int)(c2 & 0xff)) > max_diff) return FALSE;
     c1 >>= 8; c2 >>= 8;
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
+    if (abs((int)(c1 & 0xff) - (int)(c2 & 0xff)) > max_diff) return FALSE;
     c1 >>= 8; c2 >>= 8;
-    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
+    if (abs((int)(c1 & 0xff) - (int)(c2 & 0xff)) > max_diff) return FALSE;
     return TRUE;
 }
 
@@ -117,59 +117,90 @@ static DWORD getPixelColorFromSurface(IDirect3DSurface9 *surface, UINT x, UINT y
     return color;
 }
 
+struct surface_readback
+{
+    IDirect3DSurface9 *surface;
+    D3DLOCKED_RECT locked_rect;
+};
+
+static void get_rt_readback(IDirect3DSurface9 *surface, struct surface_readback *rb)
+{
+    IDirect3DDevice9 *device;
+    HRESULT hr;
+
+    memset(rb, 0, sizeof(*rb));
+    IDirect3DSurface9_GetDevice(surface, &device);
+    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 640, 480,
+            D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &rb->surface, NULL);
+    if (FAILED(hr) || !rb->surface)
+    {
+        trace("Can't create an offscreen plain surface to read the render target data, hr %#x.\n", hr);
+        goto error;
+    }
+
+    hr = IDirect3DDevice9_GetRenderTargetData(device, surface, rb->surface);
+    if (FAILED(hr))
+    {
+        trace("Can't read the render target data, hr %#x.\n", hr);
+        goto error;
+    }
+
+    hr = IDirect3DSurface9_LockRect(rb->surface, &rb->locked_rect, NULL, D3DLOCK_READONLY);
+    if (FAILED(hr))
+    {
+        trace("Can't lock the offscreen surface, hr %#x.\n", hr);
+        goto error;
+    }
+    IDirect3DDevice9_Release(device);
+
+    return;
+
+error:
+    if (rb->surface)
+        IDirect3DSurface9_Release(rb->surface);
+    rb->surface = NULL;
+    IDirect3DDevice9_Release(device);
+}
+
+static DWORD get_readback_color(struct surface_readback *rb, unsigned int x, unsigned int y)
+{
+    return rb->locked_rect.pBits
+            ? ((DWORD *)rb->locked_rect.pBits)[y * rb->locked_rect.Pitch / sizeof(DWORD) + x] : 0xdeadbeef;
+}
+
+static void release_surface_readback(struct surface_readback *rb)
+{
+    HRESULT hr;
+
+    if (!rb->surface)
+        return;
+    if (rb->locked_rect.pBits && FAILED(hr = IDirect3DSurface9_UnlockRect(rb->surface)))
+        trace("Can't unlock the offscreen surface, hr %#x.\n", hr);
+    IDirect3DSurface9_Release(rb->surface);
+}
+
 static DWORD getPixelColor(IDirect3DDevice9 *device, UINT x, UINT y)
 {
     DWORD ret;
-    IDirect3DSurface9 *surf = NULL, *target = NULL;
+    IDirect3DSurface9 *rt;
+    struct surface_readback rb;
     HRESULT hr;
-    D3DLOCKED_RECT lockedRect;
-    RECT rectToLock = {x, y, x+1, y+1};
 
-    hr = IDirect3DDevice9_CreateOffscreenPlainSurface(device, 640, 480,
-            D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &surf, NULL);
-    if (FAILED(hr) || !surf)
-    {
-        trace("Can't create an offscreen plain surface to read the render target data, hr=%08x\n", hr);
-        return 0xdeadbeef;
-    }
-
-    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &target);
+    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &rt);
     if(FAILED(hr))
     {
-        trace("Can't get the render target, hr=%08x\n", hr);
-        ret = 0xdeadbeed;
-        goto out;
+        trace("Can't get the render target, hr %#x.\n", hr);
+        return 0xdeadbeed;
     }
 
-    hr = IDirect3DDevice9_GetRenderTargetData(device, target, surf);
-    if (FAILED(hr))
-    {
-        trace("Can't read the render target data, hr=%08x\n", hr);
-        ret = 0xdeadbeec;
-        goto out;
-    }
-
-    hr = IDirect3DSurface9_LockRect(surf, &lockedRect, &rectToLock, D3DLOCK_READONLY);
-    if(FAILED(hr))
-    {
-        trace("Can't lock the offscreen surface, hr=%08x\n", hr);
-        ret = 0xdeadbeeb;
-        goto out;
-    }
-
+    get_rt_readback(rt, &rb);
     /* Remove the X channel for now. DirectX and OpenGL have different ideas how to treat it apparently, and it isn't
      * really important for these tests
      */
-    ret = ((DWORD *) lockedRect.pBits)[0] & 0x00ffffff;
-    hr = IDirect3DSurface9_UnlockRect(surf);
-    if(FAILED(hr))
-    {
-        trace("Can't unlock the offscreen surface, hr=%08x\n", hr);
-    }
+    ret = get_readback_color(&rb, x, y) & 0x00ffffff;
+    release_surface_readback(&rb);
 
-out:
-    if(target) IDirect3DSurface9_Release(target);
-    if(surf) IDirect3DSurface9_Release(surf);
+    IDirect3DSurface9_Release(rt);
     return ret;
 }
 
@@ -7020,6 +7051,20 @@ static void pretransformed_varying_test(void)
         0x0000ffff                              /* end                      */
     };
     /* sample: fails */
+    static const DWORD texcoord1_code[] =
+    {
+        0xffff0300,                             /* ps_3_0                   */
+        0x0200001f, 0x80010005, 0x900f0000,     /* dcl_texcoord1, v0        */
+        0x02000001, 0x800f0800, 0x90e40000,     /* mov oC0, v0              */
+        0x0000ffff                              /* end                      */
+    };
+    static const DWORD texcoord1_alpha_code[] =
+    {
+        0xffff0300,                             /* ps_3_0                   */
+        0x0200001f, 0x80010005, 0x900f0000,     /* dcl_texcoord1, v0        */
+        0x02000001, 0x800f0800, 0x90ff0000,     /* mov oC0, v0.w            */
+        0x0000ffff                              /* end                      */
+    };
 
     static const struct
     {
@@ -7027,19 +7072,22 @@ static void pretransformed_varying_test(void)
         const DWORD *shader_code;
         DWORD color;
         BOOL todo;
+        BOOL broken_warp;
     }
     tests[] =
     {
-        {"blendweight",     blendweight_code,   0x00191919, TRUE },
-        {"blendindices",    blendindices_code,  0x00333333, TRUE },
-        {"normal",          normal_code,        0x004c4c4c, TRUE },
-        {"texcoord0",       texcoord0_code,     0x00808c8c, FALSE},
-        {"tangent",         tangent_code,       0x00999999, TRUE },
-        {"binormal",        binormal_code,      0x00b2b2b2, TRUE },
-        {"color",           color_code,         0x00e6e6e6, FALSE},
-        {"fog",             fog_code,           0x00666666, TRUE },
-        {"depth",           depth_code,         0x00cccccc, TRUE },
-        {"specular",        specular_code,      0x004488ff, FALSE},
+        {"blendweight",     blendweight_code,     0x00191919, TRUE },
+        {"blendindices",    blendindices_code,    0x00333333, TRUE },
+        {"normal",          normal_code,          0x004c4c4c, TRUE },
+        {"texcoord0",       texcoord0_code,       0x00808c8c, FALSE},
+        {"tangent",         tangent_code,         0x00999999, TRUE },
+        {"binormal",        binormal_code,        0x00b2b2b2, TRUE },
+        {"color",           color_code,           0x00e6e6e6, FALSE},
+        {"fog",             fog_code,             0x00666666, TRUE },
+        {"depth",           depth_code,           0x00cccccc, TRUE },
+        {"specular",        specular_code,        0x004488ff, FALSE},
+        {"texcoord1",       texcoord1_code,       0x00000000, FALSE},
+        {"texcoord1 alpha", texcoord1_alpha_code, 0x00000000, FALSE, TRUE},
     };
     /* Declare a monster vertex type :-) */
     static const D3DVERTEXELEMENT9 decl_elements[] = {
@@ -7126,6 +7174,7 @@ static void pretransformed_varying_test(void)
            0x224488ff, /* Nothing special */
         },
     };
+    D3DADAPTER_IDENTIFIER9 identifier;
     IDirect3DVertexDeclaration9 *decl;
     IDirect3DDevice9 *device;
     IDirect3D9 *d3d;
@@ -7135,6 +7184,7 @@ static void pretransformed_varying_test(void)
     DWORD color;
     HWND window;
     HRESULT hr;
+    BOOL warp;
 
     window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             0, 0, 640, 480, NULL, NULL, NULL, NULL);
@@ -7154,6 +7204,10 @@ static void pretransformed_varying_test(void)
         IDirect3DDevice9_Release(device);
         goto done;
     }
+
+    hr = IDirect3D9_GetAdapterIdentifier(d3d, D3DADAPTER_DEFAULT, 0, &identifier);
+    ok(SUCCEEDED(hr), "Failed to get adapter identifier, hr %#x.\n", hr);
+    warp = !strcmp(identifier.Description, "Microsoft Basic Render Driver");
 
     hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &decl);
     ok(hr == D3D_OK, "IDirect3DDevice9_CreateVertexDeclaration returned %08x\n", hr);
@@ -7190,7 +7244,7 @@ static void pretransformed_varying_test(void)
                     "Test %s returned color 0x%08x, expected 0x%08x (todo).\n",
                     tests[i].name, color, tests[i].color);
         else
-            ok(color_match(color, tests[i].color, 1),
+            ok(color_match(color, tests[i].color, 1) || broken(warp && tests[i].broken_warp),
                     "Test %s returned color 0x%08x, expected 0x%08x.\n",
                     tests[i].name, color, tests[i].color);
 
@@ -10141,7 +10195,7 @@ static BOOL point_match(IDirect3DDevice9 *device, UINT x, UINT y, UINT r)
     return TRUE;
 }
 
-static void pointsize_test(void)
+static void test_pointsize(void)
 {
     static const float a = 1.0f, b = 1.0f, c = 1.0f;
     float ptsize, ptsizemax_orig, ptsizemin_orig;
@@ -10664,35 +10718,40 @@ static void pointsize_test(void)
             }
             else
             {
+                struct surface_readback rb;
+
+                get_rt_readback(backbuffer, &rb);
                 /* On AMD apparently only the first texcoord is modified by the point coordinates
                  * when using SM2/3 pixel shaders. */
-                color = getPixelColor(device, 64 - size / 2 + 1, 64 - size / 2 + 1);
+                color = get_readback_color(&rb, 64 - size / 2 + 1, 64 - size / 2 + 1);
                 ok(color_match(color, 0x00ff0000, 0),
                         "Got unexpected color 0x%08x (case %u, %u, size %u).\n", color, i, j, size);
-                color = getPixelColor(device, 64 + size / 2 - 1, 64 - size / 2 + 1);
+                color = get_readback_color(&rb, 64 + size / 2 - 1, 64 - size / 2 + 1);
                 ok(color_match(color, test_setups[i].gives_0_0_texcoord ? 0x00ff0000 : 0x00ffff00, 0)
                         || (allow_broken && broken(color_match(color, 0x00ff0000, 0))),
                         "Got unexpected color 0x%08x (case %u, %u, size %u).\n", color, i, j, size);
-                color = getPixelColor(device, 64 - size / 2 + 1, 64 + size / 2 - 1);
+                color = get_readback_color(&rb, 64 - size / 2 + 1, 64 + size / 2 - 1);
                 ok(color_match(color, test_setups[i].gives_0_0_texcoord ? 0x00ff0000 : 0x00000000, 0),
                         "Got unexpected color 0x%08x (case %u, %u, size %u).\n", color, i, j, size);
-                color = getPixelColor(device, 64 + size / 2 - 1, 64 + size / 2 - 1);
+                color = get_readback_color(&rb, 64 + size / 2 - 1, 64 + size / 2 - 1);
                 ok(color_match(color, test_setups[i].gives_0_0_texcoord ? 0x00ff0000 : 0x0000ff00, 0)
                         || (allow_broken && broken(color_match(color, 0x00000000, 0))),
                         "Got unexpected color 0x%08x (case %u, %u, size %u).\n", color, i, j, size);
 
-                color = getPixelColor(device, 64 - size / 2 - 1, 64 - size / 2 - 1);
-                ok(color_match(color, 0x0000ffff, 0),
+                color = get_readback_color(&rb, 64 - size / 2 - 1, 64 - size / 2 - 1);
+                ok(color_match(color, 0xff00ffff, 0),
                         "Got unexpected color 0x%08x (case %u, %u, size %u).\n", color, i, j, size);
-                color = getPixelColor(device, 64 + size / 2 + 1, 64 - size / 2 - 1);
-                ok(color_match(color, 0x0000ffff, 0),
+                color = get_readback_color(&rb, 64 + size / 2 + 1, 64 - size / 2 - 1);
+                ok(color_match(color, 0xff00ffff, 0),
                         "Got unexpected color 0x%08x (case %u, %u, size %u).\n", color, i, j, size);
-                color = getPixelColor(device, 64 - size / 2 - 1, 64 + size / 2 + 1);
-                ok(color_match(color, 0x0000ffff, 0),
+                color = get_readback_color(&rb, 64 - size / 2 - 1, 64 + size / 2 + 1);
+                ok(color_match(color, 0xff00ffff, 0),
                         "Got unexpected color 0x%08x (case %u, %u, size %u).\n", color, i, j, size);
-                color = getPixelColor(device, 64 + size / 2 + 1, 64 + size / 2 + 1);
-                ok(color_match(color, 0x0000ffff, 0),
+                color = get_readback_color(&rb, 64 + size / 2 + 1, 64 + size / 2 + 1);
+                ok(color_match(color, 0xff00ffff, 0),
                         "Got unexpected color 0x%08x (case %u, %u, size %u).\n", color, i, j, size);
+
+                release_surface_readback(&rb);
             }
         }
         IDirect3DDevice9_SetVertexShader(device, NULL);
@@ -19610,7 +19669,7 @@ static void test_updatetexture(void)
 
                 color = getPixelColor(device, 320, 240);
                 ok (color_match(color, 0x007f7f00, 2) || broken(tests[i].broken)
-                        || broken(color == 0xdeadbeec), /* WARP device often just breaks down. */
+                        || broken(color == 0x00adbeef), /* WARP device often just breaks down. */
                         "Got unexpected color 0x%08x, case %u, %u.\n", color, t, i);
             }
 
@@ -19796,6 +19855,413 @@ done:
     DestroyWindow(window);
 }
 
+static void test_flip(void)
+{
+    IDirect3DDevice9 *device;
+    IDirect3D9 *d3d;
+    ULONG refcount;
+    HWND window;
+    HRESULT hr;
+    IDirect3DSurface9 *back_buffers[3], *test_surface;
+    unsigned int i;
+    D3DCOLOR color;
+    D3DPRESENT_PARAMETERS present_parameters = {0};
+
+    window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+
+    present_parameters.BackBufferWidth = 640;
+    present_parameters.BackBufferHeight = 480;
+    present_parameters.BackBufferFormat = D3DFMT_A8R8G8B8;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+    present_parameters.hDeviceWindow = window;
+    present_parameters.Windowed = TRUE;
+    present_parameters.BackBufferCount = 3;
+    present_parameters.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
+    hr = IDirect3D9_CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            window, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device);
+    if (!device)
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        IDirect3D9_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    for (i = 0; i < sizeof(back_buffers) / sizeof(*back_buffers); ++i)
+    {
+        hr = IDirect3DDevice9_GetBackBuffer(device, 0, i, D3DBACKBUFFER_TYPE_MONO, &back_buffers[i]);
+        ok(SUCCEEDED(hr), "Failed to get back buffer, hr %#x.\n", hr);
+    }
+    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &test_surface);
+    ok(SUCCEEDED(hr), "Failed to get render target, hr %#x.\n", hr);
+    ok(test_surface == back_buffers[0], "Expected render target %p, got %p.\n", back_buffers[0], test_surface);
+    IDirect3DSurface9_Release(test_surface);
+
+    hr = IDirect3DDevice9_SetRenderTarget(device, 0, back_buffers[2]);
+    ok(SUCCEEDED(hr), "Failed to set render target, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_ColorFill(device, back_buffers[0], NULL, 0xffff0000);
+    ok(SUCCEEDED(hr), "Failed to color fill, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_ColorFill(device, back_buffers[1], NULL, 0xff00ff00);
+    ok(SUCCEEDED(hr), "Failed to color fill, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff0000ff, 0.0f, 0);
+    ok(SUCCEEDED(hr), "Failed to clear, hr %#x\n", hr);
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to present, hr %#x.\n", hr);
+
+    /* Render target is unmodified. */
+    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &test_surface);
+    ok(SUCCEEDED(hr), "Failed to get render target, hr %#x.\n", hr);
+    ok(test_surface == back_buffers[2], "Expected render target %p, got %p.\n", back_buffers[2], test_surface);
+    IDirect3DSurface9_Release(test_surface);
+
+    /* Backbuffer surface pointers are unmodified */
+    for (i = 0; i < sizeof(back_buffers) / sizeof(*back_buffers); ++i)
+    {
+        hr = IDirect3DDevice9_GetBackBuffer(device, 0, i, D3DBACKBUFFER_TYPE_MONO, &test_surface);
+        ok(SUCCEEDED(hr), "Failed to get back buffer, hr %#x.\n", hr);
+        ok(test_surface == back_buffers[i], "Expected back buffer %u = %p, got %p.\n",
+                i, back_buffers[i], test_surface);
+        IDirect3DSurface9_Release(test_surface);
+    }
+
+    /* Contents were changed. */
+    color = getPixelColorFromSurface(back_buffers[0], 1, 1);
+    todo_wine ok(color == 0xff00ff00, "Got unexpected color 0x%08x.\n", color);
+    color = getPixelColorFromSurface(back_buffers[1], 1, 1);
+    todo_wine ok(color == 0xff0000ff, "Got unexpected color 0x%08x.\n", color);
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff808080, 0.0f, 0);
+    ok(SUCCEEDED(hr), "Failed to clear, hr %#x\n", hr);
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to present, hr %#x.\n", hr);
+
+    color = getPixelColorFromSurface(back_buffers[0], 1, 1);
+    todo_wine ok(color == 0xff0000ff, "Got unexpected color 0x%08x.\n", color);
+    color = getPixelColorFromSurface(back_buffers[1], 1, 1);
+    todo_wine ok(color == 0xff808080, "Got unexpected color 0x%08x.\n", color);
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to present, hr %#x.\n", hr);
+
+    color = getPixelColorFromSurface(back_buffers[0], 1, 1);
+    todo_wine ok(color == 0xff808080, "Got unexpected color 0x%08x.\n", color);
+
+    for (i = 0; i < sizeof(back_buffers) / sizeof(*back_buffers); ++i)
+        IDirect3DSurface9_Release(back_buffers[i]);
+
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    IDirect3D9_Release(d3d);
+    DestroyWindow(window);
+}
+
+static void test_uninitialized_varyings(void)
+{
+    static const D3DMATRIX mat =
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    }}};
+    static const struct vec3 quad[] =
+    {
+        {-1.0f, -1.0f, 0.1f},
+        {-1.0f,  1.0f, 0.1f},
+        { 1.0f, -1.0f, 0.1f},
+        { 1.0f,  1.0f, 0.1f},
+    };
+    static const DWORD vs1_code[] =
+    {
+        0xfffe0101,                                                             /* vs_1_1                         */
+        0x0000001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0                */
+        0x00000001, 0xc00f0000, 0x90e40000,                                     /* mov oPos, v0                   */
+        0x0000ffff
+    };
+    static const DWORD vs1_partial_code[] =
+    {
+        0xfffe0101,                                                             /* vs_1_1                         */
+        0x0000001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0                */
+        0x00000051, 0xa00f0000, 0x3f000000, 0x3f000000, 0x3f000000, 0x3f000000, /* def c0, 0.5, 0.5, 0.5, 0.5     */
+        0x00000001, 0xc00f0000, 0x90e40000,                                     /* mov oPos, v0                   */
+        0x00000001, 0xd0010000, 0xa0e40000,                                     /* mov oD0.x, c0                  */
+        0x00000001, 0xd0010001, 0xa0e40000,                                     /* mov oD1.x, c0                  */
+        0x00000001, 0xe0010000, 0xa0e40000,                                     /* mov oT0.x, c0                  */
+        0x0000ffff
+    };
+    static const DWORD vs2_code[] =
+    {
+        0xfffe0200,                                                             /* vs_2_0                         */
+        0x0200001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0                */
+        0x02000001, 0xc00f0000, 0x90e40000,                                     /* mov oPos, v0                   */
+        0x0000ffff
+    };
+    static const DWORD vs2_partial_code[] =
+    {
+        0xfffe0200,                                                             /* vs_2_0                         */
+        0x0200001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0                */
+        0x05000051, 0xa00f0000, 0x3f000000, 0x3f000000, 0x3f000000, 0x3f000000, /* def c0, 0.5, 0.5, 0.5, 0.5     */
+        0x02000001, 0xc00f0000, 0x90e40000,                                     /* mov oPos, v0                   */
+        0x02000001, 0xd0010000, 0xa0e40000,                                     /* mov oD0.x, c0                  */
+        0x02000001, 0xd0010001, 0xa0e40000,                                     /* mov oD1.x, c0                  */
+        0x02000001, 0xe0010000, 0xa0e40000,                                     /* mov oT0.x, c0                  */
+        0x0000ffff
+    };
+    static const DWORD vs3_code[] =
+    {
+        0xfffe0300,                                                             /* vs_3_0                         */
+        0x0200001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0                */
+        0x0200001f, 0x80000000, 0xe00f0000,                                     /* dcl_position o0                */
+        0x02000001, 0xe00f0000, 0x90e40000,                                     /* mov o0, v0                     */
+        0x0000ffff
+    };
+    static const DWORD vs3_partial_code[] =
+    {
+        0xfffe0300,                                                             /* vs_3_0                         */
+        0x0200001f, 0x80000000, 0x900f0000,                                     /* dcl_position v0                */
+        0x0200001f, 0x80000000, 0xe00f0000,                                     /* dcl_position o0                */
+        0x0200001f, 0x8000000a, 0xe00f0001,                                     /* dcl_color0 o1                  */
+        0x0200001f, 0x8001000a, 0xe00f0002,                                     /* dcl_color1 o2                  */
+        0x0200001f, 0x80000005, 0xe00f0003,                                     /* dcl_texcoord0 o3               */
+        0x05000051, 0xa00f0000, 0x3f000000, 0x3f000000, 0x3f000000, 0x3f000000, /* def c0, 0.5, 0.5, 0.5, 0.5     */
+        0x02000001, 0xe00f0000, 0x90e40000,                                     /* mov o0, v0                     */
+        0x02000001, 0xe0010001, 0xa0e40000,                                     /* mov o1.x, c0                   */
+        0x02000001, 0xe0010002, 0xa0e40000,                                     /* mov o2.x, c0                   */
+        0x02000001, 0xe0010003, 0xa0e40000,                                     /* mov o3.x, c0                   */
+        0x0000ffff
+    };
+    static const DWORD ps1_diffuse_code[] =
+    {
+        0xffff0101,                                                             /* ps_1_1                         */
+        0x00000001, 0x800f0000, 0x90e40000,                                     /* mov r0, v0                     */
+        0x0000ffff
+    };
+    static const DWORD ps1_specular_code[] =
+    {
+        0xffff0101,                                                             /* ps_1_1                         */
+        0x00000001, 0x800f0000, 0x90e40001,                                     /* mov r0, v1                     */
+        0x0000ffff
+    };
+    static const DWORD ps1_texcoord_code[] =
+    {
+        0xffff0101,                                                             /* ps_1_1                         */
+        0x00000040, 0xb00f0000,                                                 /* texcoord t0                    */
+        0x00000001, 0x800f0000, 0xb0e40000,                                     /* mov r0, t0                     */
+        0x0000ffff
+    };
+    static const DWORD ps2_diffuse_code[] =
+    {
+        0xffff0200,                                                             /* ps_2_0                         */
+        0x0200001f, 0x80000000, 0x900f0000,                                     /* dcl v0                         */
+        0x02000001, 0x800f0800, 0x90e40000,                                     /* mov oC0, v0                    */
+        0x0000ffff
+    };
+    static const DWORD ps2_specular_code[] =
+    {
+        0xffff0200,                                                             /* ps_2_0                         */
+        0x0200001f, 0x80000000, 0x900f0001,                                     /* dcl v1                         */
+        0x02000001, 0x800f0800, 0x90e40001,                                     /* mov oC0, v1                    */
+        0x0000ffff
+    };
+    static const DWORD ps2_texcoord_code[] =
+    {
+        0xffff0200,                                                             /* ps_2_0                         */
+        0x0200001f, 0x80000000, 0xb00f0000,                                     /* dcl t0                         */
+        0x02000001, 0x800f0800, 0xb0e40000,                                     /* mov oC0, t0                    */
+        0x0000ffff
+    };
+    static const DWORD ps3_diffuse_code[] =
+    {
+        0xffff0300,                                                             /* ps_3_0                         */
+        0x0200001f, 0x8000000a, 0x900f0000,                                     /* dcl_color0 v0                  */
+        0x02000001, 0x800f0800, 0x90e40000,                                     /* mov oC0, v0                    */
+        0x0000ffff
+    };
+    static const DWORD ps3_specular_code[] =
+    {
+        0xffff0300,                                                             /* ps_3_0                         */
+        0x0200001f, 0x8001000a, 0x900f0001,                                     /* dcl_color1 v1                  */
+        0x02000001, 0x800f0800, 0x90e40001,                                     /* mov oC0, v1                    */
+        0x0000ffff
+    };
+    static const DWORD ps3_texcoord_code[] =
+    {
+        0xffff0300,                                                             /* ps_3_0                         */
+        0x0200001f, 0x80000005, 0x900f0000,                                     /* dcl_texcoord0 v0               */
+        0x02000001, 0x800f0800, 0x90e40000,                                     /* mov oC0, v0                    */
+        0x0000ffff
+    };
+    static const struct
+    {
+        DWORD vs_version;
+        const DWORD *vs;
+        DWORD ps_version;
+        const DWORD *ps;
+        D3DCOLOR expected;
+        BOOL allow_zero_alpha;
+        BOOL allow_zero;
+        BOOL broken_warp;
+    }
+    /* On AMD specular color is generally initialized to 0x00000000 and texcoords to 0xff000000
+     * while on Nvidia it's the opposite. Just allow both. */
+    tests[] =
+    {
+        {D3DVS_VERSION(1, 1),         vs1_code,                   0,              NULL, 0xffffffff},
+        {                  0,             NULL, D3DPS_VERSION(1, 1), ps1_texcoord_code, 0xff000000, TRUE},
+        {                  0,             NULL, D3DPS_VERSION(2, 0), ps2_texcoord_code, 0xff000000, TRUE},
+        {D3DVS_VERSION(1, 1),         vs1_code, D3DPS_VERSION(1, 1),  ps1_diffuse_code, 0xffffffff},
+        {D3DVS_VERSION(1, 1),         vs1_code, D3DPS_VERSION(1, 1), ps1_specular_code, 0xff000000, TRUE,  FALSE, TRUE},
+        {D3DVS_VERSION(1, 1),         vs1_code, D3DPS_VERSION(1, 1), ps1_texcoord_code, 0xff000000, TRUE},
+        {D3DVS_VERSION(2, 0),         vs2_code, D3DPS_VERSION(2, 0),  ps2_diffuse_code, 0xffffffff},
+        {D3DVS_VERSION(2, 0),         vs2_code, D3DPS_VERSION(2, 0), ps2_specular_code, 0xff000000, TRUE,  FALSE, TRUE},
+        {D3DVS_VERSION(2, 0),         vs2_code, D3DPS_VERSION(2, 0), ps2_texcoord_code, 0xff000000, TRUE},
+        {D3DVS_VERSION(3, 0),         vs3_code, D3DPS_VERSION(3, 0),  ps3_diffuse_code, 0xffffffff, FALSE, TRUE},
+        {D3DVS_VERSION(3, 0),         vs3_code, D3DPS_VERSION(3, 0), ps3_specular_code, 0x00000000, FALSE, FALSE, TRUE},
+        {D3DVS_VERSION(3, 0),         vs3_code, D3DPS_VERSION(3, 0), ps3_texcoord_code, 0x00000000, FALSE, FALSE, TRUE},
+        {D3DVS_VERSION(1, 1), vs1_partial_code,                   0,              NULL, 0xff7fffff, FALSE, FALSE, TRUE},
+        {D3DVS_VERSION(1, 1), vs1_partial_code, D3DPS_VERSION(1, 1),  ps1_diffuse_code, 0xff7fffff, FALSE, FALSE, TRUE},
+        {D3DVS_VERSION(1, 1), vs1_partial_code, D3DPS_VERSION(1, 1), ps1_specular_code, 0xff7f0000, TRUE},
+        {D3DVS_VERSION(1, 1), vs1_partial_code, D3DPS_VERSION(1, 1), ps1_texcoord_code, 0xff7f0000, TRUE},
+        {D3DVS_VERSION(2, 0), vs2_partial_code, D3DPS_VERSION(2, 0),  ps2_diffuse_code, 0xff7fffff, FALSE, FALSE, TRUE},
+        {D3DVS_VERSION(2, 0), vs2_partial_code, D3DPS_VERSION(2, 0), ps2_specular_code, 0xff7f0000, TRUE},
+        {D3DVS_VERSION(2, 0), vs2_partial_code, D3DPS_VERSION(2, 0), ps2_texcoord_code, 0xff7f0000, TRUE},
+        /* Fails on Radeon HD 2600 with 0x008000ff aka nonsensical color. */
+        /* {D3DVS_VERSION(3, 0), vs3_partial_code, D3DPS_VERSION(3, 0), ps3_diffuse_code, 0xff7fffff, TRUE}, */
+        /* Randomly fails on Radeon HD 2600. */
+        /* {D3DVS_VERSION(3, 0), vs3_partial_code, D3DPS_VERSION(3, 0), ps3_specular_code, 0x007f0000}, */
+        {D3DVS_VERSION(3, 0), vs3_partial_code, D3DPS_VERSION(3, 0), ps3_texcoord_code, 0xff7f0000, TRUE},
+    };
+    IDirect3DDevice9 *device;
+    IDirect3D9 *d3d;
+    HWND window;
+    HRESULT hr;
+    D3DADAPTER_IDENTIFIER9 identifier;
+    IDirect3DSurface9 *backbuffer;
+    struct surface_readback rb;
+    IDirect3DVertexShader9 *vs;
+    IDirect3DPixelShader9 *ps;
+    unsigned int i;
+    ULONG refcount;
+    D3DCAPS9 caps;
+    D3DCOLOR color;
+    BOOL warp;
+
+    window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+    if (!(device = create_device(d3d, window, window, TRUE)))
+    {
+        skip("Failed to create a D3D device, skipping tests.\n");
+        IDirect3D9_Release(d3d);
+        DestroyWindow(window);
+        return;
+    }
+
+    hr = IDirect3D9_GetAdapterIdentifier(d3d, D3DADAPTER_DEFAULT, 0, &identifier);
+    ok(SUCCEEDED(hr), "Failed to get adapter identifier, hr %#x.\n", hr);
+    warp = !strcmp(identifier.Description, "Microsoft Basic Render Driver");
+
+    hr = IDirect3DDevice9_GetDeviceCaps(device, &caps);
+    ok(SUCCEEDED(hr), "Failed to get caps, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_GetRenderTarget(device, 0, &backbuffer);
+    ok(SUCCEEDED(hr), "Failed to get backbuffer, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLD, &mat);
+    ok(SUCCEEDED(hr), "Failed to set world transform, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_VIEW, &mat);
+    ok(SUCCEEDED(hr), "Failed to set view transform, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetTransform(device, D3DTS_PROJECTION, &mat);
+    ok(SUCCEEDED(hr), "Failed to set projection transform, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_CLIPPING, FALSE);
+    ok(SUCCEEDED(hr), "Failed to disable clipping, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_ZENABLE, FALSE);
+    ok(SUCCEEDED(hr), "Failed to disable Z test, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_FOGENABLE, FALSE);
+    ok(SUCCEEDED(hr), "Failed to disable fog, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_STENCILENABLE, FALSE);
+    ok(SUCCEEDED(hr), "Failed to disable stencil test, hr %#x.\n", hr);
+    hr = IDirect3DDevice9_SetRenderState(device, D3DRS_CULLMODE, D3DCULL_NONE);
+    ok(SUCCEEDED(hr), "Failed to disable culling, hr %#x.\n", hr);
+
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ);
+    ok(SUCCEEDED(hr), "Failed to set FVF, hr %#x.\n", hr);
+
+    for (i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i)
+    {
+        if (caps.VertexShaderVersion < tests[i].vs_version
+                || caps.PixelShaderVersion < tests[i].ps_version)
+        {
+            skip("Vertex / pixel shader version not supported, skipping test %u.\n", i);
+            continue;
+        }
+        if (tests[i].vs)
+        {
+            hr = IDirect3DDevice9_CreateVertexShader(device, tests[i].vs, &vs);
+            ok(SUCCEEDED(hr), "Failed to create vertex shader, hr %#x (case %u).\n", hr, i);
+        }
+        else
+        {
+            vs = NULL;
+        }
+        if (tests[i].ps)
+        {
+            hr = IDirect3DDevice9_CreatePixelShader(device, tests[i].ps, &ps);
+            ok(SUCCEEDED(hr), "Failed to create pixel shader, hr %#x (case %u).\n", hr, i);
+        }
+        else
+        {
+            ps = NULL;
+        }
+
+        hr = IDirect3DDevice9_SetVertexShader(device, vs);
+        ok(SUCCEEDED(hr), "Failed to set vertex shader, hr %#x.\n", hr);
+        hr = IDirect3DDevice9_SetPixelShader(device, ps);
+        ok(SUCCEEDED(hr), "Failed to set pixel shader, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0xff00ff00, 0.0, 0);
+        ok(SUCCEEDED(hr), "Failed to clear, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_BeginScene(device);
+        ok(SUCCEEDED(hr), "Failed to begin scene, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(quad[0]));
+        ok(SUCCEEDED(hr), "Failed to draw, hr %#x.\n", hr);
+
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(SUCCEEDED(hr), "Failed to end scene, hr %#x.\n", hr);
+
+        get_rt_readback(backbuffer, &rb);
+        color = get_readback_color(&rb, 320, 240);
+        ok(color_match(color, tests[i].expected, 1)
+                || (tests[i].allow_zero_alpha && color_match(color, tests[i].expected & 0x00ffffff, 1))
+                || (tests[i].allow_zero && !color) || (broken(warp && tests[i].broken_warp)),
+                "Got unexpected color 0x%08x, case %u.\n", color, i);
+        release_surface_readback(&rb);
+
+        if (vs)
+            IDirect3DVertexShader9_Release(vs);
+        if (ps)
+            IDirect3DVertexShader9_Release(ps);
+    }
+
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+    ok(SUCCEEDED(hr), "Failed to present, hr %#x.\n", hr);
+
+    IDirect3DSurface9_Release(backbuffer);
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+    IDirect3D9_Release(d3d);
+    DestroyWindow(window);
+}
+
 START_TEST(visual)
 {
     D3DADAPTER_IDENTIFIER9 identifier;
@@ -19848,7 +20314,7 @@ START_TEST(visual)
     fixed_function_decl_test();
     conditional_np2_repeat_test();
     fixed_function_bumpmap_test();
-    pointsize_test();
+    test_pointsize();
     tssargtemp_test();
     np2_stretch_rect_test();
     yuv_color_test();
@@ -19914,4 +20380,6 @@ START_TEST(visual)
     test_vertex_blending();
     test_updatetexture();
     test_depthbias();
+    test_flip();
+    test_uninitialized_varyings();
 }
