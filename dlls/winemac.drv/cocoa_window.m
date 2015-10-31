@@ -150,6 +150,11 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 }
 
 
+@interface NSWindow (WineAccessPrivateMethods)
+    - (id) _displayChanged;
+@end
+
+
 @interface WineContentView : NSView <NSTextInputClient>
 {
     NSMutableArray* glContexts;
@@ -1260,6 +1265,10 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         if ([self isMiniaturized])
             pendingMinimize = TRUE;
 
+        WineWindow* parent = (WineWindow*)self.parentWindow;
+        if ([parent isKindOfClass:[WineWindow class]])
+            [parent grabDockIconSnapshotFromWindow:self force:NO];
+
         [self becameIneligibleParentOrChild];
         if ([self isMiniaturized])
         {
@@ -1564,6 +1573,109 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         }
     }
 
+    - (BOOL) isEmptyShaped
+    {
+        return (self.shapeData.length == sizeof(CGRectZero) && !memcmp(self.shapeData.bytes, &CGRectZero, sizeof(CGRectZero)));
+    }
+
+    - (BOOL) canProvideSnapshot
+    {
+        return (self.windowNumber > 0 && ![self isEmptyShaped]);
+    }
+
+    - (void) grabDockIconSnapshotFromWindow:(WineWindow*)window force:(BOOL)force
+    {
+        if (![self isEmptyShaped])
+            return;
+
+        NSTimeInterval now = [[NSProcessInfo processInfo] systemUptime];
+        if (!force && now < lastDockIconSnapshot + 1)
+            return;
+
+        if (window)
+        {
+            if (![window canProvideSnapshot])
+                return;
+        }
+        else
+        {
+            CGFloat bestArea;
+            for (WineWindow* childWindow in self.childWindows)
+            {
+                if (![childWindow isKindOfClass:[WineWindow class]] || ![childWindow canProvideSnapshot])
+                    continue;
+
+                NSSize size = childWindow.frame.size;
+                CGFloat area = size.width * size.height;
+                if (!window || area > bestArea)
+                {
+                    window = childWindow;
+                    bestArea = area;
+                }
+            }
+
+            if (!window)
+                return;
+        }
+
+        const void* windowID = (const void*)(CGWindowID)window.windowNumber;
+        CFArrayRef windowIDs = CFArrayCreate(NULL, &windowID, 1, NULL);
+        CGImageRef windowImage = CGWindowListCreateImageFromArray(CGRectNull, windowIDs, kCGWindowImageBoundsIgnoreFraming);
+        CFRelease(windowIDs);
+        if (!windowImage)
+            return;
+
+        NSImage* appImage = [NSApp applicationIconImage];
+        if (!appImage)
+            appImage = [NSImage imageNamed:NSImageNameApplicationIcon];
+
+        NSImage* dockIcon = [[[NSImage alloc] initWithSize:NSMakeSize(256, 256)] autorelease];
+        [dockIcon lockFocus];
+
+        CGContextRef cgcontext = [[NSGraphicsContext currentContext] graphicsPort];
+
+        CGRect rect = CGRectMake(8, 8, 240, 240);
+        size_t width = CGImageGetWidth(windowImage);
+        size_t height = CGImageGetHeight(windowImage);
+        if (width > height)
+        {
+            rect.size.height *= height / (double)width;
+            rect.origin.y += (CGRectGetWidth(rect) - CGRectGetHeight(rect)) / 2;
+        }
+        else if (width != height)
+        {
+            rect.size.width *= width / (double)height;
+            rect.origin.x += (CGRectGetHeight(rect) - CGRectGetWidth(rect)) / 2;
+        }
+
+        CGContextDrawImage(cgcontext, rect, windowImage);
+        [appImage drawInRect:NSMakeRect(156, 4, 96, 96)];
+
+        [dockIcon unlockFocus];
+
+        CGImageRelease(windowImage);
+
+        NSImageView* imageView = (NSImageView*)self.dockTile.contentView;
+        if (![imageView isKindOfClass:[NSImageView class]])
+        {
+            imageView = [[[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, 256, 256)] autorelease];
+            imageView.imageScaling = NSImageScaleProportionallyUpOrDown;
+            self.dockTile.contentView = imageView;
+        }
+        imageView.image = dockIcon;
+        [self.dockTile display];
+        lastDockIconSnapshot = now;
+    }
+
+    - (void) checkEmptyShaped
+    {
+        if (self.dockTile.contentView && ![self isEmptyShaped])
+        {
+            self.dockTile.contentView = nil;
+            lastDockIconSnapshot = 0;
+        }
+    }
+
 
     /*
      * ---------- NSWindow method overrides ----------
@@ -1591,6 +1703,38 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             frame_intersects_screens(frameRect, screens))
             frameRect = [super constrainFrameRect:frameRect toScreen:screen];
         return frameRect;
+    }
+
+    // This private method of NSWindow is called as Cocoa reacts to the display
+    // configuration changing.  Among other things, it adjusts the window's
+    // frame based on how the screen(s) changed size.  That tells Wine that the
+    // window has been moved.  We don't want that.  Rather, we want to make
+    // sure that the WinAPI notion of the window position is maintained/
+    // restored, possibly undoing or overriding Cocoa's adjustment.
+    //
+    // So, we queue a REASSERT_WINDOW_POSITION event to the back end before
+    // Cocoa has a chance to adjust the frame, thus preceding any resulting
+    // WINDOW_FRAME_CHANGED event that may get queued.  The back end will
+    // reassert its notion of the position.  That call won't get processed
+    // until after this method returns, so it will override whatever this
+    // method does to the window position.  It will also discard any pending
+    // WINDOW_FRAME_CHANGED events.
+    //
+    // Unfortunately, the only way I've found to know when Cocoa is _about to_
+    // adjust the window's position due to a display change is to hook into
+    // this private method.  This private method has remained stable from 10.6
+    // through 10.11.  If it does change, the most likely thing is that it
+    // will be removed and no longer called and this fix will simply stop
+    // working.  The only real danger would be if Apple changed the return type
+    // to a struct or floating-point type, which would change the calling
+    // convention.
+    - (id) _displayChanged
+    {
+        macdrv_event* event = macdrv_create_event(REASSERT_WINDOW_POSITION, self);
+        [queue postEvent:event];
+        macdrv_release_event(event);
+
+        return [super _displayChanged];
     }
 
     - (BOOL) isExcludedFromWindowsMenu
@@ -1729,6 +1873,10 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         macdrv_event* event = macdrv_create_event(WINDOW_MINIMIZE_REQUESTED, self);
         [queue postEvent:event];
         macdrv_release_event(event);
+
+        WineWindow* parent = (WineWindow*)self.parentWindow;
+        if ([parent isKindOfClass:[WineWindow class]])
+            [parent grabDockIconSnapshotFromWindow:self force:YES];
     }
 
     - (void) toggleFullScreen:(id)sender
@@ -2086,6 +2234,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     - (void)windowWillMiniaturize:(NSNotification *)notification
     {
         [self becameIneligibleParentOrChild];
+        [self grabDockIconSnapshotFromWindow:nil force:NO];
     }
 
     - (NSSize) windowWillResize:(NSWindow*)sender toSize:(NSSize)frameSize
@@ -2547,6 +2696,7 @@ void macdrv_set_window_shape(macdrv_window w, const CGRect *rects, int count)
         {
             window.shape = nil;
             window.shapeData = nil;
+            [window checkEmptyShaped];
         }
         else
         {
@@ -2561,6 +2711,7 @@ void macdrv_set_window_shape(macdrv_window w, const CGRect *rects, int count)
                     [path appendBezierPathWithRect:NSRectFromCGRect(rects[i])];
                 window.shape = path;
                 window.shapeData = [NSData dataWithBytes:rects length:length];
+                [window checkEmptyShaped];
             }
         }
     });

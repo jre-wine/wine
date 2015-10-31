@@ -59,6 +59,7 @@
 #define FACILITY_PLA                         48
 #define FACILITY_FVE                         49
 #define FACILITY_WINDOWS_DEFENDER            80
+#define FACILITY_DIRECT3D11                  0x87c
 
 #define SEVERITY_SUCCESS    0
 #define SEVERITY_ERROR      1
@@ -1778,6 +1779,7 @@ static inline HRESULT HRESULT_FROM_WIN32(unsigned int x)
 #define DNS_ERROR_NO_PACKET                                9503
 #define DNS_ERROR_RCODE                                    9504
 #define DNS_ERROR_UNSECURE_PACKET                          9505
+#define DNS_REQUEST_PENDING                                9506
 #define DNS_ERROR_INVALID_TYPE                             9551
 #define DNS_ERROR_INVALID_IP_ADDRESS                       9552
 #define DNS_ERROR_INVALID_PROPERTY                         9553
@@ -2091,6 +2093,7 @@ static inline HRESULT HRESULT_FROM_WIN32(unsigned int x)
 #define S_FALSE                                            _HRESULT_TYPEDEF_(1)
 
 #define E_PENDING                                          _HRESULT_TYPEDEF_(0x8000000A)
+#define E_BOUNDS                                           _HRESULT_TYPEDEF_(0x8000000B)
 
 
 #define E_NOTIMPL                                          _HRESULT_TYPEDEF_(0x80004001)

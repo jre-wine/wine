@@ -147,23 +147,6 @@ static void test_EnumProcessModules(void)
     ok(hMod == GetModuleHandleA(NULL),
        "hMod=%p GetModuleHandleA(NULL)=%p\n", hMod, GetModuleHandleA(NULL));
     ok(cbNeeded % sizeof(hMod) == 0, "not a multiple of sizeof(HMODULE) cbNeeded=%d\n", cbNeeded);
-    /* Windows sometimes has a bunch of extra dlls, presumably brought in by
-     * aclayers.dll.
-     */
-    if (cbNeeded < 4 * sizeof(HMODULE) || cbNeeded > 30 * sizeof(HMODULE))
-    {
-        HMODULE hmods[100];
-        int i;
-        ok(0, "cbNeeded=%d\n", cbNeeded);
-
-        pEnumProcessModules(hpQV, hmods, sizeof(hmods), &cbNeeded);
-        for (i = 0 ; i < cbNeeded/sizeof(*hmods); i++)
-        {
-            char path[1024];
-            GetModuleFileNameA(hmods[i], path, sizeof(path));
-            trace("i=%d hmod=%p path=[%s]\n", i, hmods[i], path);
-        }
-    }
 }
 
 static void test_GetModuleInformation(void)
@@ -242,7 +225,7 @@ static void test_GetPerformanceInfo(void)
         ok(check_with_margin(info.CommitPeak,           sys_performance_info->PeakCommitment,       32),
            "expected approximately %ld but got %d\n", info.CommitPeak, sys_performance_info->PeakCommitment);
 
-        ok(check_with_margin(info.PhysicalAvailable,    sys_performance_info->AvailablePages,       64),
+        ok(check_with_margin(info.PhysicalAvailable,    sys_performance_info->AvailablePages,       128),
            "expected approximately %ld but got %d\n", info.PhysicalAvailable, sys_performance_info->AvailablePages);
 
         /* TODO: info.SystemCache not checked yet - to which field(s) does this value correspond to? */
@@ -296,7 +279,7 @@ static void test_GetPerformanceInfo(void)
         }
         HeapFree(GetProcessHeap(), 0, sys_process_info);
 
-        ok(check_with_margin(info.HandleCount,  handle_count,  8),
+        ok(check_with_margin(info.HandleCount,  handle_count,  24),
            "expected approximately %d but got %d\n", info.HandleCount, handle_count);
 
         ok(check_with_margin(info.ProcessCount, process_count, 4),
@@ -641,30 +624,36 @@ static void test_GetModuleFileNameEx(void)
     SetLastError(0xdeadbeef);
     memset( szModExPath, 0xcc, sizeof(szModExPath) );
     ret = pGetModuleFileNameExA(hpQV, NULL, szModExPath, 4 );
-    ok( ret == 4, "wrong length %u\n", ret );
+    ok( ret == 4 || ret == strlen(szModExPath), "wrong length %u\n", ret );
     ok( broken(szModExPath[3]) /*w2kpro*/ || strlen(szModExPath) == 3,
         "szModExPath=\"%s\" ret=%d\n", szModExPath, ret );
     ok(GetLastError() == 0xdeadbeef, "got error %d\n", GetLastError());
 
-    SetLastError(0xdeadbeef);
-    ret = pGetModuleFileNameExA(hpQV, NULL, szModExPath, 0 );
-    ok( ret == 0, "wrong length %u\n", ret );
-    ok(GetLastError() == ERROR_INVALID_PARAMETER, "got error %d\n", GetLastError());
+    if (0) /* crashes on Windows 10 */
+    {
+        SetLastError(0xdeadbeef);
+        ret = pGetModuleFileNameExA(hpQV, NULL, szModExPath, 0 );
+        ok( ret == 0, "wrong length %u\n", ret );
+        ok(GetLastError() == ERROR_INVALID_PARAMETER, "got error %d\n", GetLastError());
+    }
 
     SetLastError(0xdeadbeef);
     memset( buffer, 0xcc, sizeof(buffer) );
     ret = pGetModuleFileNameExW(hpQV, NULL, buffer, 4 );
-    ok( ret == 4, "wrong length %u\n", ret );
+    ok( ret == 4 || ret == lstrlenW(buffer), "wrong length %u\n", ret );
     ok( broken(buffer[3]) /*w2kpro*/ || lstrlenW(buffer) == 3,
         "buffer=%s ret=%d\n", wine_dbgstr_w(buffer), ret );
     ok(GetLastError() == 0xdeadbeef, "got error %d\n", GetLastError());
 
-    SetLastError(0xdeadbeef);
-    buffer[0] = 0xcc;
-    ret = pGetModuleFileNameExW(hpQV, NULL, buffer, 0 );
-    ok( ret == 0, "wrong length %u\n", ret );
-    ok(GetLastError() == 0xdeadbeef, "got error %d\n", GetLastError());
-    ok( buffer[0] == 0xcc, "buffer modified %s\n", wine_dbgstr_w(buffer) );
+    if (0) /* crashes on Windows 10 */
+    {
+        SetLastError(0xdeadbeef);
+        buffer[0] = 0xcc;
+        ret = pGetModuleFileNameExW(hpQV, NULL, buffer, 0 );
+        ok( ret == 0, "wrong length %u\n", ret );
+        ok(GetLastError() == 0xdeadbeef, "got error %d\n", GetLastError());
+        ok( buffer[0] == 0xcc, "buffer modified %s\n", wine_dbgstr_w(buffer) );
+    }
 }
 
 static void test_GetModuleBaseName(void)

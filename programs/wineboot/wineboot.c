@@ -85,8 +85,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wineboot);
 
-#define MAX_LINE_LENGTH (2*MAX_PATH+2)
-
 extern BOOL shutdown_close_windows( BOOL force );
 extern BOOL shutdown_all_desktops( BOOL force );
 extern void kill_processes( BOOL kill_desktop );
@@ -321,9 +319,9 @@ static void create_environment_registry_keys( void )
     WCHAR buffer[60];
     const WCHAR *arch;
 
-    NtQuerySystemInformation( SystemCpuInformation, &sci, sizeof(sci), NULL );
-
     if (RegCreateKeyW( HKEY_LOCAL_MACHINE, EnvironW, &env_key )) return;
+
+    NtQuerySystemInformation( SystemCpuInformation, &sci, sizeof(sci), NULL );
 
     sprintfW( buffer, PercentDW, NtCurrentTeb()->Peb->NumberOfProcessors );
     set_reg_value( env_key, NumProcW, buffer );

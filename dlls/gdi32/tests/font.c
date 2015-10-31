@@ -4136,7 +4136,8 @@ static void test_RealizationInfo(void)
         DWORD cache_num;
         DWORD instance_id;
         DWORD unk;
-        DWORD face_index;
+        WORD  face_index;
+        WORD  simulations;
     };
 
     struct realization_info_t
@@ -4177,16 +4178,17 @@ static void test_RealizationInfo(void)
     ok((info[0] & 0xf) == 1, "info[0] = %x for the system font\n", info[0]);
     ok(info[3] == 0xcccccccc, "structure longer than 3 dwords\n");
 
-    if (!is_truetype_font_installed("Arial"))
+    if (!is_truetype_font_installed("Tahoma"))
     {
         skip("skipping GdiRealizationInfo with truetype font\n");
         goto end;
     }
 
     memset(&lf, 0, sizeof(lf));
-    strcpy(lf.lfFaceName, "Arial");
+    strcpy(lf.lfFaceName, "Tahoma");
     lf.lfHeight = 20;
-    lf.lfWeight = FW_NORMAL;
+    lf.lfWeight = FW_BOLD;
+    lf.lfItalic = 1;
     hfont = CreateFontIndirectA(&lf);
     hfont_old = SelectObject(hdc, hfont);
 
@@ -4234,16 +4236,24 @@ static void test_RealizationInfo(void)
         ok(fri->flags == ri->flags, "flags mismatch\n");
         ok(fri->cache_num == ri->cache_num, "cache_num mismatch\n");
         ok(fri->instance_id == ri->instance_id, "instance id mismatch\n");
+        ok(fri->simulations == 0x2, "got simulations flags 0x%04x\n", fri->simulations);
         ok(fri->face_index == 0, "got wrong face index %u\n", fri->face_index);
         ok(info2[6] == 0xcccccccc, "structure longer than 6 dwords\n");
 
         /* Test GetFontFileInfo() */
-    if (pGetFontFileInfo) {
+        /* invalid font id */
+        SetLastError(0xdeadbeef);
+        r = pGetFontFileInfo(0xabababab, 0, &file_info, sizeof(file_info), &needed);
+        ok(r == 0 && GetLastError() == ERROR_INVALID_PARAMETER, "ret %d gle %d\n", r, GetLastError());
+
+        needed = 0;
         r = pGetFontFileInfo(fri->instance_id, 0, &file_info, sizeof(file_info), &needed);
         ok(r != 0 || GetLastError() == ERROR_NOACCESS, "ret %d gle %d\n", r, GetLastError());
 
         if (r)
         {
+            ok(needed > 0 && needed < sizeof(file_info), "got needed size %u\n", needed);
+
             h = CreateFileW(file_info.path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
             ok(h != INVALID_HANDLE_VALUE, "Unable to open file %d\n", GetLastError());
 
@@ -4256,8 +4266,14 @@ static void test_RealizationInfo(void)
             ReadFile(h, file, sizeof(file), &read, NULL);
             CloseHandle(h);
             have_file = TRUE;
+
+            /* shorter buffer */
+            SetLastError(0xdeadbeef);
+            r = pGetFontFileInfo(fri->instance_id, 0, &file_info, needed - 1, &needed);
+            ok(r == 0 && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "ret %d gle %d\n", r, GetLastError());
         }
 
+    if (pGetFontFileData) {
         /* Get bytes 2 - 16 using GetFontFileData */
         r = pGetFontFileData(fri->instance_id, 0, 2, data, sizeof(data));
         ok(r != 0, "ret 0 gle %d\n", GetLastError());
@@ -5958,6 +5974,7 @@ static void test_stock_fonts(void)
     {
         { /* ANSI_FIXED_FONT */
             { ANSI_CHARSET, FW_NORMAL, 12, 12, 96, "Courier", LANG_ARABIC },
+            { ANSI_CHARSET, FW_NORMAL, 12, 12, 96, "Courier", LANG_HEBREW},
             { DEFAULT_CHARSET, FW_NORMAL, 12, 13, 96, "Courier" },
             { DEFAULT_CHARSET, FW_NORMAL, 12, 13, 120, "Courier" },
             { 0 }

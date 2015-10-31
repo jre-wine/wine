@@ -300,24 +300,6 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
     unsigned int i;
     RECT ds_rect;
 
-    /* When we're clearing parts of the drawable, make sure that the target surface is well up to date in the
-     * drawable. After the clear we'll mark the drawable up to date, so we have to make sure that this is true
-     * for the cleared parts, and the untouched parts.
-     *
-     * If we're clearing the whole target there is no need to copy it into the drawable, it will be overwritten
-     * anyway. If we're not clearing the color buffer we don't have to copy either since we're not going to set
-     * the drawable up to date. We have to check all settings that limit the clear area though. Do not bother
-     * checking all this if the dest surface is in the drawable anyway. */
-    if (flags & WINED3DCLEAR_TARGET && !is_full_clear(target, draw_rect, clear_rect))
-    {
-        for (i = 0; i < rt_count; ++i)
-        {
-            struct wined3d_surface *rt = wined3d_rendertarget_view_get_surface(fb->render_targets[i]);
-            if (rt)
-                surface_load_location(rt, rt->container->resource.draw_binding);
-        }
-    }
-
     context = context_acquire(device, target);
     if (!context->valid)
     {
@@ -326,6 +308,26 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
         return;
     }
     gl_info = context->gl_info;
+
+    /* When we're clearing parts of the drawable, make sure that the target surface is well up to date in the
+     * drawable. After the clear we'll mark the drawable up to date, so we have to make sure that this is true
+     * for the cleared parts, and the untouched parts.
+     *
+     * If we're clearing the whole target there is no need to copy it into the drawable, it will be overwritten
+     * anyway. If we're not clearing the color buffer we don't have to copy either since we're not going to set
+     * the drawable up to date. We have to check all settings that limit the clear area though. Do not bother
+     * checking all this if the dest surface is in the drawable anyway. */
+    for (i = 0; i < rt_count; ++i)
+    {
+        struct wined3d_surface *rt = wined3d_rendertarget_view_get_surface(fb->render_targets[i]);
+        if (rt && rt->resource.format->id != WINED3DFMT_NULL)
+        {
+            if (flags & WINED3DCLEAR_TARGET && !is_full_clear(target, draw_rect, clear_rect))
+                surface_load_location(rt, context, rt->container->resource.draw_binding);
+            else
+                wined3d_surface_prepare(rt, context, rt->container->resource.draw_binding);
+        }
+    }
 
     if (target)
     {
@@ -338,6 +340,9 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
         drawable_width = depth_stencil->pow2Width;
         drawable_height = depth_stencil->pow2Height;
     }
+
+    if (depth_stencil && render_offscreen)
+        wined3d_surface_prepare(depth_stencil, context, depth_stencil->container->resource.draw_binding);
 
     if (flags & WINED3DCLEAR_ZBUFFER)
     {
@@ -3290,24 +3295,6 @@ HRESULT CDECL wined3d_device_end_scene(struct wined3d_device *device)
     return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_present(const struct wined3d_device *device, const RECT *src_rect,
-        const RECT *dst_rect, HWND dst_window_override, const RGNDATA *dirty_region, DWORD flags)
-{
-    UINT i;
-
-    TRACE("device %p, src_rect %s, dst_rect %s, dst_window_override %p, dirty_region %p, flags %#x.\n",
-            device, wine_dbgstr_rect(src_rect), wine_dbgstr_rect(dst_rect),
-            dst_window_override, dirty_region, flags);
-
-    for (i = 0; i < device->swapchain_count; ++i)
-    {
-        wined3d_swapchain_present(device->swapchains[i], src_rect,
-                dst_rect, dst_window_override, dirty_region, flags);
-    }
-
-    return WINED3D_OK;
-}
-
 HRESULT CDECL wined3d_device_clear(struct wined3d_device *device, DWORD rect_count,
         const RECT *rects, DWORD flags, const struct wined3d_color *color, float depth, DWORD stencil)
 {
@@ -3648,19 +3635,6 @@ HRESULT CDECL wined3d_device_update_texture(struct wined3d_device *device,
     }
 
     return WINED3D_OK;
-}
-
-HRESULT CDECL wined3d_device_get_front_buffer_data(const struct wined3d_device *device,
-        UINT swapchain_idx, struct wined3d_surface *dst_surface)
-{
-    struct wined3d_swapchain *swapchain;
-
-    TRACE("device %p, swapchain_idx %u, dst_surface %p.\n", device, swapchain_idx, dst_surface);
-
-    if (!(swapchain = wined3d_device_get_swapchain(device, swapchain_idx)))
-        return WINED3DERR_INVALIDCALL;
-
-    return wined3d_swapchain_get_front_buffer_data(swapchain, dst_surface);
 }
 
 HRESULT CDECL wined3d_device_validate_device(const struct wined3d_device *device, DWORD *num_passes)
@@ -4033,7 +4007,7 @@ void CDECL wined3d_device_update_sub_resource(struct wined3d_device *device, str
             && src_rect.bottom == sub_resource->height)
         wined3d_texture_prepare_texture(texture, context, FALSE);
     else
-        surface_load_location(surface, WINED3D_LOCATION_TEXTURE_RGB);
+        surface_load_location(surface, context, WINED3D_LOCATION_TEXTURE_RGB);
     wined3d_texture_bind_and_dirtify(texture, context, FALSE);
 
     wined3d_surface_upload_data(surface, gl_info, resource->format,
@@ -4221,10 +4195,22 @@ static struct wined3d_texture *wined3d_device_create_cursor_texture(struct wined
 }
 
 HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device,
-        UINT x_hotspot, UINT y_hotspot, struct wined3d_surface *cursor_image)
+        UINT x_hotspot, UINT y_hotspot, struct wined3d_texture *texture, unsigned int sub_resource_idx)
 {
-    TRACE("device %p, x_hotspot %u, y_hotspot %u, cursor_image %p.\n",
-            device, x_hotspot, y_hotspot, cursor_image);
+    struct wined3d_display_mode mode;
+    struct wined3d_map_desc map_desc;
+    struct wined3d_resource *sub_resource;
+    struct wined3d_surface *cursor_image;
+    HRESULT hr;
+
+    TRACE("device %p, x_hotspot %u, y_hotspot %u, texture %p, sub_resource_idx %u.\n",
+            device, x_hotspot, y_hotspot, texture, sub_resource_idx);
+
+    if (!(sub_resource = wined3d_texture_get_sub_resource(texture, sub_resource_idx))
+            || sub_resource->type != WINED3D_RTYPE_SURFACE)
+        return WINED3DERR_INVALIDCALL;
+
+    cursor_image = surface_from_resource(sub_resource);
 
     if (device->cursor_texture)
     {
@@ -4232,86 +4218,84 @@ HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device
         device->cursor_texture = NULL;
     }
 
-    if (cursor_image)
+    if (cursor_image->resource.format->id != WINED3DFMT_B8G8R8A8_UNORM)
     {
-        struct wined3d_display_mode mode;
-        struct wined3d_map_desc map_desc;
-        HRESULT hr;
-
-        /* MSDN: Cursor must be A8R8G8B8 */
-        if (cursor_image->resource.format->id != WINED3DFMT_B8G8R8A8_UNORM)
-        {
-            WARN("surface %p has an invalid format.\n", cursor_image);
-            return WINED3DERR_INVALIDCALL;
-        }
-
-        if (FAILED(hr = wined3d_get_adapter_display_mode(device->wined3d, device->adapter->ordinal, &mode, NULL)))
-        {
-            ERR("Failed to get display mode, hr %#x.\n", hr);
-            return WINED3DERR_INVALIDCALL;
-        }
-
-        /* MSDN: Cursor must be smaller than the display mode */
-        if (cursor_image->resource.width > mode.width || cursor_image->resource.height > mode.height)
-        {
-            WARN("Surface %p dimensions are %ux%u, but screen dimensions are %ux%u.\n",
-                    cursor_image, cursor_image->resource.width, cursor_image->resource.height,
-                    mode.width, mode.height);
-            return WINED3DERR_INVALIDCALL;
-        }
-
-        /* TODO: MSDN: Cursor sizes must be a power of 2 */
-
-        /* Do not store the surface's pointer because the application may
-         * release it after setting the cursor image. Windows doesn't
-         * addref the set surface, so we can't do this either without
-         * creating circular refcount dependencies. */
-        if (!(device->cursor_texture = wined3d_device_create_cursor_texture(device, cursor_image)))
-        {
-            ERR("Failed to create cursor texture.\n");
-            return WINED3DERR_INVALIDCALL;
-        }
-
-        device->cursorWidth = cursor_image->resource.width;
-        device->cursorHeight = cursor_image->resource.height;
-
-        if (cursor_image->resource.width == 32 && cursor_image->resource.height == 32)
-        {
-            UINT mask_size = cursor_image->resource.width * cursor_image->resource.height / 8;
-            ICONINFO cursorInfo;
-            DWORD *maskBits;
-            HCURSOR cursor;
-
-            /* 32-bit user32 cursors ignore the alpha channel if it's all
-             * zeroes, and use the mask instead. Fill the mask with all ones
-             * to ensure we still get a fully transparent cursor. */
-            maskBits = HeapAlloc(GetProcessHeap(), 0, mask_size);
-            memset(maskBits, 0xff, mask_size);
-            wined3d_surface_map(cursor_image, &map_desc, NULL,
-                    WINED3D_MAP_NO_DIRTY_UPDATE | WINED3D_MAP_READONLY);
-            TRACE("width: %u height: %u.\n", cursor_image->resource.width, cursor_image->resource.height);
-
-            cursorInfo.fIcon = FALSE;
-            cursorInfo.xHotspot = x_hotspot;
-            cursorInfo.yHotspot = y_hotspot;
-            cursorInfo.hbmMask = CreateBitmap(cursor_image->resource.width, cursor_image->resource.height,
-                    1, 1, maskBits);
-            cursorInfo.hbmColor = CreateBitmap(cursor_image->resource.width, cursor_image->resource.height,
-                    1, 32, map_desc.data);
-            wined3d_surface_unmap(cursor_image);
-            /* Create our cursor and clean up. */
-            cursor = CreateIconIndirect(&cursorInfo);
-            if (cursorInfo.hbmMask) DeleteObject(cursorInfo.hbmMask);
-            if (cursorInfo.hbmColor) DeleteObject(cursorInfo.hbmColor);
-            if (device->hardwareCursor) DestroyCursor(device->hardwareCursor);
-            device->hardwareCursor = cursor;
-            if (device->bCursorVisible) SetCursor( cursor );
-            HeapFree(GetProcessHeap(), 0, maskBits);
-        }
+        WARN("Surface %p has an invalid format %s.\n",
+                cursor_image, debug_d3dformat(cursor_image->resource.format->id));
+        return WINED3DERR_INVALIDCALL;
     }
 
+    if (FAILED(hr = wined3d_get_adapter_display_mode(device->wined3d, device->adapter->ordinal, &mode, NULL)))
+    {
+        ERR("Failed to get display mode, hr %#x.\n", hr);
+        return WINED3DERR_INVALIDCALL;
+    }
+
+    if (cursor_image->resource.width > mode.width || cursor_image->resource.height > mode.height)
+    {
+        WARN("Surface %p dimensions are %ux%u, but screen dimensions are %ux%u.\n",
+                cursor_image, cursor_image->resource.width, cursor_image->resource.height,
+                mode.width, mode.height);
+        return WINED3DERR_INVALIDCALL;
+    }
+
+    /* TODO: MSDN: Cursor sizes must be a power of 2 */
+
+    /* Do not store the surface's pointer because the application may
+     * release it after setting the cursor image. Windows doesn't
+     * addref the set surface, so we can't do this either without
+     * creating circular refcount dependencies. */
+    if (!(device->cursor_texture = wined3d_device_create_cursor_texture(device, cursor_image)))
+    {
+        ERR("Failed to create cursor texture.\n");
+        return WINED3DERR_INVALIDCALL;
+    }
+
+    if (cursor_image->resource.width == 32 && cursor_image->resource.height == 32)
+    {
+        UINT mask_size = cursor_image->resource.width * cursor_image->resource.height / 8;
+        ICONINFO cursor_info;
+        DWORD *mask_bits;
+        HCURSOR cursor;
+
+        /* 32-bit user32 cursors ignore the alpha channel if it's all
+         * zeroes, and use the mask instead. Fill the mask with all ones
+         * to ensure we still get a fully transparent cursor. */
+        if (!(mask_bits = HeapAlloc(GetProcessHeap(), 0, mask_size)))
+            return E_OUTOFMEMORY;
+        memset(mask_bits, 0xff, mask_size);
+
+        wined3d_surface_map(cursor_image, &map_desc, NULL, WINED3D_MAP_NO_DIRTY_UPDATE | WINED3D_MAP_READONLY);
+        cursor_info.fIcon = FALSE;
+        cursor_info.xHotspot = x_hotspot;
+        cursor_info.yHotspot = y_hotspot;
+        cursor_info.hbmMask = CreateBitmap(cursor_image->resource.width,
+                cursor_image->resource.height, 1, 1, mask_bits);
+        cursor_info.hbmColor = CreateBitmap(cursor_image->resource.width,
+                cursor_image->resource.height, 1, 32, map_desc.data);
+        wined3d_surface_unmap(cursor_image);
+
+        /* Create our cursor and clean up. */
+        cursor = CreateIconIndirect(&cursor_info);
+        if (cursor_info.hbmMask)
+            DeleteObject(cursor_info.hbmMask);
+        if (cursor_info.hbmColor)
+            DeleteObject(cursor_info.hbmColor);
+        if (device->hardwareCursor)
+            DestroyCursor(device->hardwareCursor);
+        device->hardwareCursor = cursor;
+        if (device->bCursorVisible)
+            SetCursor(cursor);
+
+        HeapFree(GetProcessHeap(), 0, mask_bits);
+    }
+
+    TRACE("New cursor dimensions are %ux%u.\n", cursor_image->resource.width, cursor_image->resource.height);
+    device->cursorWidth = cursor_image->resource.width;
+    device->cursorHeight = cursor_image->resource.height;
     device->xHotSpot = x_hotspot;
     device->yHotSpot = y_hotspot;
+
     return WINED3D_OK;
 }
 

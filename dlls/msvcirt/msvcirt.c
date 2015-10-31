@@ -117,6 +117,12 @@ typedef struct {
     freeFunction f_free;
 } strstreambuf;
 
+/* class stdiobuf */
+typedef struct {
+    streambuf base;
+    FILE *file;
+} stdiobuf;
+
 /* class ios */
 struct _ostream;
 typedef struct {
@@ -153,6 +159,8 @@ extern const vtable_ptr MSVCP_streambuf_vtable;
 extern const vtable_ptr MSVCP_filebuf_vtable;
 /* ??_7strstreambuf@@6B@ */
 extern const vtable_ptr MSVCP_strstreambuf_vtable;
+/* ??_7stdiobuf@@6B@ */
+extern const vtable_ptr MSVCP_stdiobuf_vtable;
 /* ??_7ios@@6B@ */
 extern const vtable_ptr MSVCP_ios_vtable;
 
@@ -195,6 +203,18 @@ void __asm_dummy_vtables(void) {
             VTABLE_ADD_FUNC(strstreambuf_underflow)
             VTABLE_ADD_FUNC(streambuf_pbackfail)
             VTABLE_ADD_FUNC(strstreambuf_doallocate));
+    __ASM_VTABLE(stdiobuf,
+            VTABLE_ADD_FUNC(stdiobuf_vector_dtor)
+            VTABLE_ADD_FUNC(stdiobuf_sync)
+            VTABLE_ADD_FUNC(streambuf_setbuf)
+            VTABLE_ADD_FUNC(stdiobuf_seekoff)
+            VTABLE_ADD_FUNC(streambuf_seekpos)
+            VTABLE_ADD_FUNC(streambuf_xsputn)
+            VTABLE_ADD_FUNC(streambuf_xsgetn)
+            VTABLE_ADD_FUNC(stdiobuf_overflow)
+            VTABLE_ADD_FUNC(stdiobuf_underflow)
+            VTABLE_ADD_FUNC(stdiobuf_pbackfail)
+            VTABLE_ADD_FUNC(streambuf_doallocate));
     __ASM_VTABLE(ios,
             VTABLE_ADD_FUNC(ios_vector_dtor));
 #ifndef __GNUC__
@@ -204,6 +224,7 @@ void __asm_dummy_vtables(void) {
 DEFINE_RTTI_DATA0(streambuf, 0, ".?AVstreambuf@@")
 DEFINE_RTTI_DATA1(filebuf, 0, &streambuf_rtti_base_descriptor, ".?AVfilebuf@@")
 DEFINE_RTTI_DATA1(strstreambuf, 0, &streambuf_rtti_base_descriptor, ".?AVstrstreambuf@@")
+DEFINE_RTTI_DATA1(stdiobuf, 0, &streambuf_rtti_base_descriptor, ".?AVstdiobuf@@")
 DEFINE_RTTI_DATA0(ios, 0, ".?AVios@@")
 
 /* ??0streambuf@@IAE@PADH@Z */
@@ -480,18 +501,6 @@ int __thiscall streambuf_overflow(streambuf *this, int c)
     return EOF;
 }
 
-/* ?pbackfail@streambuf@@UAEHH@Z */
-/* ?pbackfail@streambuf@@UEAAHH@Z */
-DEFINE_THISCALL_WRAPPER(streambuf_pbackfail, 8)
-#define call_streambuf_pbackfail(this, c) CALL_VTBL_FUNC(this, 36, int, (streambuf*, int), (this, c))
-int __thiscall streambuf_pbackfail(streambuf *this, int c)
-{
-    TRACE("(%p %d)\n", this, c);
-    if (this->gptr <= this->eback)
-        return EOF;
-    return *--this->gptr = c;
-}
-
 /* ?seekoff@streambuf@@UAEJJW4seek_dir@ios@@H@Z */
 /* ?seekoff@streambuf@@UEAAJJW4seek_dir@ios@@H@Z */
 DEFINE_THISCALL_WRAPPER(streambuf_seekoff, 16)
@@ -509,6 +518,25 @@ streampos __thiscall streambuf_seekpos(streambuf *this, streampos pos, int mode)
 {
     TRACE("(%p %d %d)\n", this, pos, mode);
     return call_streambuf_seekoff(this, pos, SEEKDIR_beg, mode);
+}
+
+/* ?pbackfail@streambuf@@UAEHH@Z */
+/* ?pbackfail@streambuf@@UEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(streambuf_pbackfail, 8)
+#define call_streambuf_pbackfail(this, c) CALL_VTBL_FUNC(this, 36, int, (streambuf*, int), (this, c))
+int __thiscall streambuf_pbackfail(streambuf *this, int c)
+{
+    TRACE("(%p %d)\n", this, c);
+    if (this->gptr > this->eback)
+        return *--this->gptr = c;
+    if (call_streambuf_seekoff(this, -1, SEEKDIR_cur, OPENMODE_in) == EOF)
+        return EOF;
+    if (!this->unbuffered && this->egptr) {
+        /* 'c' should be the next character read */
+        memmove(this->gptr + 1, this->gptr, this->egptr - this->gptr - 1);
+        *this->gptr = c;
+    }
+    return c;
 }
 
 /* ?setb@streambuf@@IAEXPAD0H@Z */
@@ -797,8 +825,8 @@ void __thiscall streambuf_dbp(streambuf *this)
     } else {
         printf("_fAlloc=%d\n", this->allocated);
         printf(" base()=%p, ebuf()=%p,  blen()=%d\n", this->base, this->ebuf, streambuf_blen(this));
-        printf("pbase()=%p, pptr()=%p, epptr()=%d\n", this->pbase, this->pptr, this->epptr);
-        printf("eback()=%p, gptr()=%p, egptr()=%d\n", this->eback, this->gptr, this->egptr);
+        printf("pbase()=%p, pptr()=%p, epptr()=%p\n", this->pbase, this->pptr, this->epptr);
+        printf("eback()=%p, gptr()=%p, egptr()=%p\n", this->eback, this->gptr, this->egptr);
     }
 }
 
@@ -1432,6 +1460,233 @@ int __thiscall strstreambuf_underflow(strstreambuf *this)
     if (this->base.egptr < this->base.pptr)
         this->base.egptr = this->base.pptr;
     return (this->base.gptr < this->base.egptr) ? *this->base.gptr : EOF;
+}
+
+/* ??0stdiobuf@@QAE@ABV0@@Z */
+/* ??0stdiobuf@@QEAA@AEBV0@@Z */
+DEFINE_THISCALL_WRAPPER(stdiobuf_copy_ctor, 8)
+stdiobuf* __thiscall stdiobuf_copy_ctor(stdiobuf *this, const stdiobuf *copy)
+{
+    TRACE("(%p %p)\n", this, copy);
+    *this = *copy;
+    this->base.vtable = &MSVCP_stdiobuf_vtable;
+    return this;
+}
+
+/* ??0stdiobuf@@QAE@PAU_iobuf@@@Z */
+/* ??0stdiobuf@@QEAA@PEAU_iobuf@@@Z */
+DEFINE_THISCALL_WRAPPER(stdiobuf_file_ctor, 8)
+stdiobuf* __thiscall stdiobuf_file_ctor(stdiobuf *this, FILE *file)
+{
+    TRACE("(%p %p)\n", this, file);
+    streambuf_reserve_ctor(&this->base, NULL, 0);
+    this->base.vtable = &MSVCP_stdiobuf_vtable;
+    this->file = file;
+    return this;
+}
+
+/* ??1stdiobuf@@UAE@XZ */
+/* ??1stdiobuf@@UEAA@XZ */
+DEFINE_THISCALL_WRAPPER(stdiobuf_dtor, 4)
+void __thiscall stdiobuf_dtor(stdiobuf *this)
+{
+    TRACE("(%p)\n", this);
+    call_streambuf_sync(&this->base);
+    streambuf_dtor(&this->base);
+}
+
+/* ??4stdiobuf@@QAEAAV0@ABV0@@Z */
+/* ??4stdiobuf@@QEAAAEAV0@AEBV0@@Z */
+DEFINE_THISCALL_WRAPPER(stdiobuf_assign, 8)
+stdiobuf* __thiscall stdiobuf_assign(stdiobuf *this, const stdiobuf *rhs)
+{
+    stdiobuf_dtor(this);
+    return stdiobuf_copy_ctor(this, rhs);
+}
+
+/* ??_Estdiobuf@@UAEPAXI@Z */
+DEFINE_THISCALL_WRAPPER(stdiobuf_vector_dtor, 8)
+stdiobuf* __thiscall stdiobuf_vector_dtor(stdiobuf *this, unsigned int flags)
+{
+    TRACE("(%p %x)\n", this, flags);
+    if (flags & 2) {
+        /* we have an array, with the number of elements stored before the first object */
+        INT_PTR i, *ptr = (INT_PTR *)this-1;
+
+        for (i = *ptr-1; i >= 0; i--)
+            stdiobuf_dtor(this+i);
+        MSVCRT_operator_delete(ptr);
+    } else {
+        stdiobuf_dtor(this);
+        if (flags & 1)
+            MSVCRT_operator_delete(this);
+    }
+    return this;
+}
+
+/* ??_Gstdiobuf@@UAEPAXI@Z */
+DEFINE_THISCALL_WRAPPER(stdiobuf_scalar_dtor, 8)
+stdiobuf* __thiscall stdiobuf_scalar_dtor(stdiobuf *this, unsigned int flags)
+{
+    TRACE("(%p %x)\n", this, flags);
+    stdiobuf_dtor(this);
+    if (flags & 1) MSVCRT_operator_delete(this);
+    return this;
+}
+
+/* ?overflow@stdiobuf@@UAEHH@Z */
+/* ?overflow@stdiobuf@@UEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(stdiobuf_overflow, 8)
+int __thiscall stdiobuf_overflow(stdiobuf *this, int c)
+{
+    TRACE("(%p %d)\n", this, c);
+    if (this->base.unbuffered)
+        return (c == EOF) ? 1 : fputc(c, this->file);
+    if (streambuf_allocate(&this->base) == EOF)
+        return EOF;
+
+    if (!this->base.epptr) {
+        /* set the put area to the second half of the buffer */
+        streambuf_setp(&this->base,
+            this->base.base + (this->base.ebuf - this->base.base) / 2, this->base.ebuf);
+    } else if (this->base.pptr > this->base.pbase) {
+        /* flush the put area */
+        int count = this->base.pptr - this->base.pbase;
+        if (fwrite(this->base.pbase, sizeof(char), count, this->file) != count)
+            return EOF;
+        this->base.pptr = this->base.pbase;
+    }
+    if (c != EOF) {
+        if (this->base.pbase >= this->base.epptr)
+            return fputc(c, this->file);
+        *this->base.pptr++ = c;
+    }
+    return 1;
+}
+
+/* ?pbackfail@stdiobuf@@UAEHH@Z */
+/* ?pbackfail@stdiobuf@@UEAAHH@Z */
+DEFINE_THISCALL_WRAPPER(stdiobuf_pbackfail, 8)
+int __thiscall stdiobuf_pbackfail(stdiobuf *this, int c)
+{
+    TRACE("(%p %d)\n", this, c);
+    return streambuf_pbackfail(&this->base, c);
+}
+
+/* ?seekoff@stdiobuf@@UAEJJW4seek_dir@ios@@H@Z */
+/* ?seekoff@stdiobuf@@UEAAJJW4seek_dir@ios@@H@Z */
+DEFINE_THISCALL_WRAPPER(stdiobuf_seekoff, 16)
+streampos __thiscall stdiobuf_seekoff(stdiobuf *this, streamoff offset, ios_seek_dir dir, int mode)
+{
+    TRACE("(%p %d %d %d)\n", this, offset, dir, mode);
+    call_streambuf_overflow(&this->base, EOF);
+    if (fseek(this->file, offset, dir))
+        return EOF;
+    return ftell(this->file);
+}
+
+/* ?setrwbuf@stdiobuf@@QAEHHH@Z */
+/* ?setrwbuf@stdiobuf@@QEAAHHH@Z */
+DEFINE_THISCALL_WRAPPER(stdiobuf_setrwbuf, 12)
+int __thiscall stdiobuf_setrwbuf(stdiobuf *this, int read_size, int write_size)
+{
+    char *reserve;
+    int buffer_size = read_size + write_size;
+
+    TRACE("(%p %d %d)\n", this, read_size, write_size);
+    if (read_size < 0 || write_size < 0)
+        return 0;
+    if (!buffer_size) {
+        this->base.unbuffered = 1;
+        return 0;
+    }
+    /* get a new buffer */
+    reserve = MSVCRT_operator_new(buffer_size);
+    if (!reserve)
+        return 0;
+    streambuf_setb(&this->base, reserve, reserve + buffer_size, 1);
+    this->base.unbuffered = 0;
+    /* set the get/put areas */
+    if (read_size > 0)
+        streambuf_setg(&this->base, reserve, reserve + read_size, reserve + read_size);
+    else
+        streambuf_setg(&this->base, NULL, NULL, NULL);
+    if (write_size > 0)
+        streambuf_setp(&this->base, reserve + read_size, reserve + buffer_size);
+    else
+        streambuf_setp(&this->base, NULL, NULL);
+    return 1;
+}
+
+/* ?stdiofile@stdiobuf@@QAEPAU_iobuf@@XZ */
+/* ?stdiofile@stdiobuf@@QEAAPEAU_iobuf@@XZ */
+DEFINE_THISCALL_WRAPPER(stdiobuf_stdiofile, 4)
+FILE* __thiscall stdiobuf_stdiofile(stdiobuf *this)
+{
+    TRACE("(%p)\n", this);
+    return this->file;
+}
+
+/* ?sync@stdiobuf@@UAEHXZ */
+/* ?sync@stdiobuf@@UEAAHXZ */
+DEFINE_THISCALL_WRAPPER(stdiobuf_sync, 4)
+int __thiscall stdiobuf_sync(stdiobuf *this)
+{
+    TRACE("(%p)\n", this);
+    if (this->base.unbuffered)
+        return 0;
+    /* flush the put area */
+    if (call_streambuf_overflow(&this->base, EOF) == EOF)
+        return EOF;
+    /* flush the get area */
+    if (this->base.gptr < this->base.egptr) {
+        char *ptr;
+        int fd, mode, offset = this->base.egptr - this->base.gptr;
+        if ((fd = fileno(this->file)) < 0)
+            return EOF;
+        mode = _setmode(fd, _O_TEXT);
+        _setmode(fd, mode);
+        if (mode & _O_TEXT) {
+            /* in text mode, '\n' in the buffer means '\r\n' in the file */
+            for (ptr = this->base.gptr; ptr < this->base.egptr; ptr++)
+                if (*ptr == '\n')
+                    offset++;
+        }
+        if (fseek(this->file, -offset, SEEK_CUR))
+            return EOF;
+        this->base.gptr = this->base.egptr;
+    }
+    return 0;
+}
+
+/* ?underflow@stdiobuf@@UAEHXZ */
+/* ?underflow@stdiobuf@@UEAAHXZ */
+DEFINE_THISCALL_WRAPPER(stdiobuf_underflow, 4)
+int __thiscall stdiobuf_underflow(stdiobuf *this)
+{
+    TRACE("(%p)\n", this);
+    if (!this->file)
+        return EOF;
+    if (this->base.unbuffered)
+        return fgetc(this->file);
+    if (streambuf_allocate(&this->base) == EOF)
+        return EOF;
+
+    if (!this->base.egptr) {
+        /* set the get area to the first half of the buffer */
+        char *middle = this->base.base + (this->base.ebuf - this->base.base) / 2;
+        streambuf_setg(&this->base, this->base.base, middle, middle);
+    }
+    if (this->base.gptr >= this->base.egptr) {
+        /* read characters from the file */
+        int buffer_size = this->base.egptr - this->base.eback, read_bytes;
+        if (!this->base.eback ||
+            (read_bytes = fread(this->base.eback, sizeof(char), buffer_size, this->file)) <= 0)
+            return EOF;
+        memmove(this->base.egptr - read_bytes, this->base.eback, read_bytes);
+        this->base.gptr = this->base.egptr - read_bytes;
+    }
+    return *this->base.gptr++;
 }
 
 /* ??0ios@@IAE@ABV0@@Z */
@@ -2098,6 +2353,7 @@ static void init_io(void *base)
     init_streambuf_rtti(base);
     init_filebuf_rtti(base);
     init_strstreambuf_rtti(base);
+    init_stdiobuf_rtti(base);
     init_ios_rtti(base);
 #endif
 }

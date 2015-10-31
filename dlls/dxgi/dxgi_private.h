@@ -30,12 +30,18 @@
 #include "objbase.h"
 #include "winnls.h"
 
-#include "dxgi.h"
+#include "d3d10_1.h"
 #ifdef DXGI_INIT_GUID
 #include "initguid.h"
 #endif
 #include "wine/wined3d.h"
 #include "wine/winedxgi.h"
+
+enum dxgi_frame_latency
+{
+    DXGI_FRAME_LATENCY_DEFAULT =  3,
+    DXGI_FRAME_LATENCY_MAX     = 16,
+};
 
 /* Layered device */
 enum dxgi_device_layer_id
@@ -167,5 +173,7 @@ struct dxgi_surface
 
 HRESULT dxgi_surface_init(struct dxgi_surface *surface, IDXGIDevice *device,
         IUnknown *outer, struct wined3d_resource *wined3d_resource) DECLSPEC_HIDDEN;
+
+HRESULT dxgi_check_d3d10_support(struct dxgi_factory *factory, struct dxgi_adapter *adapter) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_DXGI_PRIVATE_H */

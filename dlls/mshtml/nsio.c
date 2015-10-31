@@ -363,7 +363,7 @@ static http_header_t *find_http_header(struct list *headers, const WCHAR *name, 
     http_header_t *iter;
 
     LIST_FOR_EACH_ENTRY(iter, headers, http_header_t, entry) {
-        if(!strcmpiW(iter->header, name))
+        if(!strncmpiW(iter->header, name, len) && !iter->header[len])
             return iter;
     }
 
@@ -3545,7 +3545,7 @@ static nsresult NSAPI nsIOService_GetProtocolFlags(nsIIOService *iface, const ch
 
 static BOOL is_gecko_special_uri(const char *spec)
 {
-    static const char *special_schemes[] = {"chrome:", "jar:", "moz-safe-about", "resource:", "javascript:", "wyciwyg:"};
+    static const char *special_schemes[] = {"chrome:", "data:", "jar:", "moz-safe-about", "resource:", "javascript:", "wyciwyg:"};
     unsigned int i;
 
     for(i=0; i < sizeof(special_schemes)/sizeof(*special_schemes); i++) {

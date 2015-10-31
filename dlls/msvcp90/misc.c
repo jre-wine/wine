@@ -398,7 +398,7 @@ int __cdecl xtime_get(xtime* t, int unknown)
 }
 
 /* _Xtime_diff_to_millis2 */
-MSVCRT_long __cdecl _Xtime_diff_to_millis2(xtime *t1, xtime *t2)
+MSVCRT_long __cdecl _Xtime_diff_to_millis2(const xtime *t1, const xtime *t2)
 {
     __time64_t diff_sec;
     MSVCRT_long diff_nsec, ret;
@@ -413,7 +413,7 @@ MSVCRT_long __cdecl _Xtime_diff_to_millis2(xtime *t1, xtime *t2)
 }
 
 /* _Xtime_diff_to_millis */
-MSVCRT_long __cdecl _Xtime_diff_to_millis(xtime *t)
+MSVCRT_long __cdecl _Xtime_diff_to_millis(const xtime *t)
 {
     xtime now;
 
@@ -683,3 +683,23 @@ void init_misc(void *base)
     iostream_category_ctor(&iostream_category);
 #endif
 }
+
+#if _MSVCP_VER >= 110
+typedef struct
+{
+    HANDLE hnd;
+    DWORD  id;
+} _Thrd_t;
+
+int __cdecl _Thrd_equal(_Thrd_t a, _Thrd_t b)
+{
+    TRACE("(%p %u %p %u)\n", a.hnd, a.id, b.hnd, b.id);
+    return a.id == b.id;
+}
+
+int __cdecl _Thrd_lt(_Thrd_t a, _Thrd_t b)
+{
+    TRACE("(%p %u %p %u)\n", a.hnd, a.id, b.hnd, b.id);
+    return a.id < b.id;
+}
+#endif

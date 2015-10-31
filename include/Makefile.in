@@ -345,6 +345,7 @@ SRCDIR_INCLUDES = \
 	gdiplus.h \
 	gdipluscolor.h \
 	gdipluscolormatrix.h \
+	gdipluseffects.h \
 	gdiplusenums.h \
 	gdiplusflat.h \
 	gdiplusgpstubs.h \
@@ -513,6 +514,7 @@ SRCDIR_INCLUDES = \
 	pktdef.h \
 	poppack.h \
 	powrprof.h \
+	prntvpt.h \
 	profinfo.h \
 	propkey.h \
 	propkeydef.h \
@@ -611,6 +613,7 @@ SRCDIR_INCLUDES = \
 	werapi.h \
 	wfext.h \
 	wia.h \
+	wiadef.h \
 	winbase.h \
 	wincon.h \
 	wincred.h \
@@ -667,6 +670,7 @@ SRCDIR_INCLUDES = \
 	wsnwlink.h \
 	wtsapi32.h \
 	x3daudio.h \
+	xapofx.h \
 	xcmc.h \
 	xinput.h \
 	xmldom.h \

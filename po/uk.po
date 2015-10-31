@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2015-08-19 13:56+0200\n"
+"PO-Revision-Date: 2015-10-17 15:42+0200\n"
 "Last-Translator: Andrey Gusev <andrey.goosev@gmail.com>\n"
 "Language-Team: Ukrainian\n"
 "Language: uk\n"
@@ -61,7 +61,7 @@ msgstr "Дані підтримки"
 #: localui.rc:44 localui.rc:57 mpr.rc:49 msacm32.rc:53 mshtml.rc:47
 #: mshtml.rc:57 msvfw32.rc:36 oledlg.rc:62 oledlg.rc:94 serialui.rc:41
 #: setupapi.rc:59 shell32.rc:276 shell32.rc:300 shell32.rc:322 shell32.rc:340
-#: shlwapi.rc:44 user32.rc:80 user32.rc:98 wininet.rc:51 wininet.rc:71
+#: shlwapi.rc:44 user32.rc:83 user32.rc:98 wininet.rc:51 wininet.rc:71
 #: winspool.rc:42 net.rc:47 notepad.rc:117 oleview.rc:162 oleview.rc:175
 #: progman.rc:106 progman.rc:124 progman.rc:142 progman.rc:158 progman.rc:180
 #: progman.rc:199 progman.rc:216 regedit.rc:247 regedit.rc:258 regedit.rc:271
@@ -143,7 +143,7 @@ msgstr "&Встановити"
 #: localui.rc:58 mpr.rc:50 msacm32.rc:54 mshtml.rc:48 mshtml.rc:58
 #: msvfw32.rc:37 oledlg.rc:63 oledlg.rc:95 serialui.rc:42 setupapi.rc:42
 #: setupapi.rc:60 shell32.rc:277 shell32.rc:301 shell32.rc:312 shell32.rc:341
-#: shlwapi.rc:45 user32.rc:81 user32.rc:99 wininet.rc:52 wininet.rc:72
+#: shlwapi.rc:45 user32.rc:84 user32.rc:99 wininet.rc:52 wininet.rc:72
 #: winspool.rc:43 notepad.rc:118 oleview.rc:163 oleview.rc:176 progman.rc:107
 #: progman.rc:125 progman.rc:143 progman.rc:159 progman.rc:181 progman.rc:200
 #: progman.rc:217 regedit.rc:248 regedit.rc:259 regedit.rc:272 regedit.rc:288
@@ -309,7 +309,7 @@ msgstr "Властивості для %s"
 msgid "&Apply"
 msgstr "&Застосувати"
 
-#: comctl32.rc:58 comctl32.rc:72 comdlg32.rc:306 user32.rc:89
+#: comctl32.rc:58 comctl32.rc:72 comdlg32.rc:306 user32.rc:88
 msgid "Help"
 msgstr "&Довідка"
 
@@ -4846,7 +4846,7 @@ msgstr "Забагато посилань.\n"
 
 #: winerror.mc:1476
 msgid "Newer windows version needed.\n"
-msgstr "Необхідна новіша версія windows.\n"
+msgstr "Необхідна новіша версія Windows.\n"
 
 #: winerror.mc:1481
 msgid "Wrong operating system.\n"
@@ -7535,16 +7535,12 @@ msgid "&Convert..."
 msgstr "&Конвертувати..."
 
 #: oledlg.rc:36
-#, fuzzy
-#| msgid "&Object"
 msgid "%1 %2 &Object"
-msgstr "&Об'єкт"
+msgstr "&Об'єкт %1 %2"
 
 #: oledlg.rc:34
-#, fuzzy
-#| msgid "&Object"
 msgid "%1 &Object"
-msgstr "&Об'єкт"
+msgstr "&Об'єкт %1"
 
 #: oledlg.rc:33 oleview.rc:40
 msgid "&Object"
@@ -8092,7 +8088,7 @@ msgstr "&Зробити нову теку"
 msgid "Message"
 msgstr "Повідомлення"
 
-#: shell32.rc:309 shlwapi.rc:46 user32.rc:85
+#: shell32.rc:309 shlwapi.rc:46 user32.rc:79
 msgid "&Yes"
 msgstr "&Так"
 
@@ -8100,7 +8096,7 @@ msgstr "&Так"
 msgid "Yes to &all"
 msgstr "Так для &всіх"
 
-#: shell32.rc:311 shlwapi.rc:47 user32.rc:86
+#: shell32.rc:311 shlwapi.rc:47 user32.rc:80
 msgid "&No"
 msgstr "&Ні"
 
@@ -8624,23 +8620,23 @@ msgstr "&Закрити\tCtrl+F4"
 msgid "Nex&t\tCtrl+F6"
 msgstr "Нас&тупний\tCtrl+F6"
 
-#: user32.rc:82
+#: user32.rc:81
 msgid "&Abort"
 msgstr "П&ерервати"
 
-#: user32.rc:83
+#: user32.rc:82
 msgid "&Retry"
 msgstr "По&втор"
 
-#: user32.rc:84
+#: user32.rc:85
 msgid "&Ignore"
 msgstr "&Пропустити"
 
-#: user32.rc:87
+#: user32.rc:86
 msgid "&Try Again"
 msgstr "&Ще спроба"
 
-#: user32.rc:88
+#: user32.rc:87
 msgid "&Continue"
 msgstr "П&родовжити"
 
@@ -8983,10 +8979,6 @@ msgstr ""
 "вільного місця, або що комп'ютер ще підключений до мережі."
 
 #: winmm.rc:86
-#, fuzzy
-#| msgid ""
-#| "Cannot find the specified device. Make sure it is installed or that the "
-#| "device name is spelled correctly."
 msgid ""
 "Cannot find the specified device. Make sure it is installed and that the "
 "device name is spelled correctly."
@@ -11991,7 +11983,7 @@ msgid ""
 msgstr ""
 "Утиліта реєстрації DLL у Wine\n"
 "\n"
-"Слугує сервісом для реєстрації DLL\n"
+"Слугує сервісом для реєстрації DLL.\n"
 "\n"
 
 #: regsvr32.rc:40
@@ -12032,7 +12024,7 @@ msgstr "regsvr32: Не вдалося завантажити DLL '%1'\n"
 
 #: regsvr32.rc:43
 msgid "regsvr32: '%1!S!' not implemented in DLL '%2'\n"
-msgstr "regsvr32: %1 не реалізовано у DLL '%2'\n"
+msgstr "regsvr32: '%1!S!' не реалізовано у DLL '%2'\n"
 
 #: regsvr32.rc:44
 msgid "regsvr32: Failed to register DLL '%1'\n"
@@ -14357,7 +14349,7 @@ msgstr "&Формат символів"
 
 #: wordpad.rc:64
 msgid "&Def. char format"
-msgstr "Формат символів &за замовч."
+msgstr "Формат символів &за замовчуванням"
 
 #: wordpad.rc:65
 msgid "Paragrap&h format"

@@ -587,7 +587,7 @@ static const char* debugscrollinfo(const SCROLLINFO *pScrollInfo)
     int len, size = DEBUG_BUFFER_SIZE;
 
     if (pScrollInfo == NULL) return "(null)";
-    len = snprintf(buf, size, "{cbSize=%d, ", pScrollInfo->cbSize);
+    len = snprintf(buf, size, "{cbSize=%u, ", pScrollInfo->cbSize);
     if (len == -1) goto end; buf += len; size -= len;
     if (pScrollInfo->fMask & SIF_RANGE)
 	len = snprintf(buf, size, "nMin=%d, nMax=%d, ", pScrollInfo->nMin, pScrollInfo->nMax);
@@ -4122,6 +4122,7 @@ static LRESULT LISTVIEW_MouseMove(LISTVIEW_INFO *infoPtr, WORD fwKeys, INT x, IN
     /* see if we are supposed to be tracking mouse hovering */
     if (LISTVIEW_IsHotTracking(infoPtr)) {
         TRACKMOUSEEVENT trackinfo;
+        DWORD flags;
 
         trackinfo.cbSize = sizeof(TRACKMOUSEEVENT);
         trackinfo.dwFlags = TME_QUERY;
@@ -4129,8 +4130,12 @@ static LRESULT LISTVIEW_MouseMove(LISTVIEW_INFO *infoPtr, WORD fwKeys, INT x, IN
         /* see if we are already tracking this hwnd */
         _TrackMouseEvent(&trackinfo);
 
-        if(!(trackinfo.dwFlags & TME_HOVER) || trackinfo.hwndTrack != infoPtr->hwndSelf) {
-            trackinfo.dwFlags     = TME_HOVER;
+        flags = TME_LEAVE;
+        if(infoPtr->dwLvExStyle & LVS_EX_TRACKSELECT)
+            flags |= TME_HOVER;
+
+        if((trackinfo.dwFlags & flags) != flags || trackinfo.hwndTrack != infoPtr->hwndSelf) {
+            trackinfo.dwFlags     = flags;
             trackinfo.dwHoverTime = infoPtr->dwHoverTime;
             trackinfo.hwndTrack   = infoPtr->hwndSelf;
 
@@ -7846,10 +7851,18 @@ static INT LISTVIEW_InsertItemT(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem,
     item.iItem = nItem;
     if (infoPtr->dwLvExStyle & LVS_EX_CHECKBOXES)
     {
-        item.mask |= LVIF_STATE;
-        item.stateMask |= LVIS_STATEIMAGEMASK;
-        item.state &= ~LVIS_STATEIMAGEMASK;
-        item.state |= INDEXTOSTATEIMAGEMASK(1);
+        if (item.mask & LVIF_STATE)
+        {
+            item.stateMask |= LVIS_STATEIMAGEMASK;
+            item.state &= ~LVIS_STATEIMAGEMASK;
+            item.state |= INDEXTOSTATEIMAGEMASK(1);
+        }
+        else
+        {
+            item.mask |= LVIF_STATE;
+            item.stateMask = LVIS_STATEIMAGEMASK;
+            item.state = INDEXTOSTATEIMAGEMASK(1);
+        }
     }
 
     if (!set_main_item(infoPtr, &item, TRUE, isW, &has_changed)) goto undo;

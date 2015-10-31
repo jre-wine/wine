@@ -1291,6 +1291,7 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD2600,         "ATI Mobility Radeon HD 2600",      DRIVER_AMD_R600,         256 },
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD2900,         "ATI Radeon HD 2900 XT",            DRIVER_AMD_R600,         512 },
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD3200,         "ATI Radeon HD 3200 Graphics",      DRIVER_AMD_R600,         128 },
+    {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD3850,         "ATI Radeon HD 3850 AGP",           DRIVER_AMD_R600,         512 },
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD4200M,        "ATI Mobility Radeon HD 4200",      DRIVER_AMD_R600,         256 },
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD4350,         "ATI Radeon HD 4350",               DRIVER_AMD_R600,         256 },
     {HW_VENDOR_AMD,        CARD_AMD_RADEON_HD4600,         "ATI Radeon HD 4600 Series",        DRIVER_AMD_R600,         512 },
@@ -2019,7 +2020,7 @@ cards_amd_mesa[] =
     /* R600 */
     {"R680",                        CARD_AMD_RADEON_HD2900},
     {"R600",                        CARD_AMD_RADEON_HD2900},
-    {"RV670",                       CARD_AMD_RADEON_HD2900},
+    {"RV670",                       CARD_AMD_RADEON_HD3850},
     {"RV635",                       CARD_AMD_RADEON_HD2600},
     {"RV630",                       CARD_AMD_RADEON_HD2600},
     {"RV620",                       CARD_AMD_RADEON_HD2350},
@@ -2923,6 +2924,9 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     USE_GL_FUNC(glCompressedTexSubImage3D)  /* OpenGL 1.3 */
     USE_GL_FUNC(glCreateProgram)            /* OpenGL 2.0 */
     USE_GL_FUNC(glCreateShader)             /* OpenGL 2.0 */
+    USE_GL_FUNC(glDebugMessageCallback)     /* OpenGL 4.3 */
+    USE_GL_FUNC(glDebugMessageControl)      /* OpenGL 4.3 */
+    USE_GL_FUNC(glDebugMessageInsert)       /* OpenGL 4.3 */
     USE_GL_FUNC(glDeleteBuffers)            /* OpenGL 1.5 */
     USE_GL_FUNC(glDeleteProgram)            /* OpenGL 2.0 */
     USE_GL_FUNC(glDeleteQueries)            /* OpenGL 1.5 */
@@ -2943,6 +2947,7 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     USE_GL_FUNC(glGetAttribLocation)        /* OpenGL 2.0 */
     USE_GL_FUNC(glGetBufferSubData)         /* OpenGL 1.5 */
     USE_GL_FUNC(glGetCompressedTexImage)    /* OpenGL 1.3 */
+    USE_GL_FUNC(glGetDebugMessageLog)       /* OpenGL 4.3 */
     USE_GL_FUNC(glGetProgramInfoLog)        /* OpenGL 2.0 */
     USE_GL_FUNC(glGetProgramiv)             /* OpenGL 2.0 */
     USE_GL_FUNC(glGetQueryiv)               /* OpenGL 1.5 */
@@ -3040,6 +3045,9 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     MAP_GL_FUNCTION(glCompressedTexSubImage3D, glCompressedTexSubImage3DARB);
     MAP_GL_FUNCTION(glCreateProgram, glCreateProgramObjectARB);
     MAP_GL_FUNCTION(glCreateShader, glCreateShaderObjectARB);
+    MAP_GL_FUNCTION(glDebugMessageCallback, glDebugMessageCallbackARB);
+    MAP_GL_FUNCTION(glDebugMessageControl, glDebugMessageControlARB);
+    MAP_GL_FUNCTION(glDebugMessageInsert, glDebugMessageInsertARB);
     MAP_GL_FUNCTION(glDeleteBuffers, glDeleteBuffersARB);
     MAP_GL_FUNCTION(glDeleteProgram, glDeleteObjectARB);
     MAP_GL_FUNCTION(glDeleteQueries, glDeleteQueriesARB);
@@ -3057,6 +3065,7 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     MAP_GL_FUNCTION(glGetAttribLocation, glGetAttribLocationARB);
     MAP_GL_FUNCTION(glGetBufferSubData, glGetBufferSubDataARB);
     MAP_GL_FUNCTION(glGetCompressedTexImage, glGetCompressedTexImageARB);
+    MAP_GL_FUNCTION(glGetDebugMessageLog, glGetDebugMessageLogARB);
     MAP_GL_FUNCTION(glGetProgramInfoLog, glGetInfoLogARB);
     MAP_GL_FUNCTION(glGetProgramiv, glGetObjectParameterivARB);
     MAP_GL_FUNCTION(glGetQueryiv, glGetQueryivARB);
@@ -3707,6 +3716,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     adapter->d3d_info.limits.ps_version = shader_caps.ps_version;
     adapter->d3d_info.limits.vs_uniform_count = shader_caps.vs_uniform_count;
     adapter->d3d_info.limits.ps_uniform_count = shader_caps.ps_uniform_count;
+    adapter->d3d_info.limits.varying_count = shader_caps.varying_count;
 
     adapter->vertex_pipe->vp_get_caps(gl_info, &vertex_caps);
     adapter->d3d_info.xyzrhw = vertex_caps.xyzrhw;

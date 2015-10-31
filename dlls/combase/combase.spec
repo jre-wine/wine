@@ -288,8 +288,8 @@
 @ stdcall WdtpInterfacePointer_UserUnmarshal(ptr ptr ptr ptr) ole32.WdtpInterfacePointer_UserUnmarshal
 @ stub WdtpInterfacePointer_UserUnmarshal64
 @ stub WindowsCompareStringOrdinal
-@ stub WindowsConcatString
-@ stdcall WindowsCreateString(ptr long ptr)
+@ stdcall WindowsConcatString(ptr ptr ptr)
+@ stdcall WindowsCreateString(wstr long ptr)
 @ stdcall WindowsCreateStringReference(wstr long ptr ptr)
 @ stdcall WindowsDeleteString(ptr)
 @ stdcall WindowsDeleteStringBuffer(ptr)
@@ -302,7 +302,7 @@
 @ stdcall WindowsPromoteStringBuffer(ptr ptr)
 @ stub WindowsReplaceString
 @ stdcall WindowsStringHasEmbeddedNull(ptr ptr)
-@ stub WindowsSubstring
-@ stub WindowsSubstringWithSpecifiedLength
+@ stdcall WindowsSubstring(ptr long ptr)
+@ stdcall WindowsSubstringWithSpecifiedLength(ptr long long ptr)
 @ stub WindowsTrimStringEnd
 @ stub WindowsTrimStringStart

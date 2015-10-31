@@ -460,27 +460,6 @@ static void volume_unload(struct wined3d_resource *resource)
     resource_unload(resource);
 }
 
-static ULONG CDECL wined3d_volume_incref(struct wined3d_volume *volume)
-{
-    TRACE("Forwarding to container %p.\n", volume->container);
-
-    return wined3d_texture_incref(volume->container);
-}
-
-static ULONG CDECL wined3d_volume_decref(struct wined3d_volume *volume)
-{
-    TRACE("Forwarding to container %p.\n", volume->container);
-
-    return wined3d_texture_decref(volume->container);
-}
-
-struct wined3d_resource * CDECL wined3d_volume_get_resource(struct wined3d_volume *volume)
-{
-    TRACE("volume %p.\n", volume);
-
-    return &volume->resource;
-}
-
 static BOOL volume_check_block_align(const struct wined3d_volume *volume,
         const struct wined3d_box *box)
 {
@@ -531,7 +510,7 @@ static BOOL wined3d_volume_check_box_dimensions(const struct wined3d_volume *vol
     return TRUE;
 }
 
-HRESULT CDECL wined3d_volume_map(struct wined3d_volume *volume,
+HRESULT wined3d_volume_map(struct wined3d_volume *volume,
         struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags)
 {
     struct wined3d_device *device = volume->resource.device;
@@ -676,12 +655,7 @@ HRESULT CDECL wined3d_volume_map(struct wined3d_volume *volume,
     return WINED3D_OK;
 }
 
-struct wined3d_volume * CDECL wined3d_volume_from_resource(struct wined3d_resource *resource)
-{
-    return volume_from_resource(resource);
-}
-
-HRESULT CDECL wined3d_volume_unmap(struct wined3d_volume *volume)
+HRESULT wined3d_volume_unmap(struct wined3d_volume *volume)
 {
     TRACE("volume %p.\n", volume);
 
@@ -712,12 +686,18 @@ HRESULT CDECL wined3d_volume_unmap(struct wined3d_volume *volume)
 
 static ULONG volume_resource_incref(struct wined3d_resource *resource)
 {
-    return wined3d_volume_incref(volume_from_resource(resource));
+    struct wined3d_volume *volume = volume_from_resource(resource);
+    TRACE("Forwarding to container %p.\n", volume->container);
+
+    return wined3d_texture_incref(volume->container);
 }
 
 static ULONG volume_resource_decref(struct wined3d_resource *resource)
 {
-    return wined3d_volume_decref(volume_from_resource(resource));
+    struct wined3d_volume *volume = volume_from_resource(resource);
+    TRACE("Forwarding to container %p.\n", volume->container);
+
+    return wined3d_texture_decref(volume->container);
 }
 
 static const struct wined3d_resource_ops volume_resource_ops =
@@ -796,7 +776,7 @@ HRESULT wined3d_volume_create(struct wined3d_texture *container, const struct wi
     }
 
     if (FAILED(hr = device_parent->ops->volume_created(device_parent,
-            wined3d_texture_get_parent(container), object, &parent, &parent_ops)))
+            container, level, &parent, &parent_ops)))
     {
         WARN("Failed to create volume parent, hr %#x.\n", hr);
         wined3d_volume_destroy(object);

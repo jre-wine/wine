@@ -745,6 +745,7 @@ static importinfo_t *find_importinfo(msft_typelib_t *typelib, const char *name)
 static void add_structure_typeinfo(msft_typelib_t *typelib, type_t *structure);
 static void add_interface_typeinfo(msft_typelib_t *typelib, type_t *interface);
 static void add_enum_typeinfo(msft_typelib_t *typelib, type_t *enumeration);
+static void add_union_typeinfo(msft_typelib_t *typelib, type_t *tunion);
 static void add_coclass_typeinfo(msft_typelib_t *typelib, type_t *cls);
 static void add_dispinterface_typeinfo(msft_typelib_t *typelib, type_t *dispinterface);
 
@@ -992,6 +993,9 @@ static int encode_type(
                 break;
             case TYPE_ENUM:
                 add_enum_typeinfo(typelib, type);
+                break;
+            case TYPE_UNION:
+                add_union_typeinfo(typelib, type);
                 break;
             case TYPE_COCLASS:
                 add_coclass_typeinfo(typelib, type);
@@ -1752,6 +1756,10 @@ static HRESULT add_var_desc(msft_typeinfo_t *typeinfo, UINT index, var_t* var)
         typedata[4] = typeinfo->datawidth;
         typeinfo->datawidth += var_datawidth;
         break;
+    case TKIND_UNION:
+        typedata[4] = typeinfo->datawidth;
+        typeinfo->datawidth = max(typeinfo->datawidth, var_datawidth);
+        break;
     case TKIND_DISPATCH:
         var_kind = 3; /* VAR_DISPATCH */
         typeinfo->datawidth = pointer_size;
@@ -1836,7 +1844,7 @@ static msft_typeinfo_t *create_msft_typeinfo(msft_typelib_t *typelib, enum type_
     MSFT_TypeInfoBase *typeinfo;
     MSFT_GuidEntry guidentry;
 
-    chat("create_msft_typeinfo: name %s kind %d\n", name, kind);
+    chat("create_msft_typeinfo: name %s kind %d index %d\n", name, kind, typelib->typelib_header.nrtypeinfos);
 
     msft_typeinfo = xmalloc(sizeof(*msft_typeinfo));
     memset( msft_typeinfo, 0, sizeof(*msft_typeinfo) );
@@ -2141,22 +2149,51 @@ static void add_enum_typeinfo(msft_typelib_t *typelib, type_t *enumeration)
             add_var_desc(msft_typeinfo, idx++, cur);
 }
 
+static void add_union_typeinfo(msft_typelib_t *typelib, type_t *tunion)
+{
+    int idx = 0;
+    var_t *cur;
+    msft_typeinfo_t *msft_typeinfo;
+
+    if (-1 < tunion->typelib_idx)
+        return;
+
+    tunion->typelib_idx = typelib->typelib_header.nrtypeinfos;
+    msft_typeinfo = create_msft_typeinfo(typelib, TKIND_UNION, tunion->name, tunion->attrs);
+    msft_typeinfo->typeinfo->size = 0;
+
+    if (type_union_get_cases(tunion))
+        LIST_FOR_EACH_ENTRY(cur, type_union_get_cases(tunion), var_t, entry)
+            add_var_desc(msft_typeinfo, idx++, cur);
+}
+
 static void add_typedef_typeinfo(msft_typelib_t *typelib, type_t *tdef)
 {
-    msft_typeinfo_t *msft_typeinfo;
-    int alignment;
+    msft_typeinfo_t *msft_typeinfo = NULL;
+    int alignment, datatype1, datatype2, size;
+    type_t *type;
 
     if (-1 < tdef->typelib_idx)
         return;
 
-    tdef->typelib_idx = typelib->typelib_header.nrtypeinfos;
-    msft_typeinfo = create_msft_typeinfo(typelib, TKIND_ALIAS, tdef->name, tdef->attrs);
-    encode_type(typelib, get_type_vt(type_alias_get_aliasee(tdef)),
-                type_alias_get_aliasee(tdef),
-                &msft_typeinfo->typeinfo->datatype1,
-                &msft_typeinfo->typeinfo->size,
-                &alignment, &msft_typeinfo->typeinfo->datatype2);
-    msft_typeinfo->typeinfo->typekind |= (alignment << 11 | alignment << 6);
+    type = type_alias_get_aliasee(tdef);
+
+    if (!type->name || strcmp(tdef->name, type->name) != 0)
+    {
+        tdef->typelib_idx = typelib->typelib_header.nrtypeinfos;
+        msft_typeinfo = create_msft_typeinfo(typelib, TKIND_ALIAS, tdef->name, tdef->attrs);
+    }
+
+    encode_type(typelib, get_type_vt(type), type,
+                &datatype1, &size, &alignment, &datatype2);
+
+    if (msft_typeinfo)
+    {
+        msft_typeinfo->typeinfo->datatype1 = datatype1;
+        msft_typeinfo->typeinfo->size = size;
+        msft_typeinfo->typeinfo->datatype2 = datatype2;
+        msft_typeinfo->typeinfo->typekind |= (alignment << 11 | alignment << 6);
+    }
 }
 
 static void add_coclass_typeinfo(msft_typelib_t *typelib, type_t *cls)
@@ -2276,6 +2313,9 @@ static void add_type_typeinfo(msft_typelib_t *typelib, type_t *type)
         break;
     case TYPE_ENUM:
         add_enum_typeinfo(typelib, type);
+        break;
+    case TYPE_UNION:
+        add_union_typeinfo(typelib, type);
         break;
     case TYPE_COCLASS:
         add_coclass_typeinfo(typelib, type);

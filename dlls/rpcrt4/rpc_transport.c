@@ -247,10 +247,21 @@ static RPC_STATUS rpcrt4_conn_open_pipe(RpcConnection *Connection, LPCSTR pname,
   return RPC_S_OK;
 }
 
+static char *ncalrpc_pipe_name(const char *endpoint)
+{
+  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
+  char *pipe_name;
+
+  /* protseq=ncalrpc: supposed to use NT LPC ports,
+   * but we'll implement it with named pipes for now */
+  pipe_name = I_RpcAllocate(sizeof(prefix) + strlen(endpoint));
+  strcat(strcpy(pipe_name, prefix), endpoint);
+  return pipe_name;
+}
+
 static RPC_STATUS rpcrt4_ncalrpc_open(RpcConnection* Connection)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
   RPC_STATUS r;
   LPSTR pname;
 
@@ -258,10 +269,7 @@ static RPC_STATUS rpcrt4_ncalrpc_open(RpcConnection* Connection)
   if (npc->pipe)
     return RPC_S_OK;
 
-  /* protseq=ncalrpc: supposed to use NT LPC ports,
-   * but we'll implement it with named pipes for now */
-  pname = I_RpcAllocate(strlen(prefix) + strlen(Connection->Endpoint) + 1);
-  strcat(strcpy(pname, prefix), Connection->Endpoint);
+  pname = ncalrpc_pipe_name(Connection->Endpoint);
   r = rpcrt4_conn_open_pipe(Connection, pname, TRUE);
   I_RpcFree(pname);
 
@@ -270,7 +278,6 @@ static RPC_STATUS rpcrt4_ncalrpc_open(RpcConnection* Connection)
 
 static RPC_STATUS rpcrt4_protseq_ncalrpc_open_endpoint(RpcServerProtseq* protseq, const char *endpoint)
 {
-  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
   RPC_STATUS r;
   LPSTR pname;
   RpcConnection *Connection;
@@ -291,10 +298,7 @@ static RPC_STATUS rpcrt4_protseq_ncalrpc_open_endpoint(RpcServerProtseq* protseq
   if (r != RPC_S_OK)
       return r;
 
-  /* protseq=ncalrpc: supposed to use NT LPC ports,
-   * but we'll implement it with named pipes for now */
-  pname = I_RpcAllocate(strlen(prefix) + strlen(Connection->Endpoint) + 1);
-  strcat(strcpy(pname, prefix), Connection->Endpoint);
+  pname = ncalrpc_pipe_name(Connection->Endpoint);
   r = rpcrt4_conn_create_pipe(Connection, pname);
   I_RpcFree(pname);
 
@@ -306,10 +310,20 @@ static RPC_STATUS rpcrt4_protseq_ncalrpc_open_endpoint(RpcServerProtseq* protseq
   return r;
 }
 
+static char *ncacn_pipe_name(const char *endpoint)
+{
+  static const char prefix[] = "\\\\.";
+  char *pipe_name;
+
+  /* protseq=ncacn_np: named pipes */
+  pipe_name = I_RpcAllocate(sizeof(prefix) + strlen(endpoint));
+  strcat(strcpy(pipe_name, prefix), endpoint);
+  return pipe_name;
+}
+
 static RPC_STATUS rpcrt4_ncacn_np_open(RpcConnection* Connection)
 {
   RpcConnection_np *npc = (RpcConnection_np *) Connection;
-  static const char prefix[] = "\\\\.";
   RPC_STATUS r;
   LPSTR pname;
 
@@ -317,9 +331,7 @@ static RPC_STATUS rpcrt4_ncacn_np_open(RpcConnection* Connection)
   if (npc->pipe)
     return RPC_S_OK;
 
-  /* protseq=ncacn_np: named pipes */
-  pname = I_RpcAllocate(strlen(prefix) + strlen(Connection->Endpoint) + 1);
-  strcat(strcpy(pname, prefix), Connection->Endpoint);
+  pname = ncacn_pipe_name(Connection->Endpoint);
   r = rpcrt4_conn_open_pipe(Connection, pname, FALSE);
   I_RpcFree(pname);
 
@@ -328,7 +340,6 @@ static RPC_STATUS rpcrt4_ncacn_np_open(RpcConnection* Connection)
 
 static RPC_STATUS rpcrt4_protseq_ncacn_np_open_endpoint(RpcServerProtseq *protseq, const char *endpoint)
 {
-  static const char prefix[] = "\\\\.";
   RPC_STATUS r;
   LPSTR pname;
   RpcConnection *Connection;
@@ -349,9 +360,7 @@ static RPC_STATUS rpcrt4_protseq_ncacn_np_open_endpoint(RpcServerProtseq *protse
   if (r != RPC_S_OK)
     return r;
 
-  /* protseq=ncacn_np: named pipes */
-  pname = I_RpcAllocate(strlen(prefix) + strlen(Connection->Endpoint) + 1);
-  strcat(strcpy(pname, prefix), Connection->Endpoint);
+  pname = ncacn_pipe_name(Connection->Endpoint);
   r = rpcrt4_conn_create_pipe(Connection, pname);
   I_RpcFree(pname);
 
@@ -379,15 +388,40 @@ static RPC_STATUS rpcrt4_ncacn_np_handoff(RpcConnection *old_conn, RpcConnection
 {
   RPC_STATUS status;
   LPSTR pname;
-  static const char prefix[] = "\\\\.";
 
   rpcrt4_conn_np_handoff((RpcConnection_np *)old_conn, (RpcConnection_np *)new_conn);
 
-  pname = I_RpcAllocate(strlen(prefix) + strlen(old_conn->Endpoint) + 1);
-  strcat(strcpy(pname, prefix), old_conn->Endpoint);
+  pname = ncacn_pipe_name(old_conn->Endpoint);
   status = rpcrt4_conn_create_pipe(old_conn, pname);
   I_RpcFree(pname);
 
+  return status;
+}
+
+static RPC_STATUS is_pipe_listening(const char *pipe_name)
+{
+  return WaitNamedPipeA(pipe_name, 1) ? RPC_S_OK : RPC_S_NOT_LISTENING;
+}
+
+static RPC_STATUS rpcrt4_ncacn_np_is_server_listening(const char *endpoint)
+{
+  char *pipe_name;
+  RPC_STATUS status;
+
+  pipe_name = ncacn_pipe_name(endpoint);
+  status = is_pipe_listening(pipe_name);
+  I_RpcFree(pipe_name);
+  return status;
+}
+
+static RPC_STATUS rpcrt4_ncalrpc_np_is_server_listening(const char *endpoint)
+{
+  char *pipe_name;
+  RPC_STATUS status;
+
+  pipe_name = ncalrpc_pipe_name(endpoint);
+  status = is_pipe_listening(pipe_name);
+  I_RpcFree(pipe_name);
   return status;
 }
 
@@ -395,14 +429,12 @@ static RPC_STATUS rpcrt4_ncalrpc_handoff(RpcConnection *old_conn, RpcConnection 
 {
   RPC_STATUS status;
   LPSTR pname;
-  static const char prefix[] = "\\\\.\\pipe\\lrpc\\";
 
   TRACE("%s\n", old_conn->Endpoint);
 
   rpcrt4_conn_np_handoff((RpcConnection_np *)old_conn, (RpcConnection_np *)new_conn);
 
-  pname = I_RpcAllocate(strlen(prefix) + strlen(old_conn->Endpoint) + 1);
-  strcat(strcpy(pname, prefix), old_conn->Endpoint);
+  pname = ncalrpc_pipe_name(old_conn->Endpoint);
   status = rpcrt4_conn_create_pipe(old_conn, pname);
   I_RpcFree(pname);
     
@@ -1525,6 +1557,12 @@ static void rpcrt4_conn_tcp_cancel_call(RpcConnection *Connection)
     RpcConnection_tcp *tcpc = (RpcConnection_tcp *) Connection;
     TRACE("%p\n", Connection);
     rpcrt4_sock_wait_cancel(tcpc);
+}
+
+static RPC_STATUS rpcrt4_conn_tcp_is_server_listening(const char *endpoint)
+{
+    FIXME("\n");
+    return RPC_S_ACCESS_DENIED;
 }
 
 static int rpcrt4_conn_tcp_wait_for_incoming_data(RpcConnection *Connection)
@@ -3296,6 +3334,12 @@ static void rpcrt4_ncacn_http_cancel_call(RpcConnection *Connection)
   SetEvent(httpc->cancel_event);
 }
 
+static RPC_STATUS rpcrt4_ncacn_http_is_server_listening(const char *endpoint)
+{
+    FIXME("\n");
+    return RPC_S_ACCESS_DENIED;
+}
+
 static int rpcrt4_ncacn_http_wait_for_incoming_data(RpcConnection *Connection)
 {
   RpcConnection_http *httpc = (RpcConnection_http *) Connection;
@@ -3337,6 +3381,7 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_np_write,
     rpcrt4_conn_np_close,
     rpcrt4_conn_np_cancel_call,
+    rpcrt4_ncacn_np_is_server_listening,
     rpcrt4_conn_np_wait_for_incoming_data,
     rpcrt4_ncacn_np_get_top_of_tower,
     rpcrt4_ncacn_np_parse_top_of_tower,
@@ -3357,6 +3402,7 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_np_write,
     rpcrt4_conn_np_close,
     rpcrt4_conn_np_cancel_call,
+    rpcrt4_ncalrpc_np_is_server_listening,
     rpcrt4_conn_np_wait_for_incoming_data,
     rpcrt4_ncalrpc_get_top_of_tower,
     rpcrt4_ncalrpc_parse_top_of_tower,
@@ -3377,6 +3423,7 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_conn_tcp_write,
     rpcrt4_conn_tcp_close,
     rpcrt4_conn_tcp_cancel_call,
+    rpcrt4_conn_tcp_is_server_listening,
     rpcrt4_conn_tcp_wait_for_incoming_data,
     rpcrt4_ncacn_ip_tcp_get_top_of_tower,
     rpcrt4_ncacn_ip_tcp_parse_top_of_tower,
@@ -3397,6 +3444,7 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_ncacn_http_write,
     rpcrt4_ncacn_http_close,
     rpcrt4_ncacn_http_cancel_call,
+    rpcrt4_ncacn_http_is_server_listening,
     rpcrt4_ncacn_http_wait_for_incoming_data,
     rpcrt4_ncacn_http_get_top_of_tower,
     rpcrt4_ncacn_http_parse_top_of_tower,
@@ -3568,6 +3616,20 @@ RPC_STATUS RPCRT4_ReleaseConnection(RpcConnection* Connection)
 
   HeapFree(GetProcessHeap(), 0, Connection);
   return RPC_S_OK;
+}
+
+RPC_STATUS RPCRT4_IsServerListening(const char *protseq, const char *endpoint)
+{
+  const struct connection_ops *ops;
+
+  ops = rpcrt4_get_conn_protseq_ops(protseq);
+  if (!ops)
+  {
+    FIXME("not supported for protseq %s\n", protseq);
+    return RPC_S_INVALID_BINDING;
+  }
+
+  return ops->is_server_listening(endpoint);
 }
 
 RPC_STATUS RpcTransport_GetTopOfTower(unsigned char *tower_data,

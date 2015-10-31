@@ -4317,7 +4317,7 @@ static GLuint shader_arb_generate_vshader(const struct wined3d_shader *shader,
             const char *one = arb_get_helper_value(WINED3D_SHADER_TYPE_VERTEX, ARB_ONE);
             for(i = 0; i < MAX_REG_TEXCRD; i++)
             {
-                if (reg_maps->texcoord_mask[i] && reg_maps->texcoord_mask[i] != WINED3DSP_WRITEMASK_ALL)
+                if (reg_maps->u.texcoord_mask[i] && reg_maps->u.texcoord_mask[i] != WINED3DSP_WRITEMASK_ALL)
                     shader_addline(buffer, "MOV result.texcoord[%u].w, %s\n", i, one);
             }
         }
@@ -4538,7 +4538,7 @@ static void find_arb_ps_compile_args(const struct wined3d_state *state,
     int i;
     WORD int_skip;
 
-    find_ps_compile_args(state, shader, context->stream_info.position_transformed, &args->super, gl_info);
+    find_ps_compile_args(state, shader, context->stream_info.position_transformed, &args->super, context);
 
     /* This forces all local boolean constants to 1 to make them stateblock independent */
     args->bools = shader->reg_maps.local_bool_consts;
@@ -5161,6 +5161,7 @@ static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct sh
         caps->ps_1x_max_value = 0.0f;
     }
 
+    caps->varying_count = 0;
     caps->wined3d_caps = WINED3D_SHADER_CAP_SRGB_WRITE;
     if (use_nv_clip(gl_info))
         caps->wined3d_caps |= WINED3D_SHADER_CAP_VS_CLIPPING;
@@ -7858,7 +7859,7 @@ static void arbfp_blit_surface(struct wined3d_device *device, DWORD filter,
          * flip in the blitter, we don't actually need that flip anyway. So we
          * use the surface's texture as scratch texture, and flip the source
          * rectangle instead. */
-        surface_load_fb_texture(src_surface, FALSE);
+        surface_load_fb_texture(src_surface, FALSE, context);
 
         src_rect.top = src_surface->resource.height - src_rect.top;
         src_rect.bottom = src_surface->resource.height - src_rect.bottom;

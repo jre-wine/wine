@@ -26,7 +26,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d11);
 
 static HRESULT shdr_handler(const char *data, DWORD data_size, DWORD tag, void *ctx)
 {
-    struct d3d10_shader_info *shader_info = ctx;
+    struct d3d_shader_info *shader_info = ctx;
     HRESULT hr;
 
     switch (tag)
@@ -53,7 +53,7 @@ static HRESULT shdr_handler(const char *data, DWORD data_size, DWORD tag, void *
     return S_OK;
 }
 
-static HRESULT shader_extract_from_dxbc(const void *dxbc, SIZE_T dxbc_length, struct d3d10_shader_info *shader_info)
+static HRESULT shader_extract_from_dxbc(const void *dxbc, SIZE_T dxbc_length, struct d3d_shader_info *shader_info)
 {
     HRESULT hr;
 
@@ -364,7 +364,7 @@ static HRESULT d3d_vertex_shader_init(struct d3d_vertex_shader *shader, struct d
 {
     struct wined3d_shader_signature output_signature;
     struct wined3d_shader_signature input_signature;
-    struct d3d10_shader_info shader_info;
+    struct d3d_shader_info shader_info;
     struct wined3d_shader_desc desc;
     HRESULT hr;
 
@@ -430,6 +430,15 @@ HRESULT d3d_vertex_shader_create(struct d3d_device *device, const void *byte_cod
     return S_OK;
 }
 
+struct d3d_vertex_shader *unsafe_impl_from_ID3D11VertexShader(ID3D11VertexShader *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d3d11_vertex_shader_vtbl);
+
+    return impl_from_ID3D11VertexShader(iface);
+}
+
 struct d3d_vertex_shader *unsafe_impl_from_ID3D10VertexShader(ID3D10VertexShader *iface)
 {
     if (!iface)
@@ -439,9 +448,135 @@ struct d3d_vertex_shader *unsafe_impl_from_ID3D10VertexShader(ID3D10VertexShader
     return impl_from_ID3D10VertexShader(iface);
 }
 
-static inline struct d3d10_geometry_shader *impl_from_ID3D10GeometryShader(ID3D10GeometryShader *iface)
+/* ID3D11GeometryShader methods */
+
+static inline struct d3d_geometry_shader *impl_from_ID3D11GeometryShader(ID3D11GeometryShader *iface)
 {
-    return CONTAINING_RECORD(iface, struct d3d10_geometry_shader, ID3D10GeometryShader_iface);
+    return CONTAINING_RECORD(iface, struct d3d_geometry_shader, ID3D11GeometryShader_iface);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_geometry_shader_QueryInterface(ID3D11GeometryShader *iface,
+        REFIID riid, void **object)
+{
+    struct d3d_geometry_shader *shader = impl_from_ID3D11GeometryShader(iface);
+
+    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), object);
+
+    if (IsEqualGUID(riid, &IID_ID3D11GeometryShader)
+            || IsEqualGUID(riid, &IID_ID3D11DeviceChild)
+            || IsEqualGUID(riid, &IID_IUnknown))
+    {
+        ID3D11GeometryShader_AddRef(iface);
+        *object = iface;
+        return S_OK;
+    }
+
+    if (IsEqualGUID(riid, &IID_ID3D10GeometryShader)
+            || IsEqualGUID(riid, &IID_ID3D10DeviceChild))
+    {
+        ID3D10GeometryShader_AddRef(&shader->ID3D10GeometryShader_iface);
+        *object = &shader->ID3D10GeometryShader_iface;
+        return S_OK;
+    }
+
+    WARN("%s not implemented, returning E_NOINTERFACE.\n", debugstr_guid(riid));
+
+    *object = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_geometry_shader_AddRef(ID3D11GeometryShader *iface)
+{
+    struct d3d_geometry_shader *shader = impl_from_ID3D11GeometryShader(iface);
+    ULONG refcount = InterlockedIncrement(&shader->refcount);
+
+    TRACE("%p increasing refcount to %u.\n", shader, refcount);
+
+    return refcount;
+}
+
+static ULONG STDMETHODCALLTYPE d3d11_geometry_shader_Release(ID3D11GeometryShader *iface)
+{
+    struct d3d_geometry_shader *shader = impl_from_ID3D11GeometryShader(iface);
+    ULONG refcount = InterlockedDecrement(&shader->refcount);
+
+    TRACE("%p decreasing refcount to %u.\n", shader, refcount);
+
+    if (!refcount)
+    {
+        ID3D11Device *device = shader->device;
+
+        wined3d_mutex_lock();
+        wined3d_shader_decref(shader->wined3d_shader);
+        wined3d_mutex_unlock();
+
+        /* Release the device last, it may cause the wined3d device to be
+         * destroyed. */
+        ID3D11Device_Release(device);
+    }
+
+    return refcount;
+}
+
+static void STDMETHODCALLTYPE d3d11_geometry_shader_GetDevice(ID3D11GeometryShader *iface,
+        ID3D11Device **device)
+{
+    struct d3d_geometry_shader *shader = impl_from_ID3D11GeometryShader(iface);
+
+    TRACE("iface %p, device %p.\n", iface, device);
+
+    *device = shader->device;
+    ID3D11Device_AddRef(*device);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_geometry_shader_GetPrivateData(ID3D11GeometryShader *iface,
+        REFGUID guid, UINT *data_size, void *data)
+{
+    struct d3d_geometry_shader *shader = impl_from_ID3D11GeometryShader(iface);
+
+    TRACE("iface %p, guid %s, data_size %p, data %p.\n", iface, debugstr_guid(guid), data_size, data);
+
+    return d3d_get_private_data(&shader->private_store, guid, data_size, data);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_geometry_shader_SetPrivateData(ID3D11GeometryShader *iface,
+        REFGUID guid, UINT data_size, const void *data)
+{
+    struct d3d_geometry_shader *shader = impl_from_ID3D11GeometryShader(iface);
+
+    TRACE("iface %p, guid %s, data_size %u, data %p.\n", iface, debugstr_guid(guid), data_size, data);
+
+    return d3d_set_private_data(&shader->private_store, guid, data_size, data);
+}
+
+static HRESULT STDMETHODCALLTYPE d3d11_geometry_shader_SetPrivateDataInterface(ID3D11GeometryShader *iface,
+        REFGUID guid, const IUnknown *data)
+{
+    struct d3d_geometry_shader *shader = impl_from_ID3D11GeometryShader(iface);
+
+    TRACE("iface %p, guid %s, data %p.\n", iface, debugstr_guid(guid), data);
+
+    return d3d_set_private_data_interface(&shader->private_store, guid, data);
+}
+
+static const struct ID3D11GeometryShaderVtbl d3d11_geometry_shader_vtbl =
+{
+    /* IUnknown methods */
+    d3d11_geometry_shader_QueryInterface,
+    d3d11_geometry_shader_AddRef,
+    d3d11_geometry_shader_Release,
+    /* ID3D11DeviceChild methods */
+    d3d11_geometry_shader_GetDevice,
+    d3d11_geometry_shader_GetPrivateData,
+    d3d11_geometry_shader_SetPrivateData,
+    d3d11_geometry_shader_SetPrivateDataInterface,
+};
+
+/* ID3D10GeometryShader methods */
+
+static inline struct d3d_geometry_shader *impl_from_ID3D10GeometryShader(ID3D10GeometryShader *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d_geometry_shader, ID3D10GeometryShader_iface);
 }
 
 /* IUnknown methods */
@@ -449,61 +584,46 @@ static inline struct d3d10_geometry_shader *impl_from_ID3D10GeometryShader(ID3D1
 static HRESULT STDMETHODCALLTYPE d3d10_geometry_shader_QueryInterface(ID3D10GeometryShader *iface,
         REFIID riid, void **object)
 {
-    TRACE("iface %p, riid %s, object %p\n", iface, debugstr_guid(riid), object);
+    struct d3d_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
 
-    if (IsEqualGUID(riid, &IID_ID3D10GeometryShader)
-            || IsEqualGUID(riid, &IID_ID3D10DeviceChild)
-            || IsEqualGUID(riid, &IID_IUnknown))
-    {
-        IUnknown_AddRef(iface);
-        *object = iface;
-        return S_OK;
-    }
+    TRACE("iface %p, riid %s, object %p.\n", iface, debugstr_guid(riid), object);
 
-    WARN("%s not implemented, returning E_NOINTERFACE\n", debugstr_guid(riid));
-
-    *object = NULL;
-    return E_NOINTERFACE;
+    return d3d11_geometry_shader_QueryInterface(&shader->ID3D11GeometryShader_iface, riid, object);
 }
 
 static ULONG STDMETHODCALLTYPE d3d10_geometry_shader_AddRef(ID3D10GeometryShader *iface)
 {
-    struct d3d10_geometry_shader *This = impl_from_ID3D10GeometryShader(iface);
-    ULONG refcount = InterlockedIncrement(&This->refcount);
+    struct d3d_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
 
-    TRACE("%p increasing refcount to %u\n", This, refcount);
+    TRACE("iface %p.\n", iface);
 
-    return refcount;
+    return d3d11_geometry_shader_AddRef(&shader->ID3D11GeometryShader_iface);
 }
 
 static ULONG STDMETHODCALLTYPE d3d10_geometry_shader_Release(ID3D10GeometryShader *iface)
 {
-    struct d3d10_geometry_shader *This = impl_from_ID3D10GeometryShader(iface);
-    ULONG refcount = InterlockedDecrement(&This->refcount);
+    struct d3d_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
 
-    TRACE("%p decreasing refcount to %u\n", This, refcount);
+    TRACE("iface %p.\n", iface);
 
-    if (!refcount)
-    {
-        wined3d_mutex_lock();
-        wined3d_shader_decref(This->wined3d_shader);
-        wined3d_mutex_unlock();
-    }
-
-    return refcount;
+    return d3d11_geometry_shader_Release(&shader->ID3D11GeometryShader_iface);
 }
 
 /* ID3D10DeviceChild methods */
 
 static void STDMETHODCALLTYPE d3d10_geometry_shader_GetDevice(ID3D10GeometryShader *iface, ID3D10Device **device)
 {
-    FIXME("iface %p, device %p stub!\n", iface, device);
+    struct d3d_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
+
+    TRACE("iface %p, device %p.\n", iface, device);
+
+    ID3D11Device_QueryInterface(shader->device, &IID_ID3D10Device, (void **)device);
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_geometry_shader_GetPrivateData(ID3D10GeometryShader *iface,
         REFGUID guid, UINT *data_size, void *data)
 {
-    struct d3d10_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
+    struct d3d_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
 
     TRACE("iface %p, guid %s, data_size %p, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
@@ -514,7 +634,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_geometry_shader_GetPrivateData(ID3D10Geom
 static HRESULT STDMETHODCALLTYPE d3d10_geometry_shader_SetPrivateData(ID3D10GeometryShader *iface,
         REFGUID guid, UINT data_size, const void *data)
 {
-    struct d3d10_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
+    struct d3d_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
 
     TRACE("iface %p, guid %s, data_size %u, data %p.\n",
             iface, debugstr_guid(guid), data_size, data);
@@ -525,7 +645,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_geometry_shader_SetPrivateData(ID3D10Geom
 static HRESULT STDMETHODCALLTYPE d3d10_geometry_shader_SetPrivateDataInterface(ID3D10GeometryShader *iface,
         REFGUID guid, const IUnknown *data)
 {
-    struct d3d10_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
+    struct d3d_geometry_shader *shader = impl_from_ID3D10GeometryShader(iface);
 
     TRACE("iface %p, guid %s, data %p.\n", iface, debugstr_guid(guid), data);
 
@@ -545,28 +665,29 @@ static const struct ID3D10GeometryShaderVtbl d3d10_geometry_shader_vtbl =
     d3d10_geometry_shader_SetPrivateDataInterface,
 };
 
-static void STDMETHODCALLTYPE d3d10_geometry_shader_wined3d_object_destroyed(void *parent)
+static void STDMETHODCALLTYPE d3d_geometry_shader_wined3d_object_destroyed(void *parent)
 {
-    struct d3d10_geometry_shader *shader = parent;
+    struct d3d_geometry_shader *shader = parent;
 
     wined3d_private_store_cleanup(&shader->private_store);
     HeapFree(GetProcessHeap(), 0, parent);
 }
 
-static const struct wined3d_parent_ops d3d10_geometry_shader_wined3d_parent_ops =
+static const struct wined3d_parent_ops d3d_geometry_shader_wined3d_parent_ops =
 {
-    d3d10_geometry_shader_wined3d_object_destroyed,
+    d3d_geometry_shader_wined3d_object_destroyed,
 };
 
-HRESULT d3d10_geometry_shader_init(struct d3d10_geometry_shader *shader, struct d3d_device *device,
+static HRESULT d3d_geometry_shader_init(struct d3d_geometry_shader *shader, struct d3d_device *device,
         const void *byte_code, SIZE_T byte_code_length)
 {
     struct wined3d_shader_signature output_signature;
     struct wined3d_shader_signature input_signature;
-    struct d3d10_shader_info shader_info;
+    struct d3d_shader_info shader_info;
     struct wined3d_shader_desc desc;
     HRESULT hr;
 
+    shader->ID3D11GeometryShader_iface.lpVtbl = &d3d11_geometry_shader_vtbl;
     shader->ID3D10GeometryShader_iface.lpVtbl = &d3d10_geometry_shader_vtbl;
     shader->refcount = 1;
     wined3d_mutex_lock();
@@ -588,7 +709,7 @@ HRESULT d3d10_geometry_shader_init(struct d3d10_geometry_shader *shader, struct 
     desc.max_version = 4;
 
     hr = wined3d_shader_create_gs(device->wined3d_device, &desc, shader,
-            &d3d10_geometry_shader_wined3d_parent_ops, &shader->wined3d_shader);
+            &d3d_geometry_shader_wined3d_parent_ops, &shader->wined3d_shader);
     shader_free_signature(&input_signature);
     shader_free_signature(&output_signature);
     if (FAILED(hr))
@@ -600,10 +721,44 @@ HRESULT d3d10_geometry_shader_init(struct d3d10_geometry_shader *shader, struct 
     }
     wined3d_mutex_unlock();
 
+    shader->device = &device->ID3D11Device_iface;
+    ID3D11Device_AddRef(shader->device);
+
     return S_OK;
 }
 
-struct d3d10_geometry_shader *unsafe_impl_from_ID3D10GeometryShader(ID3D10GeometryShader *iface)
+HRESULT d3d_geometry_shader_create(struct d3d_device *device, const void *byte_code, SIZE_T byte_code_length,
+        struct d3d_geometry_shader **shader)
+{
+    struct d3d_geometry_shader *object;
+    HRESULT hr;
+
+    if (!(object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object))))
+        return E_OUTOFMEMORY;
+
+    if (FAILED(hr = d3d_geometry_shader_init(object, device, byte_code, byte_code_length)))
+    {
+        WARN("Failed to initialize geometry shader, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created geometry shader %p.\n", object);
+    *shader = object;
+
+    return S_OK;
+}
+
+struct d3d_geometry_shader *unsafe_impl_from_ID3D11GeometryShader(ID3D11GeometryShader *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d3d11_geometry_shader_vtbl);
+
+    return impl_from_ID3D11GeometryShader(iface);
+}
+
+struct d3d_geometry_shader *unsafe_impl_from_ID3D10GeometryShader(ID3D10GeometryShader *iface)
 {
     if (!iface)
         return NULL;
@@ -854,7 +1009,7 @@ static HRESULT d3d_pixel_shader_init(struct d3d_pixel_shader *shader, struct d3d
 {
     struct wined3d_shader_signature output_signature;
     struct wined3d_shader_signature input_signature;
-    struct d3d10_shader_info shader_info;
+    struct d3d_shader_info shader_info;
     struct wined3d_shader_desc desc;
     HRESULT hr;
 
@@ -918,6 +1073,15 @@ HRESULT d3d_pixel_shader_create(struct d3d_device *device, const void *byte_code
     *shader = object;
 
     return S_OK;
+}
+
+struct d3d_pixel_shader *unsafe_impl_from_ID3D11PixelShader(ID3D11PixelShader *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d3d11_pixel_shader_vtbl);
+
+    return impl_from_ID3D11PixelShader(iface);
 }
 
 struct d3d_pixel_shader *unsafe_impl_from_ID3D10PixelShader(ID3D10PixelShader *iface)

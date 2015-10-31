@@ -284,7 +284,8 @@ struct font_realization_info
     DWORD cache_num;   /* keeps incrementing - num of fonts that have been created allowing for caching?? */
     DWORD instance_id; /* identifies a realized font instance */
     DWORD unk;         /* unknown */
-    DWORD face_index;  /* face index in case of font collections */
+    WORD  face_index;  /* face index in case of font collections */
+    WORD  simulations; /* 0 bit - bold simulation, 1 bit - oblique simulation */
 };
 
 extern INT WineEngAddFontResourceEx(LPCWSTR, DWORD, PVOID) DECLSPEC_HIDDEN;
@@ -369,6 +370,7 @@ extern BOOL nulldrv_FrameRgn( PHYSDEV dev, HRGN rgn, HBRUSH brush, INT width, IN
 extern LONG nulldrv_GetBitmapBits( HBITMAP bitmap, void *bits, LONG size ) DECLSPEC_HIDDEN;
 extern COLORREF nulldrv_GetNearestColor( PHYSDEV dev, COLORREF color ) DECLSPEC_HIDDEN;
 extern COLORREF nulldrv_GetPixel( PHYSDEV dev, INT x, INT y ) DECLSPEC_HIDDEN;
+extern UINT nulldrv_GetSystemPaletteEntries( PHYSDEV dev, UINT start, UINT count, PALETTEENTRY *entries ) DECLSPEC_HIDDEN;
 extern BOOL nulldrv_GradientFill( PHYSDEV dev, TRIVERTEX *vert_array, ULONG nvert,
                                   void * grad_array, ULONG ngrad, ULONG mode ) DECLSPEC_HIDDEN;
 extern INT  nulldrv_IntersectClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom ) DECLSPEC_HIDDEN;

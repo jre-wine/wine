@@ -57,6 +57,7 @@ static int  (WINAPI *pGetWindowRgnBox)(HWND,LPRECT);
 static BOOL (WINAPI *pGetGUIThreadInfo)(DWORD, GUITHREADINFO*);
 static BOOL (WINAPI *pGetProcessDefaultLayout)( DWORD *layout );
 static BOOL (WINAPI *pSetProcessDefaultLayout)( DWORD layout );
+static BOOL (WINAPI *pFlashWindow)( HWND hwnd, BOOL bInvert );
 static BOOL (WINAPI *pFlashWindowEx)( PFLASHWINFO pfwi );
 static DWORD (WINAPI *pSetLayout)(HDC hdc, DWORD layout);
 static DWORD (WINAPI *pGetLayout)(HDC hdc);
@@ -1289,7 +1290,7 @@ static char mdi_lParam_test_message[] = "just a test string";
 static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
 {
     MDICREATESTRUCTA mdi_cs;
-    HWND mdi_child;
+    HWND mdi_child, hwnd, exp_hwnd;
     INT_PTR id;
     static const WCHAR classW[] = {'M','D','I','_','c','h','i','l','d','_','C','l','a','s','s','_','1',0};
     static const WCHAR titleW[] = {'M','D','I',' ','c','h','i','l','d',0};
@@ -1308,6 +1309,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == first_id, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+    exp_hwnd = (GetWindowLongW(mdi_child, GWL_STYLE) & WS_VISIBLE) ? mdi_child : 0;
+    ok(hwnd == exp_hwnd, "WM_MDIGETACTIVE should return %p, got %p\n", exp_hwnd, hwnd);
     SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
     ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
 
@@ -1316,6 +1320,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == first_id, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+todo_wine
+    ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
     SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
     ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
 
@@ -1330,6 +1337,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
         ok(mdi_child != 0, "MDI child creation failed\n");
         id = GetWindowLongPtrA(mdi_child, GWLP_ID);
         ok(id == first_id, "wrong child id %ld\n", id);
+        hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+todo_wine
+        ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
         SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
         ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
     }
@@ -1352,6 +1362,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     {
         id = GetWindowLongPtrA(mdi_child, GWLP_ID);
         ok(id == first_id, "wrong child id %ld\n", id);
+        hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+        exp_hwnd = (GetWindowLongW(mdi_child, GWL_STYLE) & WS_VISIBLE) ? mdi_child : 0;
+        ok(hwnd == exp_hwnd, "WM_MDIGETACTIVE should return %p, got %p\n", exp_hwnd, hwnd);
         SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
         ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
     }
@@ -1365,6 +1378,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == first_id, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+    exp_hwnd = (GetWindowLongW(mdi_child, GWL_STYLE) & WS_VISIBLE) ? mdi_child : 0;
+    ok(hwnd == exp_hwnd, "WM_MDIGETACTIVE should return %p, got %p\n", exp_hwnd, hwnd);
     SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
     ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
 
@@ -1377,6 +1393,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == first_id, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+todo_wine
+    ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
     SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
     ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
 
@@ -1395,6 +1414,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
         ok(mdi_child != 0, "MDI child creation failed\n");
         id = GetWindowLongPtrA(mdi_child, GWLP_ID);
         ok(id == first_id, "wrong child id %ld\n", id);
+        hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+todo_wine
+        ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
         SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
         ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
     }
@@ -1418,6 +1440,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     {
         id = GetWindowLongPtrA(mdi_child, GWLP_ID);
         ok(id == first_id, "wrong child id %ld\n", id);
+        hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+        exp_hwnd = (GetWindowLongW(mdi_child, GWL_STYLE) & WS_VISIBLE) ? mdi_child : 0;
+        ok(hwnd == exp_hwnd, "WM_MDIGETACTIVE should return %p, got %p\n", exp_hwnd, hwnd);
         SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
         ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
     }
@@ -1431,6 +1456,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == first_id, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+    exp_hwnd = (GetWindowLongW(mdi_child, GWL_STYLE) & WS_VISIBLE) ? mdi_child : 0;
+    ok(hwnd == exp_hwnd, "WM_MDIGETACTIVE should return %p, got %p\n", exp_hwnd, hwnd);
     SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
     ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
 
@@ -1443,6 +1471,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == first_id, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+todo_wine
+    ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
     SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
     ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
 
@@ -1461,6 +1492,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
         ok(mdi_child != 0, "MDI child creation failed\n");
         id = GetWindowLongPtrA(mdi_child, GWLP_ID);
         ok(id == first_id, "wrong child id %ld\n", id);
+        hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+todo_wine
+        ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
         SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
         ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
     }
@@ -1484,6 +1518,9 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     {
         id = GetWindowLongPtrA(mdi_child, GWLP_ID);
         ok(id == first_id, "wrong child id %ld\n", id);
+        hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+        exp_hwnd = (GetWindowLongW(mdi_child, GWL_STYLE) & WS_VISIBLE) ? mdi_child : 0;
+        ok(hwnd == exp_hwnd, "WM_MDIGETACTIVE should return %p, got %p\n", exp_hwnd, hwnd);
         SendMessageA(mdi_client, WM_MDIDESTROY, (WPARAM)mdi_child, 0);
         ok(!IsWindow(mdi_child), "WM_MDIDESTROY failed\n");
     }
@@ -1509,6 +1546,8 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == 0, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+    ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
     DestroyWindow(mdi_child);
 
     mdi_child = CreateWindowExA(0, "MDI_child_Class_2", "MDI child",
@@ -1520,6 +1559,8 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == 0, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+    ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
     DestroyWindow(mdi_child);
 
     /* maximized child */
@@ -1532,6 +1573,8 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == 0, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+    ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
     DestroyWindow(mdi_child);
 
     trace("Creating maximized child with a caption\n");
@@ -1544,6 +1587,8 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == 0, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+    ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
     DestroyWindow(mdi_child);
 
     trace("Creating maximized child with a caption and a thick frame\n");
@@ -1556,6 +1601,8 @@ static void test_MDI_create(HWND parent, HWND mdi_client, INT_PTR first_id)
     ok(mdi_child != 0, "MDI child creation failed\n");
     id = GetWindowLongPtrA(mdi_child, GWLP_ID);
     ok(id == 0, "wrong child id %ld\n", id);
+    hwnd = (HWND)SendMessageA(mdi_client, WM_MDIGETACTIVE, 0, 0);
+    ok(!hwnd, "WM_MDIGETACTIVE should return 0, got %p\n", hwnd);
     DestroyWindow(mdi_child);
 }
 
@@ -1868,51 +1915,7 @@ static LRESULT WINAPI mdi_main_wnd_procA(HWND hwnd, UINT msg, WPARAM wparam, LPA
     switch (msg)
     {
         case WM_CREATE:
-        {
-            CLIENTCREATESTRUCT client_cs;
-            RECT rc;
-
-            GetClientRect(hwnd, &rc);
-
-            client_cs.hWindowMenu = 0;
-            client_cs.idFirstChild = 1;
-
-            /* MDIClient without MDIS_ALLCHILDSTYLES */
-            mdi_client = CreateWindowExA(0, "mdiclient",
-                                         NULL,
-                                         WS_CHILD /*| WS_VISIBLE*/,
-                                          /* tests depend on a not zero MDIClient size */
-                                         0, 0, rc.right, rc.bottom,
-                                         hwnd, 0, GetModuleHandleA(NULL),
-                                         &client_cs);
-            assert(mdi_client);
-            test_MDI_create(hwnd, mdi_client, client_cs.idFirstChild);
-            DestroyWindow(mdi_client);
-
-            /* MDIClient with MDIS_ALLCHILDSTYLES */
-            mdi_client = CreateWindowExA(0, "mdiclient",
-                                         NULL,
-                                         WS_CHILD | MDIS_ALLCHILDSTYLES /*| WS_VISIBLE*/,
-                                          /* tests depend on a not zero MDIClient size */
-                                         0, 0, rc.right, rc.bottom,
-                                         hwnd, 0, GetModuleHandleA(NULL),
-                                         &client_cs);
-            assert(mdi_client);
-            test_MDI_create(hwnd, mdi_client, client_cs.idFirstChild);
-            DestroyWindow(mdi_client);
-
-            /* Test child window stack management */
-            mdi_client = CreateWindowExA(0, "mdiclient",
-                                         NULL,
-                                         WS_CHILD,
-                                         0, 0, rc.right, rc.bottom,
-                                         hwnd, 0, GetModuleHandleA(NULL),
-                                         &client_cs);
-            assert(mdi_client);
-            test_MDI_child_stack(mdi_client);
-            DestroyWindow(mdi_client);
-            break;
-        }
+            return 1;
 
         case WM_WINDOWPOSCHANGED:
         {
@@ -1992,7 +1995,9 @@ static BOOL mdi_RegisterWindowClasses(void)
 
 static void test_mdi(void)
 {
-    HWND mdi_hwndMain;
+    HWND mdi_hwndMain, mdi_client;
+    CLIENTCREATESTRUCT client_cs;
+    RECT rc;
     /*MSG msg;*/
 
     if (!mdi_RegisterWindowClasses()) assert(0);
@@ -2004,6 +2009,46 @@ static void test_mdi(void)
                                    GetDesktopWindow(), 0,
                                    GetModuleHandleA(NULL), NULL);
     assert(mdi_hwndMain);
+
+    GetClientRect(mdi_hwndMain, &rc);
+
+    client_cs.hWindowMenu = 0;
+    client_cs.idFirstChild = 1;
+
+    /* MDIClient without MDIS_ALLCHILDSTYLES */
+    mdi_client = CreateWindowExA(0, "mdiclient",
+                                 NULL,
+                                 WS_CHILD /*| WS_VISIBLE*/,
+                                  /* tests depend on a not zero MDIClient size */
+                                 0, 0, rc.right, rc.bottom,
+                                 mdi_hwndMain, 0, GetModuleHandleA(NULL),
+                                 &client_cs);
+    assert(mdi_client);
+    test_MDI_create(mdi_hwndMain, mdi_client, client_cs.idFirstChild);
+    DestroyWindow(mdi_client);
+
+    /* MDIClient with MDIS_ALLCHILDSTYLES */
+    mdi_client = CreateWindowExA(0, "mdiclient",
+                                 NULL,
+                                 WS_CHILD | MDIS_ALLCHILDSTYLES /*| WS_VISIBLE*/,
+                                  /* tests depend on a not zero MDIClient size */
+                                 0, 0, rc.right, rc.bottom,
+                                 mdi_hwndMain, 0, GetModuleHandleA(NULL),
+                                 &client_cs);
+    assert(mdi_client);
+    test_MDI_create(mdi_hwndMain, mdi_client, client_cs.idFirstChild);
+    DestroyWindow(mdi_client);
+
+    /* Test child window stack management */
+    mdi_client = CreateWindowExA(0, "mdiclient",
+                                 NULL,
+                                 WS_CHILD,
+                                 0, 0, rc.right, rc.bottom,
+                                 mdi_hwndMain, 0, GetModuleHandleA(NULL),
+                                 &client_cs);
+    assert(mdi_client);
+    test_MDI_child_stack(mdi_client);
+    DestroyWindow(mdi_client);
 /*
     while(GetMessage(&msg, 0, 0, 0))
     {
@@ -7068,6 +7113,33 @@ static void test_rtl_layout(void)
     DestroyWindow( parent );
 }
 
+static void test_FlashWindow(void)
+{
+    HWND hwnd;
+    BOOL ret;
+    if (!pFlashWindow)
+    {
+        win_skip( "FlashWindow not supported\n" );
+        return;
+    }
+
+    hwnd = CreateWindowExA( 0, "MainWindowClass", "FlashWindow", WS_POPUP,
+                            0, 0, 0, 0, 0, 0, 0, NULL );
+    ok( hwnd != 0, "CreateWindowExA error %d\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    ret = pFlashWindow( NULL, TRUE );
+    ok( !ret && GetLastError() == ERROR_INVALID_PARAMETER,
+        "FlashWindow returned with %d\n", GetLastError() );
+
+    DestroyWindow( hwnd );
+
+    SetLastError( 0xdeadbeef );
+    ret = pFlashWindow( hwnd, TRUE );
+    ok( !ret && GetLastError() == ERROR_INVALID_PARAMETER,
+        "FlashWindow returned with %d\n", GetLastError() );
+}
+
 static void test_FlashWindowEx(void)
 {
     HWND hwnd;
@@ -7091,13 +7163,13 @@ static void test_FlashWindowEx(void)
     finfo.hwnd = NULL;
     SetLastError(0xdeadbeef);
     ret = pFlashWindowEx(&finfo);
-    todo_wine ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-                 "FlashWindowEx returned with %d\n", GetLastError());
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "FlashWindowEx returned with %d\n", GetLastError());
 
     finfo.hwnd = hwnd;
     SetLastError(0xdeadbeef);
     ret = pFlashWindowEx(NULL);
-    todo_wine ok(!ret && GetLastError() == ERROR_NOACCESS,
+    ok(!ret && GetLastError() == ERROR_NOACCESS,
        "FlashWindowEx returned with %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -7107,13 +7179,13 @@ static void test_FlashWindowEx(void)
     finfo.cbSize = sizeof(FLASHWINFO) - 1;
     SetLastError(0xdeadbeef);
     ret = pFlashWindowEx(&finfo);
-    todo_wine ok(!ret && GetLastError()==ERROR_INVALID_PARAMETER,
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
        "FlashWindowEx succeeded\n");
 
     finfo.cbSize = sizeof(FLASHWINFO) + 1;
     SetLastError(0xdeadbeef);
     ret = pFlashWindowEx(&finfo);
-    todo_wine ok(!ret && GetLastError()==ERROR_INVALID_PARAMETER,
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
        "FlashWindowEx succeeded\n");
     finfo.cbSize = sizeof(FLASHWINFO);
 
@@ -7121,7 +7193,7 @@ static void test_FlashWindowEx(void)
 
     SetLastError(0xdeadbeef);
     ret = pFlashWindowEx(&finfo);
-    todo_wine ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
        "FlashWindowEx returned with %d\n", GetLastError());
 
     ok(finfo.cbSize == sizeof(FLASHWINFO), "FlashWindowEx modified cdSize to %x\n", finfo.cbSize);
@@ -7137,7 +7209,7 @@ static void test_FlashWindowEx(void)
 
     SetLastError(0xdeadbeef);
     ret = pFlashWindowEx(NULL);
-    todo_wine ok(!ret && GetLastError() == ERROR_NOACCESS,
+    ok(!ret && GetLastError() == ERROR_NOACCESS,
        "FlashWindowEx returned with %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -7152,7 +7224,6 @@ static void test_FlashWindowEx(void)
     finfo.dwFlags = FLASHW_STOP;
     SetLastError(0xdeadbeef);
     ret = pFlashWindowEx(&finfo);
-todo_wine
     ok(prev != ret, "previous window state should be different\n");
 
     DestroyWindow( hwnd );
@@ -8177,6 +8248,7 @@ START_TEST(win)
     pGetGUIThreadInfo = (void *)GetProcAddress( user32, "GetGUIThreadInfo" );
     pGetProcessDefaultLayout = (void *)GetProcAddress( user32, "GetProcessDefaultLayout" );
     pSetProcessDefaultLayout = (void *)GetProcAddress( user32, "SetProcessDefaultLayout" );
+    pFlashWindow = (void *)GetProcAddress( user32, "FlashWindow" );
     pFlashWindowEx = (void *)GetProcAddress( user32, "FlashWindowEx" );
     pGetLayout = (void *)GetProcAddress( gdi32, "GetLayout" );
     pSetLayout = (void *)GetProcAddress( gdi32, "SetLayout" );
@@ -8240,6 +8312,7 @@ START_TEST(win)
     test_capture_3(hwndMain, hwndMain2);
     test_capture_4();
     test_rtl_layout();
+    test_FlashWindow();
     test_FlashWindowEx();
 
     test_CreateWindow();

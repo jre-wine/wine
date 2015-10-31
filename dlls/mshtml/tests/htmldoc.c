@@ -872,7 +872,13 @@ static IHlinkFrame HlinkFrame = { &HlinkFrameVtbl };
 
 static HRESULT WINAPI NewWindowManager_QueryInterface(INewWindowManager *iface, REFIID riid, void **ppv)
 {
-    ok(0, "unexpected call\n");
+    if(IsEqualGUID(&IID_IUnknown, riid) || IsEqualGUID(riid, &IID_INewWindowManager)) {
+        *ppv = iface;
+        return S_OK;
+    }
+
+    trace("NewWindowManager_QueryInterface %s\n", wine_dbgstr_guid(riid));
+    *ppv = NULL;
     return E_NOINTERFACE;
 }
 
@@ -2872,8 +2878,6 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
     }
 
     if(IsEqualGUID(&CGID_ShellDocView, pguidCmdGroup)) {
-        if(nCmdID != 63 && nCmdID != 178 && (!is_refresh || nCmdID != 37))
-            test_readyState(NULL);
         ok(nCmdexecopt == 0, "nCmdexecopts=%08x\n", nCmdexecopt);
 
         switch(nCmdID) {
@@ -2887,6 +2891,8 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
                 test_readyState(NULL);
                 load_state = LD_LOADING;
             }else {
+                if(!is_refresh)
+                    test_readyState(NULL);
                 if(nav_url)
                     test_GetCurMoniker(doc_unk, NULL, nav_serv_url, FALSE);
                 else if(load_from_stream)
@@ -2950,6 +2956,7 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             if(pvaIn)
                 ok(V_VT(pvaOut) == VT_EMPTY, "V_VT(pvaOut)=%d\n", V_VT(pvaOut));
 
+            test_readyState(NULL);
             return E_NOTIMPL;
 
         case 103:
@@ -2958,6 +2965,7 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             ok(pvaIn == NULL, "pvaIn != NULL\n");
             ok(pvaOut == NULL, "pvaOut != NULL\n");
 
+            test_readyState(NULL);
             return E_NOTIMPL;
 
         case 105:
@@ -2966,12 +2974,14 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             ok(pvaIn != NULL, "pvaIn == NULL\n");
             ok(pvaOut == NULL, "pvaOut != NULL\n");
 
+            test_readyState(NULL);
             return E_NOTIMPL;
 
         case 138:
             CHECK_EXPECT2(Exec_ShellDocView_138);
             ok(!pvaIn, "pvaIn != NULL\n");
             ok(!pvaOut, "pvaOut != NULL\n");
+            test_readyState(NULL);
             return S_OK;
 
         case 140:
@@ -2980,10 +2990,13 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
             ok(pvaIn == NULL, "pvaIn != NULL\n");
             ok(pvaOut == NULL, "pvaOut != NULL\n");
 
+            test_readyState(NULL);
             return E_NOTIMPL;
 
         case 83:
+        case 101:
         case 102:
+        case 132:
         case 133:
         case 134: /* TODO */
         case 135:
@@ -2997,6 +3010,7 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
         case 180:
         case 181:
         case 182:
+        case 183:
             return E_NOTIMPL;
 
         default:
@@ -8498,8 +8512,12 @@ static void test_ServiceProvider(void)
     hres = IServiceProvider_QueryService(provider, &SID_SContainerDispatch, &IID_IUnknown, (void**)&unk);
     ok(hres == S_OK, "got 0x%08x\n", hres);
     ok(iface_cmp((IUnknown*)doc, unk), "got wrong pointer\n");
-
     IUnknown_Release(unk);
+
+    hres = IServiceProvider_QueryService(provider, &SID_SHTMLEditServices, &IID_IHTMLEditServices, (void**)&unk);
+    ok(hres == S_OK, "QueryService(HTMLEditServices) failed: %08x\n", hres);
+    IUnknown_Release(unk);
+
     IServiceProvider_Release(provider);
     release_document(doc);
 }

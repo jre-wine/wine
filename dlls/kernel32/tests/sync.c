@@ -2308,6 +2308,92 @@ static void test_srwlock_example(void)
     trace("number of total exclusive accesses is %d\n", srwlock_protected_value);
 }
 
+static DWORD WINAPI alertable_wait_thread(void *param)
+{
+    HANDLE *semaphores = param;
+    LARGE_INTEGER timeout;
+    NTSTATUS status;
+    DWORD result;
+
+    ReleaseSemaphore(semaphores[0], 1, NULL);
+    result = WaitForMultipleObjectsEx(1, &semaphores[1], TRUE, 1000, TRUE);
+    ok(result == WAIT_IO_COMPLETION, "expected WAIT_IO_COMPLETION, got %u\n", result);
+    result = WaitForMultipleObjectsEx(1, &semaphores[1], TRUE, 200, TRUE);
+    ok(result == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %u\n", result);
+
+    ReleaseSemaphore(semaphores[0], 1, NULL);
+    timeout.QuadPart = -10000000;
+    status = pNtWaitForMultipleObjects(1, &semaphores[1], FALSE, TRUE, &timeout);
+    ok(status == STATUS_USER_APC, "expected STATUS_USER_APC, got %08x\n", status);
+    timeout.QuadPart = -2000000;
+    status = pNtWaitForMultipleObjects(1, &semaphores[1], FALSE, TRUE, &timeout);
+    ok(status == STATUS_WAIT_0, "expected STATUS_WAIT_0, got %08x\n", status);
+
+    ReleaseSemaphore(semaphores[0], 1, NULL);
+    timeout.QuadPart = -10000000;
+    status = pNtWaitForMultipleObjects(1, &semaphores[1], FALSE, TRUE, &timeout);
+    ok(status == STATUS_USER_APC, "expected STATUS_USER_APC, got %08x\n", status);
+    result = WaitForSingleObject(semaphores[0], 0);
+    ok(result == WAIT_TIMEOUT, "expected WAIT_TIMEOUT, got %u\n", result);
+
+    return 0;
+}
+
+static void CALLBACK alertable_wait_apc(ULONG_PTR userdata)
+{
+    HANDLE *semaphores = (void *)userdata;
+    ReleaseSemaphore(semaphores[1], 1, NULL);
+}
+
+static void CALLBACK alertable_wait_apc2(ULONG_PTR userdata)
+{
+    HANDLE *semaphores = (void *)userdata;
+    DWORD result;
+
+    result = WaitForSingleObject(semaphores[0], 1000);
+    ok(result == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %u\n", result);
+}
+
+static void test_alertable_wait(void)
+{
+    HANDLE thread, semaphores[2];
+    DWORD result;
+
+    semaphores[0] = CreateSemaphoreW(NULL, 0, 2, NULL);
+    ok(semaphores[0] != NULL, "CreateSemaphore failed with %u\n", GetLastError());
+    semaphores[1] = CreateSemaphoreW(NULL, 0, 1, NULL);
+    ok(semaphores[1] != NULL, "CreateSemaphore failed with %u\n", GetLastError());
+    thread = CreateThread(NULL, 0, alertable_wait_thread, semaphores, 0, NULL);
+    ok(thread != NULL, "CreateThread failed with %u\n", GetLastError());
+
+    result = WaitForSingleObject(semaphores[0], 1000);
+    ok(result == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %u\n", result);
+    Sleep(100); /* ensure the thread is blocking in WaitForMultipleObjectsEx */
+    result = QueueUserAPC(alertable_wait_apc, thread, (ULONG_PTR)semaphores);
+    ok(result != 0, "QueueUserAPC failed with %u\n", GetLastError());
+
+    result = WaitForSingleObject(semaphores[0], 1000);
+    ok(result == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %u\n", result);
+    Sleep(100); /* ensure the thread is blocking in NtWaitForMultipleObjects */
+    result = QueueUserAPC(alertable_wait_apc, thread, (ULONG_PTR)semaphores);
+    ok(result != 0, "QueueUserAPC failed with %u\n", GetLastError());
+
+    result = WaitForSingleObject(semaphores[0], 1000);
+    ok(result == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %u\n", result);
+    Sleep(100); /* ensure the thread is blocking in NtWaitForMultipleObjects */
+    result = QueueUserAPC(alertable_wait_apc2, thread, (ULONG_PTR)semaphores);
+    ok(result != 0, "QueueUserAPC failed with %u\n", GetLastError());
+    result = QueueUserAPC(alertable_wait_apc2, thread, (ULONG_PTR)semaphores);
+    ok(result != 0, "QueueUserAPC failed with %u\n", GetLastError());
+    ReleaseSemaphore(semaphores[0], 2, NULL);
+
+    result = WaitForSingleObject(thread, 1000);
+    ok(result == WAIT_OBJECT_0, "expected WAIT_OBJECT_0, got %u\n", result);
+    CloseHandle(thread);
+    CloseHandle(semaphores[0]);
+    CloseHandle(semaphores[1]);
+}
+
 START_TEST(sync)
 {
     HMODULE hdll = GetModuleHandleA("kernel32.dll");
@@ -2355,4 +2441,5 @@ START_TEST(sync)
     test_condvars_consumer_producer();
     test_srwlock_base();
     test_srwlock_example();
+    test_alertable_wait();
 }

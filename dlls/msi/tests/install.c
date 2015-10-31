@@ -4716,6 +4716,11 @@ static void test_propcase(void)
     ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
     ok(delete_pf("msitest", FALSE), "Directory not created\n");
 
+    r = MsiInstallProductA(msifile, "BLAHBLAH=\"Copyright \"\"My Company\"\" 2015\" MyProp=42");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+    ok(delete_pf("msitest\\augustus", TRUE), "File not installed\n");
+    ok(delete_pf("msitest", FALSE), "Directory not created\n");
+
 error:
     DeleteFileA(msifile);
     DeleteFileA("msitest\\augustus");

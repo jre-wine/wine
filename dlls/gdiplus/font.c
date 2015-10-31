@@ -178,7 +178,7 @@ GpStatus WINGDIPAPI GdipCreateFont(GDIPCONST GpFontFamily *fontFamily,
 
     if (!ret) return NotTrueTypeFont;
 
-    *font = GdipAlloc(sizeof(GpFont));
+    *font = heap_alloc_zero(sizeof(GpFont));
     if (!*font) return OutOfMemory;
 
     (*font)->unit = unit;
@@ -188,7 +188,7 @@ GpStatus WINGDIPAPI GdipCreateFont(GDIPCONST GpFontFamily *fontFamily,
     stat = clone_font_family(fontFamily, &(*font)->family);
     if (stat != Ok)
     {
-        GdipFree(*font);
+        heap_free(*font);
         return stat;
     }
 
@@ -224,7 +224,7 @@ GpStatus WINGDIPAPI GdipCreateFontFromLogfontW(HDC hdc,
 
     if (!ret) return NotTrueTypeFont;
 
-    *font = GdipAlloc(sizeof(GpFont));
+    *font = heap_alloc_zero(sizeof(GpFont));
     if (!*font) return OutOfMemory;
 
     (*font)->unit = UnitWorld;
@@ -234,7 +234,7 @@ GpStatus WINGDIPAPI GdipCreateFontFromLogfontW(HDC hdc,
     stat = GdipCreateFontFamilyFromName(facename, NULL, &(*font)->family);
     if (stat != Ok)
     {
-        GdipFree(*font);
+        heap_free(*font);
         return NotTrueTypeFont;
     }
 
@@ -275,7 +275,7 @@ GpStatus WINGDIPAPI GdipDeleteFont(GpFont* font)
         return InvalidParameter;
 
     GdipDeleteFontFamily(font->family);
-    GdipFree(font);
+    heap_free(font);
 
     return Ok;
 }
@@ -526,12 +526,12 @@ GpStatus WINGDIPAPI GdipCloneFont(GpFont *font, GpFont **cloneFont)
     if(!font || !cloneFont)
         return InvalidParameter;
 
-    *cloneFont = GdipAlloc(sizeof(GpFont));
+    *cloneFont = heap_alloc_zero(sizeof(GpFont));
     if(!*cloneFont)    return OutOfMemory;
 
     **cloneFont = *font;
     stat = GdipCloneFontFamily(font->family, &(*cloneFont)->family);
-    if (stat != Ok) GdipFree(*cloneFont);
+    if (stat != Ok) heap_free(*cloneFont);
 
     return stat;
 }
@@ -759,7 +759,7 @@ GpStatus WINGDIPAPI GdipCreateFontFamilyFromName(GDIPCONST WCHAR *name,
     stat = find_installed_font(name, &fm);
     if (stat != Ok) return stat;
 
-    ffamily = GdipAlloc(sizeof (GpFontFamily));
+    ffamily = heap_alloc_zero(sizeof (GpFontFamily));
     if (!ffamily) return OutOfMemory;
 
     lstrcpyW(ffamily->FamilyName, fm.facename);
@@ -778,7 +778,7 @@ GpStatus WINGDIPAPI GdipCreateFontFamilyFromName(GDIPCONST WCHAR *name,
 
 static GpStatus clone_font_family(const GpFontFamily *family, GpFontFamily **clone)
 {
-    *clone = GdipAlloc(sizeof(GpFontFamily));
+    *clone = heap_alloc_zero(sizeof(GpFontFamily));
     if (!*clone) return OutOfMemory;
 
     **clone = *family;
@@ -870,7 +870,7 @@ GpStatus WINGDIPAPI GdipDeleteFontFamily(GpFontFamily *FontFamily)
         return InvalidParameter;
     TRACE("Deleting %p (%s)\n", FontFamily, debugstr_w(FontFamily->FamilyName));
 
-    GdipFree (FontFamily);
+    heap_free (FontFamily);
 
     return Ok;
 }
@@ -1098,7 +1098,7 @@ GpStatus WINGDIPAPI GdipNewPrivateFontCollection(GpFontCollection** fontCollecti
     if (!fontCollection)
         return InvalidParameter;
 
-    *fontCollection = GdipAlloc(sizeof(GpFontCollection));
+    *fontCollection = heap_alloc_zero(sizeof(GpFontCollection));
     if (!*fontCollection) return OutOfMemory;
 
     (*fontCollection)->FontFamilies = NULL;
@@ -1122,8 +1122,8 @@ GpStatus WINGDIPAPI GdipDeletePrivateFontCollection(GpFontCollection **fontColle
     if (!fontCollection)
         return InvalidParameter;
 
-    for (i = 0; i < (*fontCollection)->count; i++) GdipFree((*fontCollection)->FontFamilies[i]);
-    GdipFree(*fontCollection);
+    for (i = 0; i < (*fontCollection)->count; i++) heap_free((*fontCollection)->FontFamilies[i]);
+    heap_free(*fontCollection);
 
     return Ok;
 }
@@ -1590,7 +1590,7 @@ void free_installed_fonts(void)
 {
     while (installedFontCollection.count)
         GdipDeleteFontFamily(installedFontCollection.FontFamilies[--installedFontCollection.count]);
-    HeapFree(GetProcessHeap(), 0, installedFontCollection.FontFamilies);
+    heap_free(installedFontCollection.FontFamilies);
     installedFontCollection.FontFamilies = NULL;
     installedFontCollection.allocated = 0;
 }
@@ -1612,13 +1612,13 @@ static INT CALLBACK add_font_proc(const LOGFONTW *lfw, const TEXTMETRICW *ntm,
     if (fonts->allocated == fonts->count)
     {
         INT new_alloc_count = fonts->allocated+50;
-        GpFontFamily** new_family_list = HeapAlloc(GetProcessHeap(), 0, new_alloc_count*sizeof(void*));
+        GpFontFamily** new_family_list = heap_alloc(new_alloc_count*sizeof(void*));
 
         if (!new_family_list)
             return 0;
 
         memcpy(new_family_list, fonts->FontFamilies, fonts->count*sizeof(void*));
-        HeapFree(GetProcessHeap(), 0, fonts->FontFamilies);
+        heap_free(fonts->FontFamilies);
         fonts->FontFamilies = new_family_list;
         fonts->allocated = new_alloc_count;
     }

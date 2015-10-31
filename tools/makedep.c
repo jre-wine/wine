@@ -149,10 +149,16 @@ struct makefile
     struct strarray vars;
     struct strarray include_args;
     struct strarray define_args;
+    struct strarray programs;
+    struct strarray scripts;
     struct strarray appmode;
     struct strarray imports;
     struct strarray delayimports;
     struct strarray extradllflags;
+    struct strarray install_lib;
+    struct strarray install_dev;
+    struct strarray install_lib_rules;
+    struct strarray install_dev_rules;
     struct list     sources;
     struct list     includes;
     const char     *base_dir;
@@ -171,8 +177,8 @@ struct makefile
 
 static struct makefile *top_makefile;
 
-static const char *makefile_name = "Makefile";
-static const char *Separator = "### Dependencies";
+static const char *output_makefile_name = "Makefile";
+static const char *input_makefile_name;
 static const char *input_file_name;
 static const char *output_file_name;
 static const char *temp_file_name;
@@ -186,7 +192,7 @@ static const char Usage[] =
     "Options:\n"
     "   -R from to  Compute the relative path between two directories\n"
     "   -fxxx       Store output in file 'xxx' (default: Makefile)\n"
-    "   -sxxx       Use 'xxx' as separator (default: \"### Dependencies\")\n";
+    "   -ixxx       Read input from file 'xxx' (default: Makefile.in)\n";
 
 
 #ifndef __GNUC__
@@ -1462,6 +1468,28 @@ static struct incl_file *add_src_file( struct makefile *make, const char *name )
 
 
 /*******************************************************************
+ *         open_input_makefile
+ */
+static FILE *open_input_makefile( struct makefile *make )
+{
+    FILE *ret;
+
+    if (make->base_dir)
+        input_file_name = base_dir_path( make, input_makefile_name );
+    else
+        input_file_name = output_makefile_name;  /* always use output name for main Makefile */
+
+    input_line = 0;
+    if (!(ret = fopen( input_file_name, "r" )))
+    {
+        input_file_name = root_dir_path( input_file_name );
+        if (!(ret = fopen( input_file_name, "r" ))) fatal_perror( "open" );
+    }
+    return ret;
+}
+
+
+/*******************************************************************
  *         get_make_variable
  */
 static char *get_make_variable( struct makefile *make, const char *name )
@@ -1496,23 +1524,21 @@ static char *get_expanded_make_variable( struct makefile *make, const char *name
             var = get_make_variable( make, p + 2 );
             tmp = replace_substr( expand, p, end - p, var ? var : "" );
             free( var );
+            /* switch to the new string */
+            p = tmp + (p - expand);
+            free( expand );
+            expand = tmp;
         }
         else if (p[1] == '{')  /* don't expand ${} variables */
         {
             if (!(end = strchr( p + 2, '}' ))) fatal_error( "syntax error in '%s'\n", expand );
             p = end + 1;
-            continue;
         }
         else if (p[1] == '$')
         {
-            tmp = replace_substr( expand, p, 2, "$" );
+            p += 2;
         }
         else fatal_error( "syntax error in '%s'\n", expand );
-
-        /* switch to the new string */
-        p = tmp + (p - expand);
-        free( expand );
-        expand = tmp;
     }
 
     /* consider empty variables undefined */
@@ -1536,6 +1562,19 @@ static struct strarray get_expanded_make_var_array( struct makefile *make, const
         for (token = strtok( value, " \t" ); token; token = strtok( NULL, " \t" ))
             strarray_add( &ret, token );
     return ret;
+}
+
+
+/*******************************************************************
+ *         file_local_var
+ */
+static char *file_local_var( const char *file, const char *name )
+{
+    char *p, *var;
+
+    var = strmake( "%s_%s", file, name );
+    for (p = var; *p; p++) if (!isalnum( *p )) *p = '_';
+    return var;
 }
 
 
@@ -1580,10 +1619,7 @@ static struct makefile *parse_makefile( const char *path, const char *separator 
         if (!strcmp( make->base_dir, "." )) make->base_dir = NULL;
     }
 
-    input_file_name = base_dir_path( make, makefile_name );
-    if (!(file = fopen( input_file_name, "r" ))) fatal_perror( "open" );
-
-    input_line = 0;
+    file = open_input_makefile( make );
     while ((buffer = get_line( file )))
     {
         if (separator && !strncmp( buffer, separator, strlen(separator) )) break;
@@ -1726,12 +1762,101 @@ static void output_include( struct incl_file *pFile, struct incl_file *owner )
 
 
 /*******************************************************************
+ *         add_install_rule
+ */
+static void add_install_rule( struct makefile *make, const char *target,
+                              const char *file, const char *dest )
+{
+    if (strarray_exists( &make->install_lib, target ))
+    {
+        strarray_add( &make->install_lib_rules, file );
+        strarray_add( &make->install_lib_rules, dest );
+    }
+    else if (strarray_exists( &make->install_dev, target ))
+    {
+        strarray_add( &make->install_dev_rules, file );
+        strarray_add( &make->install_dev_rules, dest );
+    }
+}
+
+
+/*******************************************************************
+ *         output_install_rules
+ *
+ * Rules are stored as a (file,dest) pair of values.
+ * The first char of dest indicates the type of install.
+ */
+static void output_install_rules( struct makefile *make, struct strarray files,
+                                  const char *target, struct strarray *phony_targets )
+{
+    unsigned int i;
+    char *install_sh;
+    struct strarray targets = empty_strarray;
+
+    if (!files.count) return;
+
+    for (i = 0; i < files.count; i += 2)
+        if (strchr( "dps", files.str[i + 1][0] ))  /* only for files copied from object dir */
+            strarray_add_uniq( &targets, files.str[i] );
+
+    output( "install %s::", target );
+    output_filenames_obj_dir( make, targets );
+    output( "\n" );
+
+    install_sh = top_dir_path( make, "tools/install-sh" );
+    for (i = 0; i < files.count; i += 2)
+    {
+        const char *file = files.str[i];
+        const char *dest = files.str[i + 1];
+
+        switch (*dest)
+        {
+        case 'd':  /* data file */
+            output( "\t%s -m 644 $(INSTALL_DATA_FLAGS) %s $(DESTDIR)%s\n",
+                    install_sh, obj_dir_path( make, file ), dest + 1 );
+            break;
+        case 'D':  /* data file in source dir */
+            output( "\t%s -m 644 $(INSTALL_DATA_FLAGS) %s $(DESTDIR)%s\n",
+                    install_sh, src_dir_path( make, file ), dest + 1 );
+            break;
+        case 'p':  /* program file */
+            output( "\tSTRIPPROG=\"$(STRIP)\" %s $(INSTALL_PROGRAM_FLAGS) %s $(DESTDIR)%s\n",
+                    install_sh, obj_dir_path( make, file ), dest + 1 );
+            break;
+        case 's':  /* script */
+            output( "\t%s $(INSTALL_SCRIPT_FLAGS) %s $(DESTDIR)%s\n",
+                    install_sh, obj_dir_path( make, file ), dest + 1 );
+            break;
+        case 'S':  /* script in source dir */
+            output( "\t%s $(INSTALL_SCRIPT_FLAGS) %s $(DESTDIR)%s\n",
+                    install_sh, src_dir_path( make, file ), dest + 1 );
+            break;
+        case 'y':  /* symlink */
+            output( "\t$(RM) $(DESTDIR)%s && $(LN_S) %s $(DESTDIR)%s\n", dest + 1, file, dest + 1 );
+            break;
+        default:
+            assert(0);
+        }
+    }
+
+    output( "uninstall::\n" );
+    output( "\t$(RM)" );
+    for (i = 0; i < files.count; i += 2) output_filename( strmake( "$(DESTDIR)%s", files.str[i + 1] + 1 ));
+    output( "\n" );
+
+    strarray_add( phony_targets, "install" );
+    strarray_add( phony_targets, target );
+    strarray_add( phony_targets, "uninstall" );
+}
+
+
+/*******************************************************************
  *         output_sources
  */
 static struct strarray output_sources( struct makefile *make, struct strarray *testlist_files )
 {
     struct incl_file *source;
-    unsigned int i;
+    unsigned int i, j;
     struct strarray object_files = empty_strarray;
     struct strarray crossobj_files = empty_strarray;
     struct strarray res_files = empty_strarray;
@@ -1746,11 +1871,14 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
     struct strarray includes = empty_strarray;
     struct strarray subdirs = empty_strarray;
     struct strarray phony_targets = empty_strarray;
-    struct strarray all_targets = get_expanded_make_var_array( make, "PROGRAMS" );
+    struct strarray all_targets = empty_strarray;
+    char *ldrpath_local   = get_expanded_make_variable( make, "LDRPATH_LOCAL" );
+    char *ldrpath_install = get_expanded_make_variable( make, "LDRPATH_INSTALL" );
 
     for (i = 0; i < linguas.count; i++)
         strarray_add( &mo_files, strmake( "%s/%s.mo", top_obj_dir_path( make, "po" ), linguas.str[i] ));
 
+    strarray_add( &phony_targets, "all" );
     strarray_add( &includes, strmake( "-I%s", obj_dir_path( make, "" )));
     if (make->src_dir) strarray_add( &includes, strmake( "-I%s", make->src_dir ));
     if (make->parent_dir) strarray_add( &includes, strmake( "-I%s", src_dir_path( make, make->parent_dir )));
@@ -1775,7 +1903,7 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
             strarray_add_uniq( &subdirs, subdir );
         }
 
-        extradefs = get_expanded_make_var_array( make, strmake( "%s_EXTRADEFS", obj ));
+        extradefs = get_expanded_make_var_array( make, file_local_var( obj, "EXTRADEFS" ));
 
         if (!strcmp( ext, "y" ))  /* yacc file */
         {
@@ -1893,24 +2021,24 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
         {
             if (strendswith( obj, ".man" ) && source->file->args)
             {
+                struct strarray symlinks;
                 char *dir, *dest = replace_extension( obj, ".man", "" );
                 char *lang = strchr( dest, '.' );
                 char *section = source->file->args;
                 if (lang)
                 {
                     *lang++ = 0;
-                    dir = strmake( "$(DESTDIR)$(mandir)/%s/man%s", lang, section );
+                    dir = strmake( "$(mandir)/%s/man%s", lang, section );
                 }
-                else dir = strmake( "$(DESTDIR)$(mandir)/man%s", section );
-                output( "install-man-pages:: %s\n", obj_dir_path( make, obj ));
-                output( "\t$(INSTALL_DATA) %s %s/%s.%s\n", obj_dir_path( make, obj ), dir, dest, section );
-                output( "uninstall::\n" );
-                output( "\t$(RM) %s/%s.%s\n", dir, dest, section );
+                else dir = strmake( "$(mandir)/man%s", section );
+                add_install_rule( make, dest, xstrdup(obj), strmake( "d%s/%s.%s", dir, dest, section ));
+                symlinks = get_expanded_make_var_array( make, file_local_var( dest, "SYMLINKS" ));
+                for (j = 0; j < symlinks.count; j++)
+                    add_install_rule( make, symlinks.str[j], strmake( "%s.%s", dest, section ),
+                                      strmake( "y%s/%s.%s", dir, symlinks.str[j], section ));
                 free( dest );
                 free( dir );
                 strarray_add( &all_targets, xstrdup(obj) );
-                strarray_add_uniq( &phony_targets, "install-man-pages" );
-                strarray_add_uniq( &phony_targets, "uninstall" );
             }
             else strarray_add( &clean_files, xstrdup(obj) );
             output( "%s: %s\n", obj_dir_path( make, obj ), source->filename );
@@ -1929,10 +2057,8 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
             }
             if (source->file->flags & FLAG_INSTALL)
             {
-                output( "install install-lib::\n" );
-                output( "\t$(INSTALL_DATA) %s $(DESTDIR)$(fontdir)/%s.ttf\n", ttf_file, obj );
-                output( "uninstall::\n" );
-                output( "\t$(RM) $(DESTDIR)$(fontdir)/%s.ttf\n", obj );
+                strarray_add( &make->install_lib_rules, strmake( "%s.ttf", obj ));
+                strarray_add( &make->install_lib_rules, strmake( "D$(fontdir)/%s.ttf", obj ));
             }
             if (source->file->flags & FLAG_SFD_FONTS)
             {
@@ -1947,18 +2073,9 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
                     output( "%s: %s %s\n", obj_dir_path( make, font ),
                             tools_path( make, "sfnt2fon" ), ttf_file );
                     output( "\t%s -o $@ %s %s\n", tools_path( make, "sfnt2fon" ), ttf_file, args );
-                    output( "install install-lib:: %s\n", font );
-                    output( "\t$(INSTALL_DATA) %s $(DESTDIR)$(fontdir)/%s\n",
-                            obj_dir_path( make, font ), font );
-                    output( "uninstall::\n" );
-                    output( "\t$(RM) $(DESTDIR)$(fontdir)/%s\n", font );
+                    strarray_add( &make->install_lib_rules, xstrdup(font) );
+                    strarray_add( &make->install_lib_rules, strmake( "d$(fontdir)/%s", font ));
                 }
-            }
-            if (source->file->flags & (FLAG_INSTALL | FLAG_SFD_FONTS))
-            {
-                strarray_add_uniq( &phony_targets, "install" );
-                strarray_add_uniq( &phony_targets, "install-lib" );
-                strarray_add_uniq( &phony_targets, "uninstall" );
             }
             continue;  /* no dependencies */
         }
@@ -2097,11 +2214,17 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
         {
             strarray_add( &all_targets, strmake( "%s%s", make->module, dll_ext ));
             strarray_add( &all_targets, strmake( "%s.fake", make->module ));
+            add_install_rule( make, make->module, strmake( "%s%s", make->module, dll_ext ),
+                              strmake( "p$(dlldir)/%s%s", make->module, dll_ext ));
+            add_install_rule( make, make->module, strmake( "%s.fake", make->module ),
+                              strmake( "d$(fakedlldir)/%s", make->module ));
             output( "%s%s %s.fake:", module_path, dll_ext, module_path );
         }
         else
         {
             strarray_add( &all_targets, make->module );
+            add_install_rule( make, make->module, make->module,
+                              strmake( "p$(%s)/%s", spec_file ? "dlldir" : "bindir", make->module ));
             output( "%s:", module_path );
         }
         if (spec_file) output_filename( spec_file );
@@ -2136,6 +2259,8 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
                 output_filenames( target_flags );
                 if (make->is_win16) output_filename( "-m16" );
                 output( "\n" );
+                add_install_rule( make, make->importlib, strmake( "lib%s.def", make->importlib ),
+                                  strmake( "d$(dlldir)/lib%s.def", make->importlib ));
                 if (implib_objs.count)
                 {
                     strarray_add( &clean_files, strmake( "lib%s.def.a", make->importlib ));
@@ -2147,6 +2272,8 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
                     output_filenames_obj_dir( make, implib_objs );
                     output( "\n" );
                     output( "\t$(RANLIB) $@\n" );
+                    add_install_rule( make, make->importlib, strmake( "lib%s.def.a", make->importlib ),
+                                      strmake( "d$(dlldir)/lib%s.def.a", make->importlib ));
                 }
             }
             else
@@ -2159,6 +2286,8 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
                 output_filenames( target_flags );
                 output_filenames_obj_dir( make, implib_objs );
                 output( "\n" );
+                add_install_rule( make, make->importlib, strmake( "lib%s.a", make->importlib ),
+                                  strmake( "d$(dlldir)/lib%s.a", make->importlib ));
             }
             if (crosstarget && !make->is_win16)
             {
@@ -2217,6 +2346,12 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
             }
             else output( "manpages htmlpages sgmlpages xmlpages::\n" );
         }
+        else if (*dll_ext)
+        {
+            char *binary = replace_extension( make->module, ".exe", "" );
+            add_install_rule( make, binary, tools_dir_path( make, "wineapploader" ),
+                              strmake( "s$(bindir)/%s", binary ));
+        }
     }
 
     if (make->staticlib)
@@ -2251,7 +2386,7 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
 
         for (i = 0; i < make->imports.count; i++)
             strarray_add( &all_libs, strmake( "-l%s", make->imports.str[i] ));
-        strarray_addall( &all_libs, get_expanded_make_var_array( make, "LIBS" ));
+        strarray_addall( &all_libs, libs );
 
         strarray_add( &all_targets, strmake( "%s%s", testmodule, dll_ext ));
         strarray_add( &clean_files, strmake( "%s%s", stripped, dll_ext ));
@@ -2331,12 +2466,81 @@ static struct strarray output_sources( struct makefile *make, struct strarray *t
         *testlist_files = strarray_replace_extension( &ok_files, ".ok", "" );
     }
 
+    for (i = 0; i < make->programs.count; i++)
+    {
+        char *program_installed = NULL;
+        char *program = strmake( "%s%s", make->programs.str[i], exe_ext );
+        struct strarray all_libs = empty_strarray;
+        struct strarray objs = get_expanded_make_var_array( make,
+                                                 file_local_var( make->programs.str[i], "OBJS" ));
+        struct strarray symlinks = get_expanded_make_var_array( make,
+                                                 file_local_var( make->programs.str[i], "SYMLINKS" ));
+
+        if (!objs.count) objs = object_files;
+        output( "%s:", obj_dir_path( make, program ) );
+        output_filenames_obj_dir( make, objs );
+        output( "\n" );
+        output( "\t$(CC) -o $@" );
+        output_filenames_obj_dir( make, objs );
+        strarray_add( &all_libs, top_obj_dir_path( make, "libs/port/libwine_port.a" ));
+        strarray_addall( &all_libs, get_expanded_make_var_array( make, "EXTRALIBS" ));
+        strarray_addall( &all_libs, libs );
+        strarray_addall( &all_libs, get_expanded_make_var_array( make,
+                                                      file_local_var( make->programs.str[i], "LDFLAGS" )));
+
+        if (strarray_exists( &all_libs, "-lwine" ))
+        {
+            strarray_add( &all_libs, strmake( "-L%s", top_obj_dir_path( make, "libs/wine" )));
+            if (ldrpath_local && ldrpath_install)
+            {
+                program_installed = strmake( "%s-installed%s", make->programs.str[i], exe_ext );
+                output_filename( ldrpath_local );
+                output_filenames( all_libs );
+                output_filename( "$(LDFLAGS)" );
+                output( "\n" );
+                output( "%s:", obj_dir_path( make, program_installed ) );
+                output_filenames_obj_dir( make, objs );
+                output( "\n" );
+                output( "\t$(CC) -o $@" );
+                output_filenames_obj_dir( make, objs );
+                output_filename( ldrpath_install );
+                strarray_add( &all_targets, program_installed );
+            }
+        }
+
+        output_filenames( all_libs );
+        output_filename( "$(LDFLAGS)" );
+        output( "\n" );
+        strarray_add( &all_targets, program );
+
+        if (symlinks.count)
+        {
+            output_filenames_obj_dir( make, symlinks );
+            output( ": %s\n", obj_dir_path( make, program ));
+            output( "\t$(RM) $@ && $(LN_S) %s $@\n", obj_dir_path( make, program ));
+            strarray_addall( &all_targets, symlinks );
+        }
+
+        add_install_rule( make, program, program_installed ? program_installed : program,
+                          strmake( "p$(bindir)/%s", program ));
+        for (j = 0; j < symlinks.count; j++)
+            add_install_rule( make, symlinks.str[j], program,
+                              strmake( "y$(bindir)/%s%s", symlinks.str[j], exe_ext ));
+    }
+
+    for (i = 0; i < make->scripts.count; i++)
+        add_install_rule( make, make->scripts.str[i], make->scripts.str[i],
+                          strmake( "S$(bindir)/%s", make->scripts.str[i] ));
+
     if (all_targets.count)
     {
         output( "all:" );
         output_filenames_obj_dir( make, all_targets );
         output( "\n" );
     }
+
+    output_install_rules( make, make->install_lib_rules, "install-lib", &phony_targets );
+    output_install_rules( make, make->install_dev_rules, "install-dev", &phony_targets );
 
     strarray_addall( &clean_files, object_files );
     strarray_addall( &clean_files, crossobj_files );
@@ -2513,38 +2717,48 @@ static void output_gitignore( const char *dest, struct strarray files )
 
 
 /*******************************************************************
+ *         output_top_variables
+ */
+static void output_top_variables( struct makefile *make )
+{
+    unsigned int i;
+    struct strarray *vars = &top_makefile->vars;
+
+    if (!make->base_dir) return;  /* don't output variables in the top makefile */
+
+    output( "# Automatically generated by make depend; DO NOT EDIT!!\n\n" );
+    output( "all:\n\n" );
+    for (i = 0; i < vars->count; i += 2)
+        output( "%s = %s\n", vars->str[i], get_make_variable( make, vars->str[i] ));
+    output( "\n" );
+}
+
+
+/*******************************************************************
  *         output_dependencies
  */
-static void output_dependencies( struct makefile *make, const char *path )
+static void output_dependencies( struct makefile *make )
 {
     struct strarray targets, testlist_files = empty_strarray, ignore_files = empty_strarray;
+    char buffer[1024];
+    FILE *src_file;
 
-    if (Separator && ((output_file = fopen( path, "r" ))))
-    {
-        char buffer[1024];
-        FILE *tmp_file = create_temp_file( path );
-        int found = 0;
+    output_file_name = base_dir_path( make, output_makefile_name );
+    output_file = create_temp_file( output_file_name );
+    output_top_variables( make );
 
-        while (fgets( buffer, sizeof(buffer), output_file ) && !found)
-        {
-            if (fwrite( buffer, 1, strlen(buffer), tmp_file ) != strlen(buffer)) fatal_perror( "write" );
-            found = !strncmp( buffer, Separator, strlen(Separator) );
-        }
-        if (fclose( output_file )) fatal_perror( "write" );
-        output_file = tmp_file;
-        if (!found) output( "\n%s\n", Separator );
-    }
-    else
-    {
-        if (!(output_file = fopen( path, Separator ? "a" : "w" )))
-            fatal_perror( "%s", path );
-    }
+    /* copy the contents of the source makefile */
+    src_file = open_input_makefile( make );
+    while (fgets( buffer, sizeof(buffer), src_file ))
+        if (fwrite( buffer, 1, strlen(buffer), output_file ) != strlen(buffer)) fatal_perror( "write" );
+    if (fclose( src_file )) fatal_perror( "close" );
+    input_file_name = NULL;
 
     targets = output_sources( make, &testlist_files );
 
     fclose( output_file );
     output_file = NULL;
-    if (temp_file_name) rename_temp_file( path );
+    rename_temp_file( output_file_name );
 
     strarray_add( &ignore_files, ".gitignore" );
     strarray_add( &ignore_files, "Makefile" );
@@ -2555,6 +2769,8 @@ static void output_dependencies( struct makefile *make, const char *path )
         output_testlist( base_dir_path( make, "testlist.c" ), testlist_files );
     if (!make->src_dir && make->base_dir)
         output_gitignore( base_dir_path( make, ".gitignore" ), ignore_files );
+
+    output_file_name = NULL;
 }
 
 
@@ -2585,7 +2801,7 @@ static void update_makefile( const char *path )
     struct incl_file *file;
     struct makefile *make;
 
-    make = parse_makefile( path, Separator );
+    make = parse_makefile( path, NULL );
 
     if (root_src_dir)
     {
@@ -2602,10 +2818,14 @@ static void update_makefile( const char *path )
     make->staticlib     = get_expanded_make_variable( make, "STATICLIB" );
     make->importlib     = get_expanded_make_variable( make, "IMPORTLIB" );
 
+    make->programs      = get_expanded_make_var_array( make, "PROGRAMS" );
+    make->scripts       = get_expanded_make_var_array( make, "SCRIPTS" );
     make->appmode       = get_expanded_make_var_array( make, "APPMODE" );
     make->imports       = get_expanded_make_var_array( make, "IMPORTS" );
     make->delayimports  = get_expanded_make_var_array( make, "DELAYIMPORTS" );
     make->extradllflags = get_expanded_make_var_array( make, "EXTRADLLFLAGS" );
+    make->install_lib   = get_expanded_make_var_array( make, "INSTALL_LIB" );
+    make->install_dev   = get_expanded_make_var_array( make, "INSTALL_DEV" );
 
     if (make->module && strendswith( make->module, ".a" )) make->staticlib = make->module;
 
@@ -2614,6 +2834,10 @@ static void update_makefile( const char *path )
 
     for (i = 0; i < make->imports.count && !make->use_msvcrt; i++)
         make->use_msvcrt = !strncmp( make->imports.str[i], "msvcr", 5 );
+
+    make->install_lib_rules = empty_strarray;
+    make->install_dev_rules = empty_strarray;
+    if (make->module && !make->install_lib.count) strarray_add( &make->install_lib, make->module );
 
     make->include_args = empty_strarray;
     make->define_args = empty_strarray;
@@ -2629,6 +2853,9 @@ static void update_makefile( const char *path )
 
     list_init( &make->sources );
     list_init( &make->includes );
+
+    /* FIXME: target dir has to exist to allow locating srcdir-relative include files */
+    if (make->base_dir) create_dir( make->base_dir );
 
     for (var = source_vars; *var; var++)
     {
@@ -2650,9 +2877,7 @@ static void update_makefile( const char *path )
 
     LIST_FOR_EACH_ENTRY( file, &make->includes, struct incl_file, entry ) parse_file( make, file, 0 );
 
-    output_file_name = base_dir_path( make, makefile_name );
-    output_dependencies( make, output_file_name );
-    output_file_name = NULL;
+    output_dependencies( make );
 }
 
 
@@ -2692,14 +2917,13 @@ static int parse_option( const char *opt )
     switch(opt[1])
     {
     case 'f':
-        if (opt[2]) makefile_name = opt + 2;
+        if (opt[2]) output_makefile_name = opt + 2;
+        break;
+    case 'i':
+        if (opt[2]) input_makefile_name = opt + 2;
         break;
     case 'R':
         relative_dir_mode = 1;
-        break;
-    case 's':
-        if (opt[2]) Separator = opt + 2;
-        else Separator = NULL;
         break;
     default:
         fprintf( stderr, "Unknown option '%s'\n%s", opt, Usage );
@@ -2758,6 +2982,8 @@ int main( int argc, char *argv[] )
 
     for (i = 0; i < HASH_SIZE; i++) list_init( &files[i] );
 
+    if (!input_makefile_name) input_makefile_name = strmake( "%s.in", output_makefile_name );
+
     top_makefile = parse_makefile( NULL, "# End of common header" );
 
     linguas      = get_expanded_make_var_array( top_makefile, "LINGUAS" );
@@ -2784,6 +3010,7 @@ int main( int argc, char *argv[] )
 
     if (root_src_dir && !strcmp( root_src_dir, "." )) root_src_dir = NULL;
     if (tools_dir && !strcmp( tools_dir, "." )) tools_dir = NULL;
+    if (!exe_ext) exe_ext = "";
     if (!tools_ext) tools_ext = "";
     if (!dll_prefix) dll_prefix = "";
     if (!man_ext) man_ext = "3w";

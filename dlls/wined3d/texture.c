@@ -253,6 +253,12 @@ void wined3d_texture_bind(struct wined3d_texture *texture,
         gl_tex->sampler_desc.min_filter = WINED3D_TEXF_POINT;
         gl_tex->sampler_desc.mip_filter = WINED3D_TEXF_NONE;
     }
+
+    if (gl_info->supported[WINED3D_GL_LEGACY_CONTEXT] && gl_info->supported[ARB_DEPTH_TEXTURE])
+    {
+        gl_info->gl_ops.gl.p_glTexParameteri(target, GL_DEPTH_TEXTURE_MODE_ARB, GL_INTENSITY);
+        checkGLcall("glTexParameteri(GL_DEPTH_TEXTURE_MODE_ARB, GL_INTENSITY)");
+    }
 }
 
 /* Context activation is done by the caller. */
@@ -362,14 +368,9 @@ void wined3d_texture_apply_sampler_desc(struct wined3d_texture *texture,
     if (!sampler_desc->compare != !gl_tex->sampler_desc.compare)
     {
         if (sampler_desc->compare)
-        {
-            gl_info->gl_ops.gl.p_glTexParameteri(target, GL_DEPTH_TEXTURE_MODE_ARB, GL_LUMINANCE);
             gl_info->gl_ops.gl.p_glTexParameteri(target, GL_TEXTURE_COMPARE_MODE_ARB, GL_COMPARE_R_TO_TEXTURE_ARB);
-        }
         else
-        {
             gl_info->gl_ops.gl.p_glTexParameteri(target, GL_TEXTURE_COMPARE_MODE_ARB, GL_NONE);
-        }
         gl_tex->sampler_desc.compare = sampler_desc->compare;
     }
 
@@ -762,16 +763,19 @@ static HRESULT wined3d_texture_upload_data(struct wined3d_texture *texture,
 static void texture2d_sub_resource_load(struct wined3d_resource *sub_resource,
         struct wined3d_context *context, BOOL srgb)
 {
-    surface_load(surface_from_resource(sub_resource), srgb);
+    surface_load(surface_from_resource(sub_resource), context, srgb);
 }
 
 static void texture2d_sub_resource_add_dirty_region(struct wined3d_resource *sub_resource,
         const struct wined3d_box *dirty_region)
 {
     struct wined3d_surface *surface = surface_from_resource(sub_resource);
+    struct wined3d_context *context;
 
     surface_prepare_map_memory(surface);
-    surface_load_location(surface, surface->resource.map_binding);
+    context = context_acquire(surface->resource.device, NULL);
+    surface_load_location(surface, context, surface->resource.map_binding);
+    context_release(context);
     surface_invalidate_location(surface, ~surface->resource.map_binding);
 }
 
@@ -915,6 +919,17 @@ static void texture2d_prepare_texture(struct wined3d_texture *texture, struct wi
     }
 }
 
+static HRESULT texture2d_sub_resource_map(struct wined3d_resource *sub_resource,
+        struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags)
+{
+    return wined3d_surface_map(surface_from_resource(sub_resource), map_desc, box, flags);
+}
+
+static HRESULT texture2d_sub_resource_unmap(struct wined3d_resource *sub_resource)
+{
+    return wined3d_surface_unmap(surface_from_resource(sub_resource));
+}
+
 static const struct wined3d_texture_ops texture2d_ops =
 {
     texture2d_sub_resource_load,
@@ -923,6 +938,8 @@ static const struct wined3d_texture_ops texture2d_ops =
     texture2d_sub_resource_invalidate_location,
     texture2d_sub_resource_validate_location,
     texture2d_sub_resource_upload_data,
+    texture2d_sub_resource_map,
+    texture2d_sub_resource_unmap,
     texture2d_prepare_texture,
 };
 
@@ -1290,6 +1307,17 @@ static void texture3d_prepare_texture(struct wined3d_texture *texture, struct wi
     }
 }
 
+static HRESULT texture3d_sub_resource_map(struct wined3d_resource *sub_resource,
+        struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags)
+{
+    return wined3d_volume_map(volume_from_resource(sub_resource), map_desc, box, flags);
+}
+
+static HRESULT texture3d_sub_resource_unmap(struct wined3d_resource *sub_resource)
+{
+     return wined3d_volume_unmap(volume_from_resource(sub_resource));
+}
+
 static const struct wined3d_texture_ops texture3d_ops =
 {
     texture3d_sub_resource_load,
@@ -1298,6 +1326,8 @@ static const struct wined3d_texture_ops texture3d_ops =
     texture3d_sub_resource_invalidate_location,
     texture3d_sub_resource_validate_location,
     texture3d_sub_resource_upload_data,
+    texture3d_sub_resource_map,
+    texture3d_sub_resource_unmap,
     texture3d_prepare_texture,
 };
 
@@ -1405,6 +1435,30 @@ static HRESULT volumetexture_init(struct wined3d_texture *texture, const struct 
     return WINED3D_OK;
 }
 
+HRESULT CDECL wined3d_texture_blt(struct wined3d_texture *dst_texture, unsigned int dst_sub_resource_idx, const RECT *dst_rect_in,
+        struct wined3d_texture *src_texture, unsigned int src_sub_resource_idx, const RECT *src_rect_in, DWORD flags,
+        const WINEDDBLTFX *fx, enum wined3d_texture_filter_type filter)
+{
+    struct wined3d_resource *dst_resource, *src_resource = NULL;
+
+    TRACE("dst_texture %p, dst_sub_resource_idx %u, src_texture %p, src_sub_resource_idx %u.\n",
+            dst_texture, dst_sub_resource_idx, src_texture, src_sub_resource_idx);
+
+    if (!(dst_resource = wined3d_texture_get_sub_resource(dst_texture, dst_sub_resource_idx))
+            || dst_resource->type != WINED3D_RTYPE_SURFACE)
+        return WINED3DERR_INVALIDCALL;
+
+    if (src_texture)
+    {
+        if (!(src_resource = wined3d_texture_get_sub_resource(src_texture, src_sub_resource_idx))
+                || src_resource->type != WINED3D_RTYPE_SURFACE)
+            return WINED3DERR_INVALIDCALL;
+    }
+
+    return wined3d_surface_blt(surface_from_resource(dst_resource), dst_rect_in,
+        src_resource ? surface_from_resource(src_resource) : NULL, src_rect_in, flags, fx, filter);
+}
+
 HRESULT CDECL wined3d_texture_create(struct wined3d_device *device, const struct wined3d_resource_desc *desc,
         UINT level_count, DWORD surface_flags, const struct wined3d_sub_resource_data *data, void *parent,
         const struct wined3d_parent_ops *parent_ops, struct wined3d_texture **texture)
@@ -1464,4 +1518,66 @@ HRESULT CDECL wined3d_texture_create(struct wined3d_device *device, const struct
     *texture = object;
 
     return WINED3D_OK;
+}
+
+HRESULT CDECL wined3d_texture_map(struct wined3d_texture *texture, unsigned int sub_resource_idx,
+        struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags)
+{
+    struct wined3d_resource *sub_resource;
+
+    TRACE("texture %p, sub_resource_idx %u, map_desc %p, box %p, flags %#x.\n",
+            texture, sub_resource_idx, map_desc, box, flags);
+
+    if (!(sub_resource = wined3d_texture_get_sub_resource(texture, sub_resource_idx)))
+        return WINED3DERR_INVALIDCALL;
+
+    return texture->texture_ops->texture_sub_resource_map(sub_resource, map_desc, box, flags);
+}
+
+HRESULT CDECL wined3d_texture_unmap(struct wined3d_texture *texture, unsigned int sub_resource_idx)
+{
+    struct wined3d_resource *sub_resource;
+
+    TRACE("texture %p, sub_resource_idx %u.\n", texture, sub_resource_idx);
+
+    if (!(sub_resource = wined3d_texture_get_sub_resource(texture, sub_resource_idx)))
+        return WINED3DERR_INVALIDCALL;
+
+    return texture->texture_ops->texture_sub_resource_unmap(sub_resource);
+}
+
+HRESULT CDECL wined3d_texture_get_dc(struct wined3d_texture *texture, unsigned int sub_resource_idx, HDC *dc)
+{
+    struct wined3d_resource *sub_resource;
+
+    TRACE("texture %p, sub_resource_idx %u, dc %p.\n", texture, sub_resource_idx, dc);
+
+    if (!(sub_resource = wined3d_texture_get_sub_resource(texture, sub_resource_idx)))
+        return WINED3DERR_INVALIDCALL;
+
+    if (sub_resource->type != WINED3D_RTYPE_SURFACE)
+    {
+        WARN("Not supported on %s resources.\n", debug_d3dresourcetype(texture->resource.type));
+        return WINED3DERR_INVALIDCALL;
+    }
+
+    return wined3d_surface_getdc(surface_from_resource(sub_resource), dc);
+}
+
+HRESULT CDECL wined3d_texture_release_dc(struct wined3d_texture *texture, unsigned int sub_resource_idx, HDC dc)
+{
+    struct wined3d_resource *sub_resource;
+
+    TRACE("texture %p, sub_resource_idx %u, dc %p.\n", texture, sub_resource_idx, dc);
+
+    if (!(sub_resource = wined3d_texture_get_sub_resource(texture, sub_resource_idx)))
+        return WINED3DERR_INVALIDCALL;
+
+    if (sub_resource->type != WINED3D_RTYPE_SURFACE)
+    {
+        WARN("Not supported on %s resources.\n", debug_d3dresourcetype(texture->resource.type));
+        return WINED3DERR_INVALIDCALL;
+    }
+
+    return wined3d_surface_releasedc(surface_from_resource(sub_resource), dc);
 }

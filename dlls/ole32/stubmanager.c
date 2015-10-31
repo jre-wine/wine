@@ -123,7 +123,8 @@ static void stub_manager_delete_ifstub(struct stub_manager *m, struct ifstub *if
 
     list_remove(&ifstub->entry);
 
-    RPC_UnregisterInterface(&ifstub->iid);
+    if (!m->disconnected)
+        RPC_UnregisterInterface(&ifstub->iid, TRUE);
 
     if (ifstub->stubbuffer) IRpcStubBuffer_Release(ifstub->stubbuffer);
     IUnknown_Release(ifstub->iface);
@@ -223,6 +224,7 @@ static struct stub_manager *new_stub_manager(APARTMENT *apt, IUnknown *object)
      * the marshalled ifptr.
      */
     sm->extrefs = 0;
+    sm->disconnected = FALSE;
 
     hres = IUnknown_QueryInterface(object, &IID_IExternalConnection, (void**)&sm->extern_conn);
     if(FAILED(hres))
@@ -236,6 +238,21 @@ static struct stub_manager *new_stub_manager(APARTMENT *apt, IUnknown *object)
     TRACE("Created new stub manager (oid=%s) at %p for object with IUnknown %p\n", wine_dbgstr_longlong(sm->oid), sm, object);
     
     return sm;
+}
+
+void stub_manager_disconnect(struct stub_manager *m)
+{
+    struct ifstub *ifstub;
+
+    EnterCriticalSection(&m->lock);
+    if (!m->disconnected)
+    {
+        LIST_FOR_EACH_ENTRY(ifstub, &m->ifstubs, struct ifstub, entry)
+            RPC_UnregisterInterface(&ifstub->iid, FALSE);
+
+        m->disconnected = TRUE;
+    }
+    LeaveCriticalSection(&m->lock);
 }
 
 /* caller must remove stub manager from apartment prior to calling this function */
@@ -506,6 +523,7 @@ static HRESULT ipid_to_stub_manager(const IPID *ipid, APARTMENT **stub_apt, stru
  * release the references to all objects (except iface) if the function
  * returned success, otherwise no references are returned. */
 HRESULT ipid_get_dispatch_params(const IPID *ipid, APARTMENT **stub_apt,
+                                 struct stub_manager **manager,
                                  IRpcStubBuffer **stub, IRpcChannelBuffer **chan,
                                  IID *iid, IUnknown **iface)
 {
@@ -528,7 +546,10 @@ HRESULT ipid_get_dispatch_params(const IPID *ipid, APARTMENT **stub_apt,
         *iid = ifstub->iid;
         *iface = ifstub->iface;
 
-        stub_manager_int_release(stubmgr);
+        if (manager)
+            *manager = stubmgr;
+        else
+            stub_manager_int_release(stubmgr);
         return S_OK;
     }
     else
@@ -646,7 +667,8 @@ static HRESULT WINAPI RemUnknown_QueryInterface(IRemUnknown *iface, REFIID riid,
         return S_OK;
     }
 
-    FIXME("No interface for iid %s\n", debugstr_guid(riid));
+    if (!IsEqualIID(riid, &IID_IExternalConnection))
+        FIXME("No interface for iid %s\n", debugstr_guid(riid));
 
     *ppv = NULL;
     return E_NOINTERFACE;

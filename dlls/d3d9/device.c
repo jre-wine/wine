@@ -322,6 +322,8 @@ static ULONG WINAPI DECLSPEC_HOTPATCH d3d9_device_Release(IDirect3DDevice9Ex *if
         if (device->index_buffer)
             wined3d_buffer_decref(device->index_buffer);
 
+        HeapFree(GetProcessHeap(), 0, device->implicit_swapchains);
+
         wined3d_device_uninit_3d(device->wined3d_device);
         wined3d_device_release_focus_window(device->wined3d_device);
         wined3d_device_decref(device->wined3d_device);
@@ -484,7 +486,7 @@ static HRESULT WINAPI d3d9_device_SetCursorProperties(IDirect3DDevice9Ex *iface,
 
     wined3d_mutex_lock();
     hr = wined3d_device_set_cursor_properties(device->wined3d_device,
-            hotspot_x, hotspot_y, bitmap_impl->wined3d_surface);
+            hotspot_x, hotspot_y, bitmap_impl->wined3d_texture, bitmap_impl->sub_resource_idx);
     wined3d_mutex_unlock();
 
     return hr;
@@ -565,19 +567,16 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_GetSwapChain(IDirect3DDevice
         UINT swapchain_idx, IDirect3DSwapChain9 **swapchain)
 {
     struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
-    struct wined3d_swapchain *wined3d_swapchain;
-    struct d3d9_swapchain *swapchain_impl;
     HRESULT hr;
 
     TRACE("iface %p, swapchain_idx %u, swapchain %p.\n", iface, swapchain_idx, swapchain);
 
     wined3d_mutex_lock();
-    if ((wined3d_swapchain = wined3d_device_get_swapchain(device->wined3d_device, swapchain_idx)))
+    if (swapchain_idx < device->implicit_swapchain_count)
     {
-       swapchain_impl = wined3d_swapchain_get_parent(wined3d_swapchain);
-       *swapchain = (IDirect3DSwapChain9 *)&swapchain_impl->IDirect3DSwapChain9Ex_iface;
-       IDirect3DSwapChain9Ex_AddRef(*swapchain);
-       hr = D3D_OK;
+        *swapchain = (IDirect3DSwapChain9 *)&device->implicit_swapchains[swapchain_idx]->IDirect3DSwapChain9Ex_iface;
+        IDirect3DSwapChain9Ex_AddRef(*swapchain);
+        hr = D3D_OK;
     }
     else
     {
@@ -646,6 +645,25 @@ static HRESULT CDECL reset_enum_callback(struct wined3d_resource *resource)
     return D3D_OK;
 }
 
+static HRESULT d3d9_device_get_swapchains(struct d3d9_device *device)
+{
+    UINT i, new_swapchain_count = wined3d_device_get_swapchain_count(device->wined3d_device);
+    struct wined3d_swapchain *wined3d_swapchain;
+
+    if (!(device->implicit_swapchains = HeapAlloc(GetProcessHeap(), 0,
+            new_swapchain_count * sizeof(*device->implicit_swapchains))))
+        return E_OUTOFMEMORY;
+
+    for (i = 0; i < new_swapchain_count; ++i)
+    {
+        wined3d_swapchain = wined3d_device_get_swapchain(device->wined3d_device, i);
+        device->implicit_swapchains[i] = wined3d_swapchain_get_parent(wined3d_swapchain);
+    }
+    device->implicit_swapchain_count = new_swapchain_count;
+
+    return D3D_OK;
+}
+
 static HRESULT d3d9_device_reset(struct d3d9_device *device,
         D3DPRESENT_PARAMETERS *present_parameters, D3DDISPLAYMODEEX *mode)
 {
@@ -691,16 +709,22 @@ static HRESULT d3d9_device_reset(struct d3d9_device *device,
     if (SUCCEEDED(hr = wined3d_device_reset(device->wined3d_device, &swapchain_desc,
             mode ? &wined3d_mode : NULL, reset_enum_callback, !device->d3d_parent->extended)))
     {
-        struct wined3d_swapchain *wined3d_swapchain;
+        HeapFree(GetProcessHeap(), 0, device->implicit_swapchains);
 
-        wined3d_swapchain = wined3d_device_get_swapchain(device->wined3d_device, 0);
-        wined3d_swapchain_get_desc(wined3d_swapchain, &swapchain_desc);
-        present_parameters->BackBufferWidth = swapchain_desc.backbuffer_width;
-        present_parameters->BackBufferHeight = swapchain_desc.backbuffer_height;
-        present_parameters->BackBufferFormat = d3dformat_from_wined3dformat(swapchain_desc.backbuffer_format);
-        present_parameters->BackBufferCount = swapchain_desc.backbuffer_count;
+        if (FAILED(hr = d3d9_device_get_swapchains(device)))
+        {
+            device->device_state = D3D9_DEVICE_STATE_NOT_RESET;
+        }
+        else
+        {
+            wined3d_swapchain_get_desc(device->implicit_swapchains[0]->wined3d_swapchain, &swapchain_desc);
+            present_parameters->BackBufferWidth = swapchain_desc.backbuffer_width;
+            present_parameters->BackBufferHeight = swapchain_desc.backbuffer_height;
+            present_parameters->BackBufferFormat = d3dformat_from_wined3dformat(swapchain_desc.backbuffer_format);
+            present_parameters->BackBufferCount = swapchain_desc.backbuffer_count;
 
-        device->device_state = D3D9_DEVICE_STATE_OK;
+            device->device_state = D3D9_DEVICE_STATE_OK;
+        }
     }
     else if (!device->d3d_parent->extended)
     {
@@ -726,6 +750,7 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_Present(IDirect3DDevice9Ex *
         const RECT *src_rect, const RECT *dst_rect, HWND dst_window_override, const RGNDATA *dirty_region)
 {
     struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
+    UINT i;
     HRESULT hr;
 
     TRACE("iface %p, src_rect %p, dst_rect %p, dst_window_override %p, dirty_region %p.\n",
@@ -735,21 +760,26 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_Present(IDirect3DDevice9Ex *
         return device->d3d_parent->extended ? S_PRESENT_OCCLUDED : D3DERR_DEVICELOST;
 
     wined3d_mutex_lock();
-    hr = wined3d_device_present(device->wined3d_device, src_rect, dst_rect,
-            dst_window_override, dirty_region, 0);
+    for (i = 0; i < device->implicit_swapchain_count; ++i)
+    {
+        hr = wined3d_swapchain_present(device->implicit_swapchains[i]->wined3d_swapchain, src_rect,
+                dst_rect, dst_window_override, dirty_region, 0);
+        if (FAILED(hr))
+        {
+            wined3d_mutex_unlock();
+            return hr;
+        }
+    }
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_device_GetBackBuffer(IDirect3DDevice9Ex *iface, UINT swapchain,
         UINT backbuffer_idx, D3DBACKBUFFER_TYPE backbuffer_type, IDirect3DSurface9 **backbuffer)
 {
     struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
-    struct wined3d_swapchain *wined3d_swapchain;
-    struct wined3d_resource *wined3d_resource;
-    struct wined3d_texture *wined3d_texture;
-    struct d3d9_surface *surface_impl;
+    HRESULT hr;
 
     TRACE("iface %p, swapchain %u, backbuffer_idx %u, backbuffer_type %#x, backbuffer %p.\n",
             iface, swapchain, backbuffer_idx, backbuffer_type, backbuffer);
@@ -757,29 +787,21 @@ static HRESULT WINAPI d3d9_device_GetBackBuffer(IDirect3DDevice9Ex *iface, UINT 
     /* backbuffer_type is ignored by native. */
 
     /* No need to check for backbuffer == NULL, Windows crashes in that case. */
+    *backbuffer = NULL;
+
     wined3d_mutex_lock();
-
-    if (!(wined3d_swapchain = wined3d_device_get_swapchain(device->wined3d_device, swapchain)))
+    if (swapchain >= device->implicit_swapchain_count)
     {
         wined3d_mutex_unlock();
-        *backbuffer = NULL;
+        WARN("Swapchain index %u is out of range, returning D3DERR_INVALIDCALL.\n", swapchain);
         return D3DERR_INVALIDCALL;
     }
 
-    if (!(wined3d_texture = wined3d_swapchain_get_back_buffer(wined3d_swapchain, backbuffer_idx)))
-    {
-        wined3d_mutex_unlock();
-        *backbuffer = NULL;
-        return D3DERR_INVALIDCALL;
-    }
-
-    wined3d_resource = wined3d_texture_get_sub_resource(wined3d_texture, 0);
-    surface_impl = wined3d_resource_get_parent(wined3d_resource);
-    *backbuffer = &surface_impl->IDirect3DSurface9_iface;
-    IDirect3DSurface9_AddRef(*backbuffer);
-
+    hr = IDirect3DSwapChain9Ex_GetBackBuffer(&device->implicit_swapchains[swapchain]->IDirect3DSwapChain9Ex_iface,
+            backbuffer_idx, backbuffer_type, backbuffer);
     wined3d_mutex_unlock();
-    return D3D_OK;
+
+    return hr;
 }
 
 static HRESULT WINAPI d3d9_device_GetRasterStatus(IDirect3DDevice9Ex *iface,
@@ -1243,12 +1265,22 @@ static HRESULT WINAPI d3d9_device_GetRenderTargetData(IDirect3DDevice9Ex *iface,
 {
     struct d3d9_surface *rt_impl = unsafe_impl_from_IDirect3DSurface9(render_target);
     struct d3d9_surface *dst_impl = unsafe_impl_from_IDirect3DSurface9(dst_surface);
+    struct wined3d_resource_desc wined3d_desc;
+    struct wined3d_resource *sub_resource;
     HRESULT hr;
 
     TRACE("iface %p, render_target %p, dst_surface %p.\n", iface, render_target, dst_surface);
 
     wined3d_mutex_lock();
-    hr = wined3d_surface_get_render_target_data(dst_impl->wined3d_surface, rt_impl->wined3d_surface);
+    sub_resource = wined3d_texture_get_sub_resource(rt_impl->wined3d_texture, rt_impl->sub_resource_idx);
+    wined3d_resource_get_desc(sub_resource, &wined3d_desc);
+
+    /* TODO: Check surface sizes, pools, etc. */
+    if (wined3d_desc.multisample_type)
+        hr = D3DERR_INVALIDCALL;
+    else
+        hr = wined3d_texture_blt(dst_impl->wined3d_texture, dst_impl->sub_resource_idx, NULL,
+                rt_impl->wined3d_texture, rt_impl->sub_resource_idx, NULL, 0, NULL, WINED3D_TEXF_POINT);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1259,12 +1291,14 @@ static HRESULT WINAPI d3d9_device_GetFrontBufferData(IDirect3DDevice9Ex *iface,
 {
     struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
     struct d3d9_surface *dst_impl = unsafe_impl_from_IDirect3DSurface9(dst_surface);
-    HRESULT hr;
+    HRESULT hr = D3DERR_INVALIDCALL;
 
     TRACE("iface %p, swapchain %u, dst_surface %p.\n", iface, swapchain, dst_surface);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_get_front_buffer_data(device->wined3d_device, swapchain, dst_impl->wined3d_surface);
+    if (swapchain < device->implicit_swapchain_count)
+        hr = wined3d_swapchain_get_front_buffer_data(device->implicit_swapchains[swapchain]->wined3d_swapchain,
+                dst_impl->wined3d_texture, dst_impl->sub_resource_idx);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1278,17 +1312,17 @@ static HRESULT WINAPI d3d9_device_StretchRect(IDirect3DDevice9Ex *iface, IDirect
     struct d3d9_surface *dst = unsafe_impl_from_IDirect3DSurface9(dst_surface);
     HRESULT hr = D3DERR_INVALIDCALL;
     struct wined3d_resource_desc src_desc, dst_desc;
-    struct wined3d_resource *wined3d_resource;
+    struct wined3d_resource *sub_resource;
 
     TRACE("iface %p, src_surface %p, src_rect %p, dst_surface %p, dst_rect %p, filter %#x.\n",
             iface, src_surface, src_rect, dst_surface, dst_rect, filter);
 
     wined3d_mutex_lock();
-    wined3d_resource = wined3d_surface_get_resource(dst->wined3d_surface);
-    wined3d_resource_get_desc(wined3d_resource, &dst_desc);
+    sub_resource = wined3d_texture_get_sub_resource(dst->wined3d_texture, dst->sub_resource_idx);
+    wined3d_resource_get_desc(sub_resource, &dst_desc);
 
-    wined3d_resource = wined3d_surface_get_resource(src->wined3d_surface);
-    wined3d_resource_get_desc(wined3d_resource, &src_desc);
+    sub_resource = wined3d_texture_get_sub_resource(src->wined3d_texture, src->sub_resource_idx);
+    wined3d_resource_get_desc(sub_resource, &src_desc);
 
     if (src_desc.usage & WINED3DUSAGE_DEPTHSTENCIL)
     {
@@ -1325,7 +1359,8 @@ static HRESULT WINAPI d3d9_device_StretchRect(IDirect3DDevice9Ex *iface, IDirect
         }
     }
 
-    hr = wined3d_surface_blt(dst->wined3d_surface, dst_rect, src->wined3d_surface, src_rect, 0, NULL, filter);
+    hr = wined3d_texture_blt(dst->wined3d_texture, dst->sub_resource_idx, dst_rect,
+            src->wined3d_texture, src->sub_resource_idx, src_rect, 0, NULL, filter);
     if (hr == WINEDDERR_INVALIDRECT)
         hr = D3DERR_INVALIDCALL;
 
@@ -1354,7 +1389,11 @@ static HRESULT WINAPI d3d9_device_ColorFill(IDirect3DDevice9Ex *iface,
 
     wined3d_mutex_lock();
 
-    wined3d_resource = wined3d_surface_get_resource(surface_impl->wined3d_surface);
+    if (!(wined3d_resource = wined3d_texture_get_sub_resource(surface_impl->wined3d_texture, surface_impl->sub_resource_idx)))
+    {
+        wined3d_mutex_unlock();
+        return D3DERR_INVALIDCALL;
+    }
     wined3d_resource_get_desc(wined3d_resource, &desc);
 
     if (desc.pool != WINED3D_POOL_DEFAULT)
@@ -3190,6 +3229,7 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_PresentEx(IDirect3DDevice9Ex
         const RGNDATA *dirty_region, DWORD flags)
 {
     struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
+    UINT i;
     HRESULT hr;
 
     TRACE("iface %p, src_rect %s, dst_rect %s, dst_window_override %p, dirty_region %p, flags %#x.\n",
@@ -3200,11 +3240,18 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH d3d9_device_PresentEx(IDirect3DDevice9Ex
         return S_PRESENT_OCCLUDED;
 
     wined3d_mutex_lock();
-    hr = wined3d_device_present(device->wined3d_device, src_rect, dst_rect,
-            dst_window_override, dirty_region, flags);
+    for (i = 0; i < device->implicit_swapchain_count; ++i)
+    {
+        if (FAILED(hr = wined3d_swapchain_present(device->implicit_swapchains[i]->wined3d_swapchain, src_rect,
+                dst_rect, dst_window_override, dirty_region, flags)))
+        {
+            wined3d_mutex_unlock();
+            return hr;
+        }
+    }
     wined3d_mutex_unlock();
 
-    return hr;
+    return D3D_OK;
 }
 
 static HRESULT WINAPI d3d9_device_GetGPUThreadPriority(IDirect3DDevice9Ex *iface, INT *priority)
@@ -3257,13 +3304,11 @@ static HRESULT WINAPI d3d9_device_CheckDeviceState(IDirect3DDevice9Ex *iface, HW
 {
     struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
     struct wined3d_swapchain_desc swapchain_desc;
-    struct wined3d_swapchain *swapchain;
 
     TRACE("iface %p, dst_window %p.\n", iface, dst_window);
 
     wined3d_mutex_lock();
-    swapchain = wined3d_device_get_swapchain(device->wined3d_device, 0);
-    wined3d_swapchain_get_desc(swapchain, &swapchain_desc);
+    wined3d_swapchain_get_desc(device->implicit_swapchains[0]->wined3d_swapchain, &swapchain_desc);
     wined3d_mutex_unlock();
 
     if (swapchain_desc.windowed)
@@ -3534,18 +3579,18 @@ static void CDECL device_parent_activate(struct wined3d_device_parent *device_pa
 }
 
 static HRESULT CDECL device_parent_surface_created(struct wined3d_device_parent *device_parent,
-        void *container_parent, struct wined3d_surface *surface, void **parent,
+        struct wined3d_texture *wined3d_texture, unsigned int sub_resource_idx, struct wined3d_surface *surface, void **parent,
         const struct wined3d_parent_ops **parent_ops)
 {
     struct d3d9_surface *d3d_surface;
 
-    TRACE("device_parent %p, container_parent %p, surface %p, parent %p, parent_ops %p.\n",
-            device_parent, container_parent, surface, parent, parent_ops);
+    TRACE("device_parent %p, wined3d_texture %p, sub_resource_idx %u, surface %p, parent %p, parent_ops %p.\n",
+            device_parent, wined3d_texture, sub_resource_idx, surface, parent, parent_ops);
 
     if (!(d3d_surface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*d3d_surface))))
         return E_OUTOFMEMORY;
 
-    surface_init(d3d_surface, container_parent, surface, parent_ops);
+    surface_init(d3d_surface, wined3d_texture, sub_resource_idx, surface, parent_ops);
     *parent = d3d_surface;
     TRACE("Created surface %p.\n", d3d_surface);
 
@@ -3553,18 +3598,18 @@ static HRESULT CDECL device_parent_surface_created(struct wined3d_device_parent 
 }
 
 static HRESULT CDECL device_parent_volume_created(struct wined3d_device_parent *device_parent,
-        void *container_parent, struct wined3d_volume *volume, void **parent,
-        const struct wined3d_parent_ops **parent_ops)
+        struct wined3d_texture *wined3d_texture, unsigned int sub_resource_idx,
+        void **parent, const struct wined3d_parent_ops **parent_ops)
 {
     struct d3d9_volume *d3d_volume;
 
-    TRACE("device_parent %p, container_parent %p, volume %p, parent %p, parent_ops %p.\n",
-            device_parent, container_parent, volume, parent, parent_ops);
+    TRACE("device_parent %p, texture %p, sub_resource_idx %u, parent %p, parent_ops %p.\n",
+            device_parent, wined3d_texture, sub_resource_idx, parent, parent_ops);
 
     if (!(d3d_volume = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*d3d_volume))))
         return E_OUTOFMEMORY;
 
-    volume_init(d3d_volume, container_parent, volume, parent_ops);
+    volume_init(d3d_volume, wined3d_texture, sub_resource_idx, parent_ops);
     *parent = d3d_volume;
     TRACE("Created volume %p.\n", d3d_volume);
 
@@ -3744,12 +3789,22 @@ HRESULT device_init(struct d3d9_device *device, struct d3d9 *parent, struct wine
         return hr;
     }
 
-    wined3d_mutex_unlock();
+    if (FAILED(hr = d3d9_device_get_swapchains(device)))
+    {
+        wined3d_device_uninit_3d(device->wined3d_device);
+        wined3d_device_release_focus_window(device->wined3d_device);
+        wined3d_device_decref(device->wined3d_device);
+        wined3d_mutex_unlock();
+        return E_OUTOFMEMORY;
+    }
 
     for (i = 0; i < count; ++i)
     {
         present_parameters_from_wined3d_swapchain_desc(&parameters[i], &swapchain_desc[i]);
     }
+
+    wined3d_mutex_unlock();
+
     HeapFree(GetProcessHeap(), 0, swapchain_desc);
 
     /* Initialize the converted declaration array. This creates a valid pointer
@@ -3759,6 +3814,7 @@ HRESULT device_init(struct d3d9_device *device, struct d3d9 *parent, struct wine
     {
         ERR("Failed to allocate FVF vertex declaration map memory.\n");
         wined3d_mutex_lock();
+        HeapFree(GetProcessHeap(), 0, device->implicit_swapchains);
         wined3d_device_uninit_3d(device->wined3d_device);
         wined3d_device_release_focus_window(device->wined3d_device);
         wined3d_device_decref(device->wined3d_device);

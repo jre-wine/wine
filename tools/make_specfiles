@@ -66,6 +66,7 @@ my @dll_groups =
   "api-ms-win-crt-string-l1-1-0",
   "api-ms-win-crt-time-l1-1-0",
   "api-ms-win-crt-utility-l1-1-0",
+  "vcruntime140",
  ],
  [
   "msvcp120",
@@ -138,6 +139,7 @@ my @dll_groups =
  ],
  [
   "vcomp",
+  "vcomp120",
   "vcomp110",
   "vcomp100",
   "vcomp90",

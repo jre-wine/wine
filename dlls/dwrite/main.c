@@ -1097,7 +1097,12 @@ static HRESULT WINAPI dwritefactory_CreateGlyphRunAnalysis(IDWriteFactory2 *ifac
     TRACE("(%p)->(%p %.2f %p %d %d %.2f %.2f %p)\n", This, run, ppdip, transform, rendering_mode,
         measuring_mode, originX, originY, analysis);
 
-    return create_glyphrunanalysis(rendering_mode, measuring_mode, run, 1.0f, DWRITE_GRID_FIT_MODE_DEFAULT,
+    if (ppdip <= 0.0f) {
+        *analysis = NULL;
+        return E_INVALIDARG;
+    }
+
+    return create_glyphrunanalysis(rendering_mode, measuring_mode, run, ppdip, transform, DWRITE_GRID_FIT_MODE_DEFAULT,
         DWRITE_TEXT_ANTIALIAS_MODE_CLEARTYPE, originX, originY, analysis);
 }
 
@@ -1183,7 +1188,7 @@ static HRESULT WINAPI dwritefactory2_CreateGlyphRunAnalysis(IDWriteFactory2 *ifa
     TRACE("(%p)->(%p %p %d %d %d %d %.2f %.2f %p)\n", This, run, transform, rendering_mode, measuring_mode,
         gridfit_mode, aa_mode, originX, originY, analysis);
 
-    return create_glyphrunanalysis(rendering_mode, measuring_mode, run, 1.0f, gridfit_mode, aa_mode, originX, originY, analysis);
+    return create_glyphrunanalysis(rendering_mode, measuring_mode, run, 1.0f, transform, gridfit_mode, aa_mode, originX, originY, analysis);
 }
 
 static const struct IDWriteFactory2Vtbl dwritefactoryvtbl = {

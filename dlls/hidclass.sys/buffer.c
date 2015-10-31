@@ -27,6 +27,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(hid);
 
 #define BASE_BUFFER_SIZE 32
+#define MIN_BUFFER_SIZE 2
+#define MAX_BUFFER_SIZE 512
 
 struct ReportRingBuffer
 {
@@ -85,6 +87,39 @@ UINT RingBuffer_GetBufferSize(struct ReportRingBuffer *ring)
     return ring->buffer_size;
 }
 
+UINT RingBuffer_GetSize(struct ReportRingBuffer *ring)
+{
+    return ring->size;
+}
+
+NTSTATUS RingBuffer_SetSize(struct ReportRingBuffer *ring, UINT size)
+{
+    BYTE* new_buffer;
+    int i;
+
+    if (size < MIN_BUFFER_SIZE || size > MAX_BUFFER_SIZE || size == ring->size)
+        return STATUS_INVALID_PARAMETER;
+
+    EnterCriticalSection(&ring->lock);
+    ring->start = ring->end = 0;
+    for (i = 0; i < ring->pointer_alloc; i++)
+    {
+        if (ring->pointers[i] != 0xffffffff)
+            ring->pointers[i] = 0;
+    }
+    new_buffer = HeapAlloc(GetProcessHeap(), 0, ring->buffer_size * size);
+    if (!new_buffer)
+    {
+        LeaveCriticalSection(&ring->lock);
+        return STATUS_NO_MEMORY;
+    }
+    HeapFree(GetProcessHeap(), 0, ring->buffer);
+    ring->buffer = new_buffer;
+    ring->size = size;
+    LeaveCriticalSection(&ring->lock);
+    return STATUS_SUCCESS;
+}
+
 void RingBuffer_Read(struct ReportRingBuffer *ring, UINT index, void *output, UINT *size)
 {
     void *ret = NULL;
@@ -138,5 +173,26 @@ void RingBuffer_RemovePointer(struct ReportRingBuffer *ring, UINT index)
     EnterCriticalSection(&ring->lock);
     if (index < ring->pointer_alloc)
         ring->pointers[index] = 0xffffffff;
+    LeaveCriticalSection(&ring->lock);
+}
+
+void RingBuffer_Write(struct ReportRingBuffer *ring, void *data)
+{
+    UINT i;
+
+    EnterCriticalSection(&ring->lock);
+    memcpy(&ring->buffer[ring->end * ring->buffer_size], data, ring->buffer_size);
+    ring->end++;
+    if (ring->end == ring->size)
+        ring->end = 0;
+    if (ring->start == ring->end)
+    {
+        ring->start++;
+        if (ring->start == ring->size)
+            ring->start = 0;
+    }
+    for (i = 0; i < ring->pointer_alloc; i++)
+        if (ring->pointers[i] == ring->end)
+            ring->pointers[i] = ring->start;
     LeaveCriticalSection(&ring->lock);
 }

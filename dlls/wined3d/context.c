@@ -141,8 +141,6 @@ static void context_attach_depth_stencil_fbo(struct wined3d_context *context,
             {
                 case WINED3D_LOCATION_TEXTURE_RGB:
                 case WINED3D_LOCATION_TEXTURE_SRGB:
-                    wined3d_texture_prepare_texture(depth_stencil->container, context, FALSE);
-
                     if (format_flags & WINED3DFMT_FLAG_DEPTH)
                     {
                         gl_info->fbo_ops.glFramebufferTexture2D(fbo_target, GL_DEPTH_ATTACHMENT,
@@ -161,13 +159,11 @@ static void context_attach_depth_stencil_fbo(struct wined3d_context *context,
                     break;
 
                 case WINED3D_LOCATION_RB_MULTISAMPLE:
-                    surface_prepare_rb(depth_stencil, gl_info, TRUE);
                     context_attach_depth_stencil_rb(gl_info, fbo_target,
                             format_flags, depth_stencil->rb_multisample);
                     break;
 
                 case WINED3D_LOCATION_RB_RESOLVED:
-                    surface_prepare_rb(depth_stencil, gl_info, FALSE);
                     context_attach_depth_stencil_rb(gl_info, fbo_target,
                             format_flags, depth_stencil->rb_resolved);
                     break;
@@ -217,7 +213,6 @@ static void context_attach_surface_fbo(struct wined3d_context *context,
             case WINED3D_LOCATION_TEXTURE_RGB:
             case WINED3D_LOCATION_TEXTURE_SRGB:
                 srgb = location == WINED3D_LOCATION_TEXTURE_SRGB;
-                wined3d_texture_prepare_texture(surface->container, context, srgb);
                 gl_info->fbo_ops.glFramebufferTexture2D(fbo_target, GL_COLOR_ATTACHMENT0 + idx,
                         surface->texture_target, surface_get_texture_name(surface, gl_info, srgb),
                         surface->texture_level);
@@ -225,14 +220,12 @@ static void context_attach_surface_fbo(struct wined3d_context *context,
                 break;
 
             case WINED3D_LOCATION_RB_MULTISAMPLE:
-                surface_prepare_rb(surface, gl_info, TRUE);
                 gl_info->fbo_ops.glFramebufferRenderbuffer(fbo_target, GL_COLOR_ATTACHMENT0 + idx,
                         GL_RENDERBUFFER, surface->rb_multisample);
                 checkGLcall("glFramebufferRenderbuffer()");
                 break;
 
             case WINED3D_LOCATION_RB_RESOLVED:
-                surface_prepare_rb(surface, gl_info, FALSE);
                 gl_info->fbo_ops.glFramebufferRenderbuffer(fbo_target, GL_COLOR_ATTACHMENT0 + idx,
                         GL_RENDERBUFFER, surface->rb_resolved);
                 checkGLcall("glFramebufferRenderbuffer()");
@@ -1194,6 +1187,20 @@ void context_release(struct wined3d_context *context)
     }
 }
 
+/* This is used when a context for render target A is active, but a separate context is
+ * needed to access the WGL framebuffer for render target B. Re-acquire a context for rt
+ * A to avoid breaking caller code. */
+void context_restore(struct wined3d_context *context, struct wined3d_surface *restore)
+{
+    if (context->current_rt != restore)
+    {
+        context_release(context);
+        context = context_acquire(restore->resource.device, restore);
+    }
+
+    context_release(context);
+}
+
 static void context_enter(struct wined3d_context *context)
 {
     TRACE("Entering context %p, level %u.\n", context, context->level + 1);
@@ -1662,27 +1669,27 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
 
     if (context_debug_output_enabled(gl_info))
     {
-        GL_EXTCALL(glDebugMessageCallbackARB(wined3d_debug_callback, ret));
+        GL_EXTCALL(glDebugMessageCallback(wined3d_debug_callback, ret));
         if (TRACE_ON(d3d_synchronous))
-            gl_info->gl_ops.gl.p_glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_ARB);
-        GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, GL_FALSE));
+            gl_info->gl_ops.gl.p_glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        GL_EXTCALL(glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, GL_FALSE));
         if (ERR_ON(d3d))
         {
-            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_ERROR_ARB,
+            GL_EXTCALL(glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_ERROR,
                     GL_DONT_CARE, 0, NULL, GL_TRUE));
         }
         if (FIXME_ON(d3d))
         {
-            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR_ARB,
+            GL_EXTCALL(glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR,
                     GL_DONT_CARE, 0, NULL, GL_TRUE));
-            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR_ARB,
+            GL_EXTCALL(glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR,
                     GL_DONT_CARE, 0, NULL, GL_TRUE));
-            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_PORTABILITY_ARB,
+            GL_EXTCALL(glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_PORTABILITY,
                     GL_DONT_CARE, 0, NULL, GL_TRUE));
         }
         if (WARN_ON(d3d_perf))
         {
-            GL_EXTCALL(glDebugMessageControlARB(GL_DONT_CARE, GL_DEBUG_TYPE_PERFORMANCE_ARB,
+            GL_EXTCALL(glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_PERFORMANCE,
                     GL_DONT_CARE, 0, NULL, GL_TRUE));
         }
     }
@@ -2263,7 +2270,7 @@ static BOOL match_depth_stencil_format(const struct wined3d_format *existing,
     return TRUE;
 }
 
-/* The caller provides a context */
+/* Context activation is done by the caller. */
 static void context_validate_onscreen_formats(struct wined3d_context *context,
         const struct wined3d_rendertarget_view *depth_stencil)
 {
@@ -2279,7 +2286,7 @@ static void context_validate_onscreen_formats(struct wined3d_context *context,
     WARN("Depth stencil format is not supported by WGL, rendering the backbuffer in an FBO\n");
 
     /* The currently active context is the necessary context to access the swapchain's onscreen buffers */
-    surface_load_location(context->current_rt, WINED3D_LOCATION_TEXTURE_RGB);
+    surface_load_location(context->current_rt, context, WINED3D_LOCATION_TEXTURE_RGB);
     swapchain->render_to_fbo = TRUE;
     swapchain_update_draw_bindings(swapchain);
     context_set_render_offscreen(context, TRUE);
