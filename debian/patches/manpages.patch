@@ -144,8 +144,8 @@ author: Michael Gilbert <mgilbert@debian.org>
  .IP \fB--file\ \fIfilename\fR
  \fBwinedbg\fR will execute the list of commands contained in file
  filename as if they were keyed on winedbg command line, and then
---- a/tools/winemaker.de.UTF-8.man.in
-+++ b/tools/winemaker.de.UTF-8.man.in
+--- a/tools/winemaker/winemaker.de.UTF-8.man.in
++++ b/tools/winemaker/winemaker.de.UTF-8.man.in
 @@ -58,7 +58,7 @@ im Includepfad suchen und die entspreche
  Groß-/Kleinschreibweise austauschen.
  .PP
@@ -180,8 +180,8 @@ author: Michael Gilbert <mgilbert@debian.org>
  .br
  $ make
  .PP
---- a/tools/winemaker.fr.UTF-8.man.in
-+++ b/tools/winemaker.fr.UTF-8.man.in
+--- a/tools/winemaker/winemaker.fr.UTF-8.man.in
++++ b/tools/winemaker/winemaker.fr.UTF-8.man.in
 @@ -211,7 +211,7 @@ Voici quelques exemples typiques d'utili
  .B winemaker
  :

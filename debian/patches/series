@@ -17,5 +17,5 @@ glu32-link.patch
 
 opengl.patch
 
-kfreebsd-include.patch
+#kfreebsd-include.patch
 font-divbyzero.patch
