@@ -35,7 +35,7 @@
 @ stub WsCreateServiceProxy
 @ stub WsCreateServiceProxyFromTemplate
 @ stdcall WsCreateWriter(ptr long ptr ptr)
-@ stub WsCreateXmlBuffer
+@ stdcall WsCreateXmlBuffer(ptr ptr long ptr ptr)
 @ stub WsCreateXmlSecurityToken
 @ stub WsDateTimeToFileTime
 @ stub WsDecodeUrl
@@ -89,7 +89,7 @@
 @ stub WsGetServiceProxyProperty
 @ stub WsGetWriterPosition
 @ stdcall WsGetWriterProperty(ptr long ptr long ptr)
-@ stub WsGetXmlAttribute
+@ stdcall WsGetXmlAttribute(ptr ptr ptr ptr ptr ptr)
 @ stub WsInitializeMessage
 @ stub WsMarkHeaderAsUnderstood
 @ stub WsMatchPolicyAlternative
@@ -151,11 +151,11 @@
 @ stub WsSetFaultErrorProperty
 @ stub WsSetHeader
 @ stdcall WsSetInput(ptr ptr ptr ptr long ptr)
-@ stub WsSetInputToBuffer
+@ stdcall WsSetInputToBuffer(ptr ptr ptr long ptr)
 @ stub WsSetListenerProperty
 @ stub WsSetMessageProperty
 @ stdcall WsSetOutput(ptr ptr ptr ptr long ptr)
-@ stub WsSetOutputToBuffer
+@ stdcall WsSetOutputToBuffer(ptr ptr ptr long ptr)
 @ stub WsSetReaderPosition
 @ stub WsSetWriterPosition
 @ stub WsShutdownSessionChannel

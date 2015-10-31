@@ -176,7 +176,7 @@ static void WINAPI d3d9_surface_PreLoad(IDirect3DSurface9 *iface)
     TRACE("iface %p.\n", iface);
 
     wined3d_mutex_lock();
-    wined3d_surface_preload(surface->wined3d_surface);
+    wined3d_texture_preload(surface->wined3d_texture);
     wined3d_mutex_unlock();
 }
 
@@ -297,7 +297,7 @@ static HRESULT WINAPI d3d9_surface_GetDC(IDirect3DSurface9 *iface, HDC *dc)
     }
 
     wined3d_mutex_lock();
-    hr = wined3d_surface_getdc(surface->wined3d_surface, dc);
+    hr = wined3d_texture_get_dc(surface->wined3d_texture, surface->sub_resource_idx, dc);
     wined3d_mutex_unlock();
 
     return hr;
@@ -311,7 +311,7 @@ static HRESULT WINAPI d3d9_surface_ReleaseDC(IDirect3DSurface9 *iface, HDC dc)
     TRACE("iface %p, dc %p.\n", iface, dc);
 
     wined3d_mutex_lock();
-    hr = wined3d_surface_releasedc(surface->wined3d_surface, dc);
+    hr = wined3d_texture_release_dc(surface->wined3d_texture, surface->sub_resource_idx, dc);
     wined3d_mutex_unlock();
 
     switch (hr)
@@ -379,7 +379,7 @@ void surface_init(struct d3d9_surface *surface, struct wined3d_texture *wined3d_
         IDirect3DBaseTexture9_Release(texture);
     }
 
-    wined3d_resource_get_desc(wined3d_surface_get_resource(wined3d_surface), &desc);
+    wined3d_resource_get_desc(wined3d_texture_get_resource(wined3d_texture), &desc);
     switch (d3dformat_from_wined3dformat(desc.format))
     {
         case D3DFMT_A8R8G8B8:
@@ -428,8 +428,8 @@ struct wined3d_rendertarget_view *d3d9_surface_get_rendertarget_view(struct d3d9
     if (surface->wined3d_rtv)
         return surface->wined3d_rtv;
 
-    if (FAILED(hr = wined3d_rendertarget_view_create_from_surface(surface->wined3d_surface,
-            surface, &d3d9_view_wined3d_parent_ops, &surface->wined3d_rtv)))
+    if (FAILED(hr = wined3d_rendertarget_view_create_from_sub_resource(surface->wined3d_texture,
+            surface->sub_resource_idx, surface, &d3d9_view_wined3d_parent_ops, &surface->wined3d_rtv)))
     {
         ERR("Failed to create rendertarget view, hr %#x.\n", hr);
         return NULL;

@@ -282,16 +282,18 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 
     case WM_PRINTCLIENT:
     case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = wParam ? (HDC)wParam : BeginPaint( hWnd, &ps );
         if (btnPaintFunc[btn_type])
         {
-            PAINTSTRUCT ps;
-            HDC hdc = wParam ? (HDC)wParam : BeginPaint( hWnd, &ps );
             int nOldMode = SetBkMode( hdc, OPAQUE );
             (btnPaintFunc[btn_type])( hWnd, hdc, ODA_DRAWENTIRE );
             SetBkMode(hdc, nOldMode); /*  reset painting mode */
-            if( !wParam ) EndPaint( hWnd, &ps );
         }
+        if ( !wParam ) EndPaint( hWnd, &ps );
         break;
+    }
 
     case WM_KEYDOWN:
 	if (wParam == VK_SPACE)
@@ -351,9 +353,13 @@ LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
                                 (state & BST_INDETERMINATE) ? 0 : ((state & 3) + 1), 0 );
                 break;
             }
+            ReleaseCapture();
             BUTTON_NOTIFY_PARENT(hWnd, BN_CLICKED);
         }
-        ReleaseCapture();
+        else
+        {
+            ReleaseCapture();
+        }
         break;
 
     case WM_CAPTURECHANGED:

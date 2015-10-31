@@ -821,6 +821,8 @@ static void surface_depth_blt_fbo(const struct wined3d_device *device,
     surface_load_location(src_surface, context, src_location);
     if (!surface_is_full_rect(dst_surface, dst_rect))
         surface_load_location(dst_surface, context, dst_location);
+    else
+        wined3d_surface_prepare(dst_surface, context, dst_location);
 
     gl_info = context->gl_info;
 
@@ -912,6 +914,9 @@ static void surface_blt_fbo(const struct wined3d_device *device,
     surface_load_location(src_surface, old_ctx, src_location);
     if (!surface_is_full_rect(dst_surface, &dst_rect))
         surface_load_location(dst_surface, old_ctx, dst_location);
+    else
+        wined3d_surface_prepare(dst_surface, old_ctx, dst_location);
+
 
     if (src_location == WINED3D_LOCATION_DRAWABLE) required_rt = src_surface;
     else if (dst_location == WINED3D_LOCATION_DRAWABLE) required_rt = dst_surface;
@@ -1008,6 +1013,10 @@ static BOOL fbo_blit_supported(const struct wined3d_gl_info *gl_info, enum wined
             if (!((dst_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_FBO_ATTACHABLE)
                     || (dst_usage & WINED3DUSAGE_RENDERTARGET)))
                 return FALSE;
+            if (!(src_format->id == dst_format->id
+                    || (is_identity_fixup(src_format->color_fixup)
+                    && is_identity_fixup(dst_format->color_fixup))))
+                return FALSE;
             break;
 
         case WINED3D_BLIT_OP_DEPTH_BLIT:
@@ -1015,16 +1024,17 @@ static BOOL fbo_blit_supported(const struct wined3d_gl_info *gl_info, enum wined
                 return FALSE;
             if (!(dst_format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)))
                 return FALSE;
+            /* Accept pure swizzle fixups for depth formats. In general we
+             * ignore the stencil component (if present) at the moment and the
+             * swizzle is not relevant with just the depth component. */
+            if (is_complex_fixup(src_format->color_fixup) || is_complex_fixup(dst_format->color_fixup)
+                    || is_scaling_fixup(src_format->color_fixup) || is_scaling_fixup(dst_format->color_fixup))
+                return FALSE;
             break;
 
         default:
             return FALSE;
     }
-
-    if (!(src_format->id == dst_format->id
-            || (is_identity_fixup(src_format->color_fixup)
-            && is_identity_fixup(dst_format->color_fixup))))
-        return FALSE;
 
     return TRUE;
 }
@@ -1093,19 +1103,6 @@ static HRESULT wined3d_surface_depth_blt(struct wined3d_surface *src_surface, DW
             dst_surface->ds_current_size.cx, dst_surface->ds_current_size.cy);
 
     return WINED3D_OK;
-}
-
-HRESULT CDECL wined3d_surface_get_render_target_data(struct wined3d_surface *surface,
-        struct wined3d_surface *render_target)
-{
-    TRACE("surface %p, render_target %p.\n", surface, render_target);
-
-    /* TODO: Check surface sizes, pools, etc. */
-
-    if (render_target->resource.multisample_type)
-        return WINED3DERR_INVALIDCALL;
-
-    return wined3d_surface_blt(surface, NULL, render_target, NULL, 0, NULL, WINED3D_TEXF_POINT);
 }
 
 /* Context activation is done by the caller. */
@@ -3666,23 +3663,7 @@ void surface_load_ds_location(struct wined3d_surface *surface, struct wined3d_co
     if (surface->locations & WINED3D_LOCATION_DISCARDED)
     {
         TRACE("Surface was discarded, no need copy data.\n");
-        switch (location)
-        {
-            case WINED3D_LOCATION_TEXTURE_RGB:
-                wined3d_texture_prepare_texture(surface->container, context, FALSE);
-                break;
-            case WINED3D_LOCATION_RB_MULTISAMPLE:
-                surface_prepare_rb(surface, gl_info, TRUE);
-                break;
-            case WINED3D_LOCATION_RB_RESOLVED:
-                surface_prepare_rb(surface, gl_info, FALSE);
-                break;
-            case WINED3D_LOCATION_DRAWABLE:
-                /* Nothing to do */
-                break;
-            default:
-                FIXME("Unhandled location %#x\n", location);
-        }
+        wined3d_surface_prepare(surface, context, location);
         surface->locations &= ~WINED3D_LOCATION_DISCARDED;
         surface->locations |= location;
         surface->ds_current_size.cx = surface->resource.width;
@@ -3745,7 +3726,6 @@ void surface_load_ds_location(struct wined3d_surface *surface, struct wined3d_co
         gl_info->gl_ops.gl.p_glTexParameteri(bind_target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         gl_info->gl_ops.gl.p_glTexParameteri(bind_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         gl_info->gl_ops.gl.p_glTexParameteri(bind_target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-        gl_info->gl_ops.gl.p_glTexParameteri(bind_target, GL_DEPTH_TEXTURE_MODE_ARB, GL_LUMINANCE);
         gl_info->gl_ops.gl.p_glBindTexture(bind_target, old_binding);
 
         context_apply_fbo_state_blit(context, GL_FRAMEBUFFER,
@@ -5505,4 +5485,27 @@ HRESULT wined3d_surface_create(struct wined3d_texture *container, const struct w
     *surface = object;
 
     return hr;
+}
+
+/* Context activation is done by the caller. */
+void wined3d_surface_prepare(struct wined3d_surface *surface, struct wined3d_context *context, DWORD location)
+{
+    switch (location)
+    {
+        case WINED3D_LOCATION_TEXTURE_RGB:
+            wined3d_texture_prepare_texture(surface->container, context, FALSE);
+            break;
+
+        case WINED3D_LOCATION_TEXTURE_SRGB:
+            wined3d_texture_prepare_texture(surface->container, context, TRUE);
+            break;
+
+        case WINED3D_LOCATION_RB_MULTISAMPLE:
+            surface_prepare_rb(surface, context->gl_info, TRUE);
+            break;
+
+        case WINED3D_LOCATION_RB_RESOLVED:
+            surface_prepare_rb(surface, context->gl_info, FALSE);
+            break;
+    }
 }

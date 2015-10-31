@@ -145,6 +145,11 @@ static inline BOOL is_complex_fixup(struct color_fixup_desc fixup)
     return fixup.x_source == CHANNEL_SOURCE_COMPLEX0 || fixup.x_source == CHANNEL_SOURCE_COMPLEX1;
 }
 
+static inline BOOL is_scaling_fixup(struct color_fixup_desc fixup)
+{
+    return fixup.x_sign_fixup || fixup.y_sign_fixup || fixup.z_sign_fixup || fixup.w_sign_fixup;
+}
+
 static inline BOOL is_same_fixup(struct color_fixup_desc f1, struct color_fixup_desc f2)
 {
     return f1.x_sign_fixup == f2.x_sign_fixup && f1.x_source == f2.x_source
@@ -1493,6 +1498,7 @@ enum wined3d_pci_device
     CARD_AMD_RADEON_HD2600          = 0x9581,
     CARD_AMD_RADEON_HD2900          = 0x9400,
     CARD_AMD_RADEON_HD3200          = 0x9620,
+    CARD_AMD_RADEON_HD3850          = 0x9515,
     CARD_AMD_RADEON_HD4200M         = 0x9712,
     CARD_AMD_RADEON_HD4350          = 0x954f,
     CARD_AMD_RADEON_HD4600          = 0x9495,
@@ -2453,6 +2459,8 @@ void surface_load_fb_texture(struct wined3d_surface *surface, BOOL srgb,
 HRESULT surface_load_location(struct wined3d_surface *surface,
         struct wined3d_context *context, DWORD location) DECLSPEC_HIDDEN;
 void surface_modify_ds_location(struct wined3d_surface *surface, DWORD location, UINT w, UINT h) DECLSPEC_HIDDEN;
+void wined3d_surface_prepare(struct wined3d_surface *surface, struct wined3d_context *context,
+        DWORD location) DECLSPEC_HIDDEN;
 void surface_prepare_rb(struct wined3d_surface *surface,
         const struct wined3d_gl_info *gl_info, BOOL multisample) DECLSPEC_HIDDEN;
 void surface_set_compatible_renderbuffer(struct wined3d_surface *surface,

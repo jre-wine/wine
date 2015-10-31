@@ -408,6 +408,7 @@ static HRESULT WINAPI rendertarget_DrawGlyphRun(IDWriteBitmapRenderTarget1 *ifac
         hr = IDWriteGlyphRunAnalysis_GetAlphaTextureBounds(analysis, DWRITE_TEXTURE_CLEARTYPE_3x1, &bounds);
         if (FAILED(hr)) {
             WARN("GetAlphaTextureBounds() failed, 0x%08x\n", hr);
+            IDWriteGlyphRunAnalysis_Release(analysis);
             return hr;
         }
         texturetype = DWRITE_TEXTURE_CLEARTYPE_3x1;
@@ -567,7 +568,7 @@ static HRESULT create_rendertarget(IDWriteFactory *factory, HDC hdc, UINT32 widt
     }
 
     target->m = identity;
-    target->ppdip = 1.0;
+    target->ppdip = GetDeviceCaps(target->hdc, LOGPIXELSX) / 96.0f;
     target->antialiasmode = DWRITE_TEXT_ANTIALIAS_MODE_CLEARTYPE;
     target->factory = factory;
     IDWriteFactory_AddRef(factory);

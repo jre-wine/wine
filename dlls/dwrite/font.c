@@ -431,6 +431,8 @@ static ULONG WINAPI dwritefontface_Release(IDWriteFontFace2 *iface)
             if (This->files[i])
                 IDWriteFontFile_Release(This->files[i]);
         }
+        heap_free(This->streams);
+        heap_free(This->files);
 
         for (i = 0; i < sizeof(This->glyphs)/sizeof(This->glyphs[0]); i++)
             heap_free(This->glyphs[i]);
@@ -1067,6 +1069,8 @@ static HRESULT WINAPI dwritefontface2_GetRecommendedRenderingMode(IDWriteFontFac
 
     if (is_sideways)
         FIXME("sideways mode not supported\n");
+
+    emSize *= max(dpiX, dpiY) / 96.0f;
 
     *renderingmode = DWRITE_RENDERING_MODE_DEFAULT;
     *gridfitmode = DWRITE_GRID_FIT_MODE_DEFAULT;
@@ -4378,9 +4382,11 @@ static const struct IDWriteGlyphRunAnalysisVtbl glyphrunanalysisvtbl = {
 };
 
 HRESULT create_glyphrunanalysis(DWRITE_RENDERING_MODE rendering_mode, DWRITE_MEASURING_MODE measuring_mode, DWRITE_GLYPH_RUN const *run,
-    FLOAT ppdip, DWRITE_GRID_FIT_MODE gridfit_mode, DWRITE_TEXT_ANTIALIAS_MODE aa_mode, FLOAT originX, FLOAT originY, IDWriteGlyphRunAnalysis **ret)
+    FLOAT ppdip, const DWRITE_MATRIX *transform, DWRITE_GRID_FIT_MODE gridfit_mode, DWRITE_TEXT_ANTIALIAS_MODE aa_mode,
+    FLOAT originX, FLOAT originY, IDWriteGlyphRunAnalysis **ret)
 {
     struct dwrite_glyphrunanalysis *analysis;
+    UINT32 i;
 
     *ret = NULL;
 
@@ -4398,8 +4404,8 @@ HRESULT create_glyphrunanalysis(DWRITE_RENDERING_MODE rendering_mode, DWRITE_MEA
     analysis->ready = 0;
     analysis->bitmap = NULL;
     analysis->ppdip = ppdip;
-    analysis->originX = originX;
-    analysis->originY = originY;
+    analysis->originX = originX * ppdip;
+    analysis->originY = originY * ppdip;
     SetRectEmpty(&analysis->bounds);
     analysis->run = *run;
     IDWriteFontFace_AddRef(analysis->run.fontFace);
@@ -4425,12 +4431,17 @@ HRESULT create_glyphrunanalysis(DWRITE_RENDERING_MODE rendering_mode, DWRITE_MEA
 
     memcpy(analysis->glyphs, run->glyphIndices, run->glyphCount*sizeof(*run->glyphIndices));
 
-    if (run->glyphAdvances)
-        memcpy(analysis->advances, run->glyphAdvances, run->glyphCount*sizeof(*run->glyphAdvances));
+    if (run->glyphAdvances) {
+        if (ppdip == 1.0f)
+            memcpy(analysis->advances, run->glyphAdvances, run->glyphCount*sizeof(*run->glyphAdvances));
+        else {
+            for (i = 0; i < run->glyphCount; i++)
+                analysis->advances[i] = run->glyphAdvances[i] * ppdip;
+        }
+    }
     else {
         DWRITE_FONT_METRICS metrics;
         IDWriteFontFace1 *fontface1;
-        UINT32 i;
 
         IDWriteFontFace_GetMetrics(run->fontFace, &metrics);
         IDWriteFontFace_QueryInterface(run->fontFace, &IID_IDWriteFontFace1, (void**)&fontface1);
@@ -4445,16 +4456,16 @@ HRESULT create_glyphrunanalysis(DWRITE_RENDERING_MODE rendering_mode, DWRITE_MEA
                 hr = IDWriteFontFace1_GetDesignGlyphAdvances(fontface1, 1, run->glyphIndices + i, &a, run->isSideways);
                 if (FAILED(hr))
                     a = 0;
-                analysis->advances[i] = get_scaled_advance_width(a, run->fontEmSize, &metrics);
+                analysis->advances[i] = get_scaled_advance_width(a, run->fontEmSize, &metrics) * ppdip;
                 break;
             case DWRITE_MEASURING_MODE_GDI_CLASSIC:
             case DWRITE_MEASURING_MODE_GDI_NATURAL:
-                hr = IDWriteFontFace1_GetGdiCompatibleGlyphAdvances(fontface1, run->fontEmSize, ppdip, NULL /* FIXME */,
+                hr = IDWriteFontFace1_GetGdiCompatibleGlyphAdvances(fontface1, run->fontEmSize, ppdip, transform,
                     measuring_mode == DWRITE_MEASURING_MODE_GDI_NATURAL, run->isSideways, 1, run->glyphIndices + i, &a);
                 if (FAILED(hr))
                     analysis->advances[i] = 0.0;
                 else
-                    analysis->advances[i] = floorf(a * run->fontEmSize * ppdip / metrics.designUnitsPerEm + 0.5f) / ppdip;
+                    analysis->advances[i] = floorf(a * run->fontEmSize * ppdip / metrics.designUnitsPerEm + 0.5f);
                 break;
             default:
                 ;
@@ -4464,8 +4475,16 @@ HRESULT create_glyphrunanalysis(DWRITE_RENDERING_MODE rendering_mode, DWRITE_MEA
         IDWriteFontFace1_Release(fontface1);
     }
 
-    if (run->glyphOffsets)
-        memcpy(analysis->offsets, run->glyphOffsets, run->glyphCount*sizeof(*run->glyphOffsets));
+    if (run->glyphOffsets) {
+        if (ppdip == 1.0f)
+            memcpy(analysis->offsets, run->glyphOffsets, run->glyphCount*sizeof(*run->glyphOffsets));
+        else {
+            for (i = 0; i < run->glyphCount; i++) {
+                analysis->offsets[i].advanceOffset  = run->glyphOffsets[i].advanceOffset * ppdip;
+                analysis->offsets[i].ascenderOffset = run->glyphOffsets[i].ascenderOffset * ppdip;
+            }
+        }
+    }
 
     *ret = &analysis->IDWriteGlyphRunAnalysis_iface;
     return S_OK;
@@ -4537,8 +4556,23 @@ HRESULT create_colorglyphenum(FLOAT originX, FLOAT originY, const DWRITE_GLYPH_R
     DWRITE_MEASURING_MODE mode, const DWRITE_MATRIX *transform, UINT32 palette, IDWriteColorGlyphRunEnumerator **ret)
 {
     struct dwrite_colorglyphenum *colorglyphenum;
+    IDWriteFontFace2 *fontface2;
+    BOOL colorfont;
+    HRESULT hr;
 
     *ret = NULL;
+
+    hr = IDWriteFontFace_QueryInterface(run->fontFace, &IID_IDWriteFontFace2, (void**)&fontface2);
+    if (FAILED(hr)) {
+        WARN("failed to get IDWriteFontFace2, 0x%08x\n", hr);
+        return hr;
+    }
+
+    colorfont = IDWriteFontFace2_IsColorFont(fontface2);
+    IDWriteFontFace2_Release(fontface2);
+    if (!colorfont)
+        return DWRITE_E_NOCOLOR;
+
     colorglyphenum = heap_alloc(sizeof(*colorglyphenum));
     if (!colorglyphenum)
         return E_OUTOFMEMORY;

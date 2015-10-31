@@ -301,14 +301,13 @@ static const struct wined3d_parent_ops d3d8_surface_wined3d_parent_ops =
 };
 
 void surface_init(struct d3d8_surface *surface, struct wined3d_texture *wined3d_texture, unsigned int sub_resource_idx,
-        struct wined3d_surface *wined3d_surface, const struct wined3d_parent_ops **parent_ops)
+        const struct wined3d_parent_ops **parent_ops)
 {
     IDirect3DBaseTexture8 *texture;
 
     surface->IDirect3DSurface8_iface.lpVtbl = &d3d8_surface_vtbl;
     d3d8_resource_init(&surface->resource);
     surface->resource.refcount = 0;
-    surface->wined3d_surface = wined3d_surface;
     list_init(&surface->rtv_entry);
     surface->container = wined3d_texture_get_parent(wined3d_texture);
     surface->wined3d_texture = wined3d_texture;
@@ -348,24 +347,13 @@ static const struct wined3d_parent_ops d3d8_view_wined3d_parent_ops =
 
 struct wined3d_rendertarget_view *d3d8_surface_get_rendertarget_view(struct d3d8_surface *surface)
 {
-    struct wined3d_resource *resource;
-    struct wined3d_resource_desc resource_desc;
-    struct wined3d_rendertarget_view_desc desc;
     HRESULT hr;
 
     if (surface->wined3d_rtv)
         return surface->wined3d_rtv;
 
-    resource = wined3d_texture_get_resource(surface->wined3d_texture);
-    wined3d_resource_get_desc(resource, &resource_desc);
-
-    desc.format_id = resource_desc.format;
-    desc.u.texture.level_idx = surface->sub_resource_idx;
-    desc.u.texture.layer_idx = 0;
-    desc.u.texture.layer_count = 1;
-
-    if (FAILED(hr = wined3d_rendertarget_view_create(&desc, resource,
-            surface, &d3d8_view_wined3d_parent_ops, &surface->wined3d_rtv)))
+    if (FAILED(hr = wined3d_rendertarget_view_create_from_sub_resource(surface->wined3d_texture,
+            surface->sub_resource_idx, surface, &d3d8_view_wined3d_parent_ops, &surface->wined3d_rtv)))
     {
         ERR("Failed to create rendertarget view, hr %#x.\n", hr);
         return NULL;

@@ -1590,7 +1590,7 @@ void free_installed_fonts(void)
 {
     while (installedFontCollection.count)
         GdipDeleteFontFamily(installedFontCollection.FontFamilies[--installedFontCollection.count]);
-    HeapFree(GetProcessHeap(), 0, installedFontCollection.FontFamilies);
+    heap_free(installedFontCollection.FontFamilies);
     installedFontCollection.FontFamilies = NULL;
     installedFontCollection.allocated = 0;
 }
@@ -1612,13 +1612,13 @@ static INT CALLBACK add_font_proc(const LOGFONTW *lfw, const TEXTMETRICW *ntm,
     if (fonts->allocated == fonts->count)
     {
         INT new_alloc_count = fonts->allocated+50;
-        GpFontFamily** new_family_list = HeapAlloc(GetProcessHeap(), 0, new_alloc_count*sizeof(void*));
+        GpFontFamily** new_family_list = heap_alloc(new_alloc_count*sizeof(void*));
 
         if (!new_family_list)
             return 0;
 
         memcpy(new_family_list, fonts->FontFamilies, fonts->count*sizeof(void*));
-        HeapFree(GetProcessHeap(), 0, fonts->FontFamilies);
+        heap_free(fonts->FontFamilies);
         fonts->FontFamilies = new_family_list;
         fonts->allocated = new_alloc_count;
     }

@@ -3187,10 +3187,8 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstance(
     REFIID iid,
     LPVOID *ppv)
 {
+    MULTI_QI multi_qi = { iid };
     HRESULT hres;
-    LPCLASSFACTORY lpclf = 0;
-    APARTMENT *apt;
-    CLSID clsid;
 
     TRACE("(rclsid=%s, pUnkOuter=%p, dwClsContext=%08x, riid=%s, ppv=%p)\n", debugstr_guid(rclsid),
           pUnkOuter, dwClsContext, debugstr_guid(iid), ppv);
@@ -3198,65 +3196,8 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstance(
     if (ppv==0)
         return E_POINTER;
 
-    hres = CoGetTreatAsClass(rclsid, &clsid);
-    if(FAILED(hres))
-        clsid = *rclsid;
-
-    *ppv = 0;
-
-    if (!(apt = COM_CurrentApt()))
-    {
-        if (!(apt = apartment_find_multi_threaded()))
-        {
-            ERR("apartment not initialised\n");
-            return CO_E_NOTINITIALIZED;
-        }
-        apartment_release(apt);
-    }
-
-    /*
-     * The Standard Global Interface Table (GIT) object is a process-wide singleton.
-     */
-    if (IsEqualIID(&clsid, &CLSID_StdGlobalInterfaceTable))
-    {
-        IGlobalInterfaceTable *git = get_std_git();
-        hres = IGlobalInterfaceTable_QueryInterface(git, iid, ppv);
-        if (hres != S_OK) return hres;
-
-        TRACE("Retrieved GIT (%p)\n", *ppv);
-        return S_OK;
-    }
-
-    if (IsEqualCLSID(&clsid, &CLSID_ManualResetEvent))
-        return ManualResetEvent_Construct(pUnkOuter, iid, ppv);
-
-    /*
-     * Get a class factory to construct the object we want.
-     */
-    hres = CoGetClassObject(&clsid,
-                            dwClsContext,
-                            NULL,
-                            &IID_IClassFactory,
-                            (LPVOID)&lpclf);
-
-    if (FAILED(hres))
-        return hres;
-
-    /*
-     * Create the object and don't forget to release the factory
-     */
-    hres = IClassFactory_CreateInstance(lpclf, pUnkOuter, iid, ppv);
-    IClassFactory_Release(lpclf);
-    if (FAILED(hres))
-    {
-        if (hres == CLASS_E_NOAGGREGATION && pUnkOuter)
-            FIXME("Class %s does not support aggregation\n", debugstr_guid(&clsid));
-        else
-            FIXME("no instance created for interface %s of class %s, hres is 0x%08x\n",
-                  debugstr_guid(iid),
-                  debugstr_guid(&clsid),hres);
-    }
-
+    hres = CoCreateInstanceEx(rclsid, pUnkOuter, dwClsContext, NULL, 1, &multi_qi);
+    *ppv = multi_qi.pItf;
     return hres;
 }
 
@@ -3271,18 +3212,26 @@ static void init_multi_qi(DWORD count, MULTI_QI *mqi)
   }
 }
 
-static HRESULT return_multi_qi(IUnknown *unk, DWORD count, MULTI_QI *mqi)
+static HRESULT return_multi_qi(IUnknown *unk, DWORD count, MULTI_QI *mqi, BOOL include_unk)
 {
-  ULONG index, fetched = 0;
+  ULONG index = 0, fetched = 0;
 
-  for (index = 0; index < count; index++)
+  if (include_unk)
+  {
+    mqi[0].hr = S_OK;
+    mqi[0].pItf = unk;
+    index = fetched = 1;
+  }
+
+  for (; index < count; index++)
   {
     mqi[index].hr = IUnknown_QueryInterface(unk, mqi[index].pIID, (void**)&mqi[index].pItf);
     if (mqi[index].hr == S_OK)
       fetched++;
   }
 
-  IUnknown_Release(unk);
+  if (!include_unk)
+      IUnknown_Release(unk);
 
   if (fetched == 0)
     return E_NOINTERFACE;
@@ -3301,33 +3250,77 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstanceEx(
   ULONG         cmq,
   MULTI_QI*     pResults)
 {
-  IUnknown* pUnk = NULL;
-  HRESULT   hr;
+    IUnknown *unk = NULL;
+    IClassFactory *cf;
+    APARTMENT *apt;
+    CLSID clsid;
+    HRESULT hres;
 
-  /*
-   * Sanity check
-   */
-  if ( (cmq==0) || (pResults==NULL))
-    return E_INVALIDARG;
+    TRACE("(%s %p %x %p %u %p)\n", debugstr_guid(rclsid), pUnkOuter, dwClsContext, pServerInfo, cmq, pResults);
 
-  if (pServerInfo!=NULL)
-    FIXME("() non-NULL pServerInfo not supported!\n");
+    if (!cmq || !pResults)
+        return E_INVALIDARG;
 
-  init_multi_qi(cmq, pResults);
+    if (pServerInfo)
+        FIXME("() non-NULL pServerInfo not supported!\n");
 
-  /*
-   * Get the object and get its IUnknown pointer.
-   */
-  hr = CoCreateInstance(rclsid,
-			pUnkOuter,
-			dwClsContext,
-			&IID_IUnknown,
-			(VOID**)&pUnk);
+    init_multi_qi(cmq, pResults);
 
-  if (hr != S_OK)
-    return hr;
+    hres = CoGetTreatAsClass(rclsid, &clsid);
+    if(FAILED(hres))
+        clsid = *rclsid;
 
-  return return_multi_qi(pUnk, cmq, pResults);
+    if (!(apt = COM_CurrentApt()))
+    {
+        if (!(apt = apartment_find_multi_threaded()))
+        {
+            ERR("apartment not initialised\n");
+            return CO_E_NOTINITIALIZED;
+        }
+        apartment_release(apt);
+    }
+
+    /*
+     * The Standard Global Interface Table (GIT) object is a process-wide singleton.
+     */
+    if (IsEqualIID(&clsid, &CLSID_StdGlobalInterfaceTable))
+    {
+        IGlobalInterfaceTable *git = get_std_git();
+        TRACE("Retrieving GIT\n");
+        return return_multi_qi((IUnknown*)git, cmq, pResults, FALSE);
+    }
+
+    if (IsEqualCLSID(&clsid, &CLSID_ManualResetEvent)) {
+        hres = ManualResetEvent_Construct(pUnkOuter, pResults[0].pIID, (void**)&unk);
+        if (FAILED(hres))
+            return hres;
+        return return_multi_qi(unk, cmq, pResults, TRUE);
+    }
+
+    /*
+     * Get a class factory to construct the object we want.
+     */
+    hres = CoGetClassObject(&clsid, dwClsContext, NULL, &IID_IClassFactory, (void**)&cf);
+    if (FAILED(hres))
+        return hres;
+
+    /*
+     * Create the object and don't forget to release the factory
+     */
+    hres = IClassFactory_CreateInstance(cf, pUnkOuter, pResults[0].pIID, (void**)&unk);
+    IClassFactory_Release(cf);
+    if (FAILED(hres))
+    {
+        if (hres == CLASS_E_NOAGGREGATION && pUnkOuter)
+            FIXME("Class %s does not support aggregation\n", debugstr_guid(&clsid));
+        else
+            FIXME("no instance created for interface %s of class %s, hres is 0x%08x\n",
+                  debugstr_guid(pResults[0].pIID),
+                  debugstr_guid(&clsid),hres);
+        return hres;
+    }
+
+    return return_multi_qi(unk, cmq, pResults, TRUE);
 }
 
 /***********************************************************************
@@ -3390,7 +3383,7 @@ HRESULT WINAPI CoGetInstanceFromFile(
       IPersistFile_Release(pf);
   }
 
-  return return_multi_qi(unk, count, results);
+  return return_multi_qi(unk, count, results, FALSE);
 }
 
 /***********************************************************************
@@ -3453,7 +3446,7 @@ HRESULT WINAPI CoGetInstanceFromIStorage(
       IPersistStorage_Release(ps);
   }
 
-  return return_multi_qi(unk, count, results);
+  return return_multi_qi(unk, count, results, FALSE);
 }
 
 /***********************************************************************

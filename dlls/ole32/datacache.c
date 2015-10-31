@@ -408,7 +408,7 @@ static HRESULT read_clipformat(IStream *stream, CLIPFORMAT *clipformat)
     if (length == -1)
     {
         DWORD cf;
-        hr = IStream_Read(stream, &cf, sizeof(cf), 0);
+        hr = IStream_Read(stream, &cf, sizeof(cf), &read);
         if (hr != S_OK || read != sizeof(cf))
             return DV_E_CLIPFORMAT;
         *clipformat = cf;
@@ -1333,7 +1333,10 @@ static HRESULT parse_contents_stream( DataCache *This, IStorage *stg, IStream *s
     if (IsEqualCLSID( &stat.clsid, &CLSID_Picture_Dib ))
         fmt = &static_dib_fmt;
     else
+    {
+        FIXME("unsupported format %s\n", debugstr_guid( &stat.clsid ));
         return E_FAIL;
+    }
 
     return add_cache_entry( This, fmt, stm, contents_stream );
 }
@@ -1365,7 +1368,8 @@ static HRESULT WINAPI DataCache_Load( IPersistStorage *iface, IStorage *pStg )
         hr = parse_contents_stream( This, pStg, stm );
         IStream_Release( stm );
     }
-    else
+
+    if (FAILED(hr))
         hr = parse_pres_streams( This, pStg );
 
     if (SUCCEEDED( hr ))

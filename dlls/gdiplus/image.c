@@ -92,7 +92,7 @@ static ColorPalette *get_palette(IWICBitmapFrameDecode *frame, WICBitmapPaletteT
             UINT count;
 
             IWICPalette_GetColorCount(wic_palette, &count);
-            palette = HeapAlloc(GetProcessHeap(), 0, 2 * sizeof(UINT) + count * sizeof(ARGB));
+            palette = heap_alloc(2 * sizeof(UINT) + count * sizeof(ARGB));
             IWICPalette_GetColors(wic_palette, count, palette->Entries, &palette->Count);
 
             IWICPalette_GetType(wic_palette, &type);
@@ -1692,7 +1692,7 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromHICON(HICON hicon, GpBitmap** bitmap)
     {
         if (iinfo.hbmMask)
         {
-            BYTE *bits = HeapAlloc(GetProcessHeap(), 0, height * stride);
+            BYTE *bits = heap_alloc(height * stride);
 
             /* read alpha data from the mask */
             if (iinfo.hbmColor)
@@ -1716,7 +1716,7 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromHICON(HICON hicon, GpBitmap** bitmap)
                 dst_row += lockeddata.Stride;
             }
 
-            HeapFree(GetProcessHeap(), 0, bits);
+            heap_free(bits);
         }
         else
         {
@@ -2874,7 +2874,7 @@ GpStatus WINGDIPAPI GdipGetAllPropertyItems(GpImage *image, UINT size,
         item_size = propvariant_size(&value);
         if (item_size)
         {
-            item = HeapAlloc(GetProcessHeap(), 0, item_size + sizeof(*item));
+            item = heap_alloc(item_size + sizeof(*item));
 
             propvariant_to_item(&value, item, item_size + sizeof(*item), id.u.uiVal);
             buf[i].id = item->id;
@@ -2884,7 +2884,7 @@ GpStatus WINGDIPAPI GdipGetAllPropertyItems(GpImage *image, UINT size,
             memcpy(item_value, item->value, item_size);
             item_value += item_size;
 
-            HeapFree(GetProcessHeap(), 0, item);
+            heap_free(item);
         }
 
         PropVariantClear(&id);
@@ -3065,7 +3065,7 @@ static BOOL get_bool_property(IWICMetadataReader *reader, const GUID *guid, cons
     PropVariantInit(&value);
 
     id.vt = VT_LPWSTR;
-    id.u.pwszVal = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(prop_name) + 1) * sizeof(WCHAR));
+    id.u.pwszVal = CoTaskMemAlloc((lstrlenW(prop_name) + 1) * sizeof(WCHAR));
     if (!id.u.pwszVal) return FALSE;
     lstrcpyW(id.u.pwszVal, prop_name);
     hr = IWICMetadataReader_GetValue(reader, NULL, &id, &value);
@@ -3092,7 +3092,7 @@ static PropertyItem *get_property(IWICMetadataReader *reader, const GUID *guid, 
     PropVariantInit(&value);
 
     id.vt = VT_LPWSTR;
-    id.u.pwszVal = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(prop_name) + 1) * sizeof(WCHAR));
+    id.u.pwszVal = CoTaskMemAlloc((lstrlenW(prop_name) + 1) * sizeof(WCHAR));
     if (!id.u.pwszVal) return NULL;
     lstrcpyW(id.u.pwszVal, prop_name);
     hr = IWICMetadataReader_GetValue(reader, NULL, &id, &value);
@@ -3838,7 +3838,7 @@ static DWORD get_gif_background_color(GpBitmap *bitmap)
         if(bitmap->prop_item[i].id == PropertyTagGlobalPalette) {
             if(bitmap->prop_item[i].length/3 > bgcolor_idx) {
                 BYTE *color = ((BYTE*)bitmap->prop_item[i].value)+bgcolor_idx*3;
-                return color[2] + (color[1]<<8) + (color[0]<<16) + (0xff<<24);
+                return color[2] + (color[1]<<8) + (color[0]<<16) + (0xffu<<24);
             }
             break;
         }
@@ -5266,5 +5266,15 @@ GpStatus WINGDIPAPI GdipImageRotateFlip(GpImage *image, RotateFlipType type)
 GpStatus WINGDIPAPI GdipImageSetAbort(GpImage *image, GdiplusAbort *pabort)
 {
     FIXME("(%p, %p): stub\n", image, pabort);
+    return NotImplemented;
+}
+
+/*****************************************************************************
+ * GdipBitmapConvertFormat [GDIPLUS.@]
+ */
+GpStatus WINGDIPAPI GdipBitmapConvertFormat(GpBitmap *bitmap, PixelFormat format, DitherType dithertype,
+    PaletteType palettetype, ColorPalette *palette, REAL alphathreshold)
+{
+    FIXME("(%p, 0x%08x, %d, %d, %p, %f): stub\n", bitmap, format, dithertype, palettetype, palette, alphathreshold);
     return NotImplemented;
 }

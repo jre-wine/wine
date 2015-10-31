@@ -7429,17 +7429,50 @@ end:
         closesocket(connector2);
 }
 
+#define compare_file(h,s,o) compare_file2(h,s,o,__FILE__,__LINE__)
+
+static void compare_file2(HANDLE handle, SOCKET sock, int offset, const char *file, int line)
+{
+    char buf1[256], buf2[256];
+    BOOL success;
+    int i = 0;
+
+    SetFilePointer(handle, offset, NULL, FILE_BEGIN);
+    while (1)
+    {
+        DWORD n1 = 0, n2 = 0;
+
+        success = ReadFile(handle, buf1, sizeof(buf1), &n1, NULL);
+        ok_(file,line)(success, "Failed to read from file.\n");
+        if (success && n1 == 0)
+            break;
+        else if(!success)
+            return;
+        n2 = recv(sock, buf2, n1, 0);
+        ok_(file,line)(n1 == n2, "Block %d size mismatch (%d != %d)\n", i, n1, n2);
+        ok_(file,line)(memcmp(buf1, buf2, n2) == 0, "Block %d failed\n", i);
+        i++;
+    }
+}
+
 static void test_TransmitFile(void)
 {
+    DWORD num_bytes, err, file_size, total_sent;
     GUID transmitFileGuid = WSAID_TRANSMITFILE;
     LPFN_TRANSMITFILE pTransmitFile = NULL;
     HANDLE file = INVALID_HANDLE_VALUE;
+    char header_msg[] = "hello world";
+    char footer_msg[] = "goodbye!!!";
     char system_ini_path[MAX_PATH];
     struct sockaddr_in bindAddress;
+    TRANSMIT_FILE_BUFFERS buffers;
     SOCKET client, server, dest;
-    DWORD num_bytes, err;
+    WSAOVERLAPPED ov;
+    char buf[256];
     int iret, len;
     BOOL bret;
+
+    memset( &ov, 0, sizeof(ov) );
 
     /* Setup sockets for testing TransmitFile */
     client = socket(AF_INET, SOCK_STREAM, 0);
@@ -7464,6 +7497,7 @@ static void test_TransmitFile(void)
         skip("Unable to open a file to transmit.\n");
         goto cleanup;
     }
+    file_size = GetFileSize(file, NULL);
 
     /* Test TransmitFile with an invalid socket */
     bret = pTransmitFile(INVALID_SOCKET, file, 0, 0, NULL, NULL, 0);
@@ -7515,7 +7549,119 @@ static void test_TransmitFile(void)
 
     /* Test TransmitFile with no possible buffer */
     bret = pTransmitFile(client, NULL, 0, 0, NULL, NULL, 0);
-    todo_wine ok(bret, "TransmitFile failed unexpectedly.\n");
+    ok(bret, "TransmitFile failed unexpectedly.\n");
+    iret = recv(dest, buf, sizeof(buf), 0);
+    ok(iret == -1, "Returned an unexpected buffer from TransmitFile (%d != -1).\n", iret);
+
+    /* Test TransmitFile with only buffer data */
+    buffers.Head = &header_msg[0];
+    buffers.HeadLength = sizeof(header_msg)+1;
+    buffers.Tail = &footer_msg[0];
+    buffers.TailLength = sizeof(footer_msg)+1;
+    bret = pTransmitFile(client, NULL, 0, 0, NULL, &buffers, 0);
+    ok(bret, "TransmitFile failed unexpectedly.\n");
+    iret = recv(dest, buf, sizeof(buf), 0);
+    ok(iret == sizeof(header_msg)+sizeof(footer_msg)+2,
+       "Returned an unexpected buffer from TransmitFile: %d\n", iret );
+    ok(memcmp(&buf[0], &header_msg[0], sizeof(header_msg)+1) == 0,
+       "TransmitFile header buffer did not match!\n");
+    ok(memcmp(&buf[sizeof(header_msg)+1], &footer_msg[0], sizeof(footer_msg)+1) == 0,
+       "TransmitFile footer buffer did not match!\n");
+
+    /* Test TransmitFile with only file data */
+    bret = pTransmitFile(client, file, 0, 0, NULL, NULL, 0);
+    ok(bret, "TransmitFile failed unexpectedly.\n");
+    compare_file(file, dest, 0);
+
+    /* Test TransmitFile with both file and buffer data */
+    buffers.Head = &header_msg[0];
+    buffers.HeadLength = sizeof(header_msg)+1;
+    buffers.Tail = &footer_msg[0];
+    buffers.TailLength = sizeof(footer_msg)+1;
+    SetFilePointer(file, 0, NULL, FILE_BEGIN);
+    bret = pTransmitFile(client, file, 0, 0, NULL, &buffers, 0);
+    ok(bret, "TransmitFile failed unexpectedly.\n");
+    iret = recv(dest, buf, sizeof(header_msg)+1, 0);
+    ok(memcmp(buf, &header_msg[0], sizeof(header_msg)+1) == 0,
+       "TransmitFile header buffer did not match!\n");
+    compare_file(file, dest, 0);
+    iret = recv(dest, buf, sizeof(footer_msg)+1, 0);
+    ok(memcmp(buf, &footer_msg[0], sizeof(footer_msg)+1) == 0,
+       "TransmitFile footer buffer did not match!\n");
+
+    /* Test overlapped TransmitFile */
+    ov.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (ov.hEvent == INVALID_HANDLE_VALUE)
+    {
+        skip("Could not create event object, some tests will be skipped. errno = %d\n",
+             GetLastError());
+        goto cleanup;
+    }
+    SetFilePointer(file, 0, NULL, FILE_BEGIN);
+    bret = pTransmitFile(client, file, 0, 0, &ov, NULL, 0);
+    err = WSAGetLastError();
+    ok(!bret, "TransmitFile succeeded unexpectedly.\n");
+    ok(err == ERROR_IO_PENDING, "TransmitFile triggered unexpected errno (%d != %d)\n",
+       err, ERROR_IO_PENDING);
+    iret = WaitForSingleObject(ov.hEvent, 2000);
+    ok(iret == WAIT_OBJECT_0, "Overlapped TransmitFile failed.\n");
+    WSAGetOverlappedResult(client, &ov, &total_sent, FALSE, NULL);
+    ok(total_sent == file_size,
+       "Overlapped TransmitFile sent an unexpected number of bytes (%d != %d).\n",
+       total_sent, file_size);
+    compare_file(file, dest, 0);
+
+    /* Test overlapped TransmitFile w/ start offset */
+    ov.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (ov.hEvent == INVALID_HANDLE_VALUE)
+    {
+        skip("Could not create event object, some tests will be skipped. errno = %d\n", GetLastError());
+        goto cleanup;
+    }
+    SetFilePointer(file, 0, NULL, FILE_BEGIN);
+    ov.Offset = 10;
+    bret = pTransmitFile(client, file, 0, 0, &ov, NULL, 0);
+    err = WSAGetLastError();
+    ok(!bret, "TransmitFile succeeded unexpectedly.\n");
+    ok(err == ERROR_IO_PENDING, "TransmitFile triggered unexpected errno (%d != %d)\n", err, ERROR_IO_PENDING);
+    iret = WaitForSingleObject(ov.hEvent, 2000);
+    ok(iret == WAIT_OBJECT_0, "Overlapped TransmitFile failed.\n");
+    WSAGetOverlappedResult(client, &ov, &total_sent, FALSE, NULL);
+    ok(total_sent == (file_size - ov.Offset),
+       "Overlapped TransmitFile sent an unexpected number of bytes (%d != %d).\n",
+       total_sent, file_size - ov.Offset);
+    compare_file(file, dest, ov.Offset);
+
+    /* Test overlapped TransmitFile w/ file and buffer data */
+    ov.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (ov.hEvent == INVALID_HANDLE_VALUE)
+    {
+        skip("Could not create event object, some tests will be skipped. errno = %d\n", GetLastError());
+        goto cleanup;
+    }
+    buffers.Head = &header_msg[0];
+    buffers.HeadLength = sizeof(header_msg)+1;
+    buffers.Tail = &footer_msg[0];
+    buffers.TailLength = sizeof(footer_msg)+1;
+    SetFilePointer(file, 0, NULL, FILE_BEGIN);
+    ov.Offset = 0;
+    bret = pTransmitFile(client, file, 0, 0, &ov, &buffers, 0);
+    err = WSAGetLastError();
+    ok(!bret, "TransmitFile succeeded unexpectedly.\n");
+    ok(err == ERROR_IO_PENDING, "TransmitFile triggered unexpected errno (%d != %d)\n", err, ERROR_IO_PENDING);
+    iret = WaitForSingleObject(ov.hEvent, 2000);
+    ok(iret == WAIT_OBJECT_0, "Overlapped TransmitFile failed.\n");
+    WSAGetOverlappedResult(client, &ov, &total_sent, FALSE, NULL);
+    ok(total_sent == (file_size + buffers.HeadLength + buffers.TailLength),
+       "Overlapped TransmitFile sent an unexpected number of bytes (%d != %d).\n",
+       total_sent, file_size  + buffers.HeadLength + buffers.TailLength);
+    iret = recv(dest, buf, sizeof(header_msg)+1, 0);
+    ok(memcmp(buf, &header_msg[0], sizeof(header_msg)+1) == 0,
+       "TransmitFile header buffer did not match!\n");
+    compare_file(file, dest, 0);
+    iret = recv(dest, buf, sizeof(footer_msg)+1, 0);
+    ok(memcmp(buf, &footer_msg[0], sizeof(footer_msg)+1) == 0,
+       "TransmitFile footer buffer did not match!\n");
 
     /* Test TransmitFile with a UDP datagram socket */
     closesocket(client);
@@ -7527,6 +7673,7 @@ static void test_TransmitFile(void)
 
 cleanup:
     CloseHandle(file);
+    CloseHandle(ov.hEvent);
     closesocket(client);
     closesocket(server);
 }

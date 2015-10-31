@@ -971,15 +971,15 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
         if(regs2[3] & (1 << 26)) info->FeatureSet |= CPU_FEATURE_SSE2;
 
         user_shared_data->ProcessorFeatures[PF_FLOATING_POINT_EMULATED]       = !(regs2[3] & 1);
-        user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE]   = (regs2[3] & (1 << 4 )) >> 4;
-        user_shared_data->ProcessorFeatures[PF_PAE_ENABLED]                   = (regs2[3] & (1 << 6 )) >> 6;
-        user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE_DOUBLE]       = (regs2[3] & (1 << 8 )) >> 8;
-        user_shared_data->ProcessorFeatures[PF_MMX_INSTRUCTIONS_AVAILABLE]    = (regs2[3] & (1 << 23)) >> 23;
-        user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE]   = (regs2[3] & (1 << 25)) >> 25;
-        user_shared_data->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = (regs2[3] & (1 << 26)) >> 26;
+        user_shared_data->ProcessorFeatures[PF_RDTSC_INSTRUCTION_AVAILABLE]   = (regs2[3] >> 4) & 1;
+        user_shared_data->ProcessorFeatures[PF_PAE_ENABLED]                   = (regs2[3] >> 6) & 1;
+        user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE_DOUBLE]       = (regs2[3] >> 8) & 1;
+        user_shared_data->ProcessorFeatures[PF_MMX_INSTRUCTIONS_AVAILABLE]    = (regs2[3] >> 23) & 1;
+        user_shared_data->ProcessorFeatures[PF_XMMI_INSTRUCTIONS_AVAILABLE]   = (regs2[3] >> 25) & 1;
+        user_shared_data->ProcessorFeatures[PF_XMMI64_INSTRUCTIONS_AVAILABLE] = (regs2[3] >> 26) & 1;
         user_shared_data->ProcessorFeatures[PF_SSE3_INSTRUCTIONS_AVAILABLE]   = regs2[2] & 1;
-        user_shared_data->ProcessorFeatures[PF_XSAVE_ENABLED]                 = (regs2[2] & (1 << 27)) >> 27;
-        user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE128]           = (regs2[2] & (1 << 13)) >> 13;
+        user_shared_data->ProcessorFeatures[PF_XSAVE_ENABLED]                 = (regs2[2] >> 27) & 1;
+        user_shared_data->ProcessorFeatures[PF_COMPARE_EXCHANGE128]           = (regs2[2] >> 13) & 1;
 
         if((regs2[3] & (1 << 26)) && (regs2[3] & (1 << 24))) /* has SSE2 and FXSAVE/FXRSTOR */
             user_shared_data->ProcessorFeatures[PF_SSE_DAZ_MODE_AVAILABLE] = have_sse_daz_mode();
@@ -999,10 +999,10 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             if (regs[0] >= 0x80000001)
             {
                 do_cpuid(0x80000001, regs2);  /* get vendor features */
-                user_shared_data->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED]        = (regs2[2] & (1 << 2  )) >> 2;
-                user_shared_data->ProcessorFeatures[PF_NX_ENABLED]                   = (regs2[3] & (1 << 20 )) >> 20;
-                user_shared_data->ProcessorFeatures[PF_3DNOW_INSTRUCTIONS_AVAILABLE] = (regs2[3] & (1 << 31 )) >> 31;
-                if(regs2[3] & (1 << 31)) info->FeatureSet |= CPU_FEATURE_3DNOW;
+                user_shared_data->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED]        = (regs2[2] >> 2) & 1;
+                user_shared_data->ProcessorFeatures[PF_NX_ENABLED]                   = (regs2[3] >> 20) & 1;
+                user_shared_data->ProcessorFeatures[PF_3DNOW_INSTRUCTIONS_AVAILABLE] = (regs2[3] >> 31) & 1;
+                if (regs2[3] >> 31) info->FeatureSet |= CPU_FEATURE_3DNOW;
             }
         }
         else if (regs[1] == GENU && regs[3] == INEI && regs[2] == NTEL)
@@ -1016,13 +1016,13 @@ static inline void get_cpuinfo(SYSTEM_CPU_INFORMATION* info)
             info->Revision |= regs2[0] & 0xf;                 /* stepping       */
 
             if(regs2[3] & (1 << 21)) info->FeatureSet |= CPU_FEATURE_DS;
-            user_shared_data->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED] = (regs2[2] & (1 << 5 )) >> 5;
+            user_shared_data->ProcessorFeatures[PF_VIRT_FIRMWARE_ENABLED] = (regs2[2] >> 5) & 1;
 
             do_cpuid(0x80000000, regs);  /* get vendor cpuid level */
             if (regs[0] >= 0x80000001)
             {
                 do_cpuid(0x80000001, regs2);  /* get vendor features */
-                user_shared_data->ProcessorFeatures[PF_NX_ENABLED] = (regs2[3] & (1 << 20 )) >> 20;
+                user_shared_data->ProcessorFeatures[PF_NX_ENABLED] = (regs2[3] >> 20) & 1;
             }
         }
         else
@@ -1307,9 +1307,9 @@ static inline BOOL logical_proc_info_add_numa_node(SYSTEM_LOGICAL_PROCESSOR_INFO
 
 static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **data, DWORD *max_len)
 {
-    static const char core_info[] = "/sys/devices/system/cpu/cpu%d/%s";
-    static const char cache_info[] = "/sys/devices/system/cpu/cpu%d/cache/index%d/%s";
-    static const char numa_info[] = "/sys/devices/system/node/node%d/cpumap";
+    static const char core_info[] = "/sys/devices/system/cpu/cpu%u/%s";
+    static const char cache_info[] = "/sys/devices/system/cpu/cpu%u/cache/index%u/%s";
+    static const char numa_info[] = "/sys/devices/system/node/node%u/cpumap";
 
     FILE *fcpu_list, *fnuma_list, *f;
     DWORD len = 0, beg, end, i, j, r;

@@ -686,17 +686,11 @@ WINE_CONFIG_HELPERS
 
 wine_binary="wine"
 test "x$enable_win64" != "xyes" || wine_binary="wine64"
-loader_programs="$wine_binary wine-installed"
+loader_programs="$wine_binary"
 libwine_soversion=`expr $libwine_version : '\([[0-9]]*\)\..*'`
 
 AC_SUBST(LOADER_RULES,["
 all: wine.inf
-
-install install-lib:: wine-installed
-	\$(INSTALL_PROGRAM) wine-installed \$(DESTDIR)\$(bindir)/$wine_binary
-
-uninstall::
-	\$(RM) \$(DESTDIR)\$(bindir)/$wine_binary
 "])
 
 case $host_os in
@@ -754,7 +748,7 @@ uninstall::
     LIBEXT="dylib"
     DLLFLAGS="$DLLFLAGS -fPIC"
     LIBWINE_LDFLAGS="-multiply_defined suppress"
-    LDRPATH_INSTALL="-Wl,-rpath,@loader_path/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
+    LDRPATH_INSTALL="-Wl,-rpath,@loader_path/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
     LDRPATH_LOCAL="-Wl,-rpath,@loader_path/\$(top_builddir)/libs/wine"
     dnl declare needed frameworks
     AC_SUBST(COREFOUNDATION_LIBS,"-framework CoreFoundation")
@@ -891,11 +885,9 @@ uninstall::
 "])
 
     AS_VAR_APPEND([LOADER_RULES],["
-$wine_binary: main.o wine_info.plist
-	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_LOCAL)
-
-wine-installed: main.o wine_info.plist
-	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_INSTALL)
+${wine_binary}_OBJS = main.o
+${wine_binary}_LDFLAGS = $LDEXECFLAGS -lwine \$(PTHREAD_LIBS)
+$wine_binary $wine_binary-installed: wine_info.plist
 "])
     ;;
 
@@ -907,10 +899,10 @@ wine-installed: main.o wine_info.plist
     WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                     [LDEXECFLAGS="-Wl,--export-dynamic"])
     WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
-                    [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
+                    [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
                      LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"],
         [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
-                         [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
+                         [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
                           LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"])])
 
     WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
@@ -940,11 +932,8 @@ uninstall::
 "])
 
     AS_VAR_APPEND([LOADER_RULES],["
-$wine_binary: main.o
-	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_LOCAL)
-
-wine-installed: main.o
-	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_INSTALL)
+${wine_binary}_OBJS = main.o
+${wine_binary}_LDFLAGS = $LDEXECFLAGS -lwine \$(PTHREAD_LIBS)
 "])
     ;;
 
@@ -971,10 +960,10 @@ wine-installed: main.o
                       [LDEXECFLAGS="-Wl,--export-dynamic"])
 
       WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
-                      [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
+                      [LDRPATH_INSTALL="-Wl,--rpath,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
                        LDRPATH_LOCAL="-Wl,--rpath,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"],
           [WINE_TRY_CFLAGS([-fPIC -Wl,-R,\$ORIGIN/../lib],
-                           [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \$(bindir) \$(libdir)\`"
+                           [LDRPATH_INSTALL="-Wl,-R,\\\$\$ORIGIN/\`\$(MAKEDEP) -R \${bindir} \${libdir}\`"
                             LDRPATH_LOCAL="-Wl,-R,\\\$\$ORIGIN/\$(top_builddir)/libs/wine"])])
 
       WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
@@ -988,11 +977,12 @@ wine-installed: main.o
                            *) LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x7bf00400" ;;
                            esac
                           ])
-          AC_PATH_PROG(PRELINK, prelink, false, [/sbin /usr/sbin $PATH])
-          if test "x$PRELINK" = xfalse
-          then
-              WINE_WARNING([prelink not found, base address of core dlls won't be set correctly.])
-          fi
+          WINE_TRY_CFLAGS([-Wl,-Ttext-segment=0x7bc00000],[:],
+                          [AC_PATH_PROG(PRELINK, prelink, false, [/sbin /usr/sbin $PATH])
+                           if test "x$PRELINK" = xfalse
+                           then
+                               WINE_WARNING([prelink not found and linker does not support relocation, base address of core dlls won't be set correctly.])
+                           fi])
           ;;
       esac
 
@@ -1032,12 +1022,18 @@ uninstall::
 "])
 
     AS_VAR_APPEND([LOADER_RULES],["
-$wine_binary: main.o
-	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_LOCAL)
-
-wine-installed: main.o
-	\$(CC) -o \$@ $LDEXECFLAGS main.o \$(LIBWINE) \$(LIBPORT) \$(EXTRALIBS) \$(LDFLAGS) \$(LDRPATH_INSTALL)
+${wine_binary}_OBJS = main.o
+${wine_binary}_LDFLAGS = $LDEXECFLAGS -lwine \$(PTHREAD_LIBS)
 "])
+    if test -z "$with_wine64"
+    then
+        AS_VAR_APPEND([LOADER_RULES],["
+install install-lib::
+	\$(INSTALL_DATA) \$(srcdir)/wine.desktop \$(DESTDIR)\$(datadir)/applications/wine.desktop
+uninstall::
+	\$(RM) \$(DESTDIR)\$(datadir)/applications/wine.desktop
+"])
+    fi
     ;;
 esac
 
@@ -1288,7 +1284,7 @@ test "x$ac_cv_lib_OpenCL_clGetPlatformInfo" != xyes && enable_opencl=${enable_op
 dnl **** Check for libpcap ****
 if test "$ac_cv_header_pcap_pcap_h" = "yes"
 then
-    AC_CHECK_LIB(pcap,pcap_create,[AC_SUBST(LIBPCAP,["-lpcap"])])
+    AC_CHECK_LIB(pcap,pcap_create,[AC_SUBST(PCAP_LIBS,["-lpcap"])])
 fi
 WINE_NOTICE_WITH(pcap,[test "x$ac_cv_lib_pcap_pcap_create" != xyes],
                  [pcap ${notice_platform}development files not found, wpcap won't be supported.])
@@ -1827,6 +1823,7 @@ then
   WINE_TRY_CFLAGS([-Wdeclaration-after-statement])
   WINE_TRY_CFLAGS([-Wempty-body])
   WINE_TRY_CFLAGS([-Wignored-qualifiers])
+  WINE_TRY_CFLAGS([-Wshift-overflow=2])
   WINE_TRY_CFLAGS([-Wstrict-prototypes])
   WINE_TRY_CFLAGS([-Wtype-limits])
   WINE_TRY_CFLAGS([-Wunused-but-set-parameter])
@@ -2033,22 +2030,16 @@ case $host_os in
         test "$wine_binary" = wine || WINE_IGNORE_FILE("loader/wine-preloader")
         loader_programs="$loader_programs $wine_binary-preloader"
         AS_VAR_APPEND([LOADER_RULES],["
-$wine_binary-preloader: preloader.o
-	\$(CC) -o \$@ -static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c400000 preloader.o \$(LIBPORT) \$(LDFLAGS)
-
-install install-lib:: $wine_binary-preloader
-	\$(INSTALL_PROGRAM) $wine_binary-preloader \$(DESTDIR)\$(bindir)/$wine_binary-preloader
-
-uninstall::
-	\$(RM) \$(DESTDIR)\$(bindir)/$wine_binary-preloader
-
 preloader_EXTRADEFS = $BUILTINFLAG
+${wine_binary}_preloader_OBJS = preloader.o
+${wine_binary}_preloader_LDFLAGS = -static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c400000
 "]) ;;
     esac
     ;;
 esac
 AS_VAR_APPEND([LOADER_RULES],["
 PROGRAMS = $loader_programs
+INSTALL_LIB = $loader_programs
 "])
 
 dnl **** Check for functions ****
@@ -2681,7 +2672,7 @@ CLEAN_FILES = *.o *.a *.so *.res *.fake *.ok *.tab.[[ch]] *.yy.c
 .INIT: Makefile
 .MAKEFILEDEPS:
 all: Makefile
-Makefile: $srcdir/Makefile.in $srcdir/Make.vars.in config.status \$(MAKEDEP)
+Makefile: $srcdir/Makefile.in config.status \$(MAKEDEP)
 	@./config.status Make.tmp Makefile])
 
 test "$srcdir" = . && WINE_APPEND_RULE(
@@ -2864,6 +2855,7 @@ WINE_CONFIG_TEST(dlls/d2d1/tests)
 WINE_CONFIG_DLL(d3d10,,[implib])
 WINE_CONFIG_TEST(dlls/d3d10/tests)
 WINE_CONFIG_DLL(d3d10_1,,[implib])
+WINE_CONFIG_TEST(dlls/d3d10_1/tests)
 WINE_CONFIG_DLL(d3d10core,,[implib])
 WINE_CONFIG_TEST(dlls/d3d10core/tests)
 WINE_CONFIG_DLL(d3d11,,[implib])
@@ -3364,6 +3356,7 @@ WINE_CONFIG_DLL(vcomp100)
 WINE_CONFIG_DLL(vcomp110)
 WINE_CONFIG_DLL(vcomp120)
 WINE_CONFIG_DLL(vcomp90)
+WINE_CONFIG_DLL(vcruntime140)
 WINE_CONFIG_DLL(vdhcp.vxd,enable_win16)
 WINE_CONFIG_DLL(vdmdbg,,[implib])
 WINE_CONFIG_DLL(ver.dll16,enable_win16)
@@ -3388,6 +3381,7 @@ WINE_CONFIG_TEST(dlls/wer/tests)
 WINE_CONFIG_DLL(wevtapi)
 WINE_CONFIG_DLL(wiaservc,,[clean])
 WINE_CONFIG_TEST(dlls/wiaservc/tests)
+WINE_CONFIG_DLL(wimgapi)
 WINE_CONFIG_DLL(win32s16.dll16,enable_win16)
 WINE_CONFIG_DLL(win87em.dll16,enable_win16)
 WINE_CONFIG_DLL(winaspi.dll16,enable_win16)
@@ -3460,7 +3454,7 @@ WINE_CONFIG_DLL(x3daudio1_3)
 WINE_CONFIG_DLL(x3daudio1_4)
 WINE_CONFIG_DLL(x3daudio1_5)
 WINE_CONFIG_DLL(x3daudio1_6)
-WINE_CONFIG_DLL(x3daudio1_7,,[implib])
+WINE_CONFIG_DLL(x3daudio1_7)
 WINE_CONFIG_DLL(xapofx1_1)
 WINE_CONFIG_DLL(xapofx1_2)
 WINE_CONFIG_DLL(xapofx1_3)
@@ -3475,7 +3469,7 @@ WINE_CONFIG_DLL(xaudio2_5,,[clean])
 WINE_CONFIG_DLL(xaudio2_6,,[clean])
 WINE_CONFIG_DLL(xaudio2_7,,[clean])
 WINE_CONFIG_TEST(dlls/xaudio2_7/tests)
-WINE_CONFIG_DLL(xaudio2_8)
+WINE_CONFIG_DLL(xaudio2_8,,[implib])
 WINE_CONFIG_DLL(xinput1_1)
 WINE_CONFIG_DLL(xinput1_2)
 WINE_CONFIG_DLL(xinput1_3,,[implib],[xinput])
@@ -3491,9 +3485,9 @@ WINE_CONFIG_MAKEFILE([documentation],,[clean])
 WINE_CONFIG_MAKEFILE([fonts],,[clean,install-lib])
 WINE_CONFIG_MAKEFILE([include],,[clean,install-dev])
 WINE_CONFIG_MAKEFILE([libs/port])
-WINE_CONFIG_MAKEFILE([libs/wine],,[clean,install-dev,install-lib])
+WINE_CONFIG_MAKEFILE([libs/wine],,[clean,config,install-dev,install-lib])
 WINE_CONFIG_MAKEFILE([libs/wpp])
-WINE_CONFIG_MAKEFILE([loader],,[clean,install-lib,manpage])
+WINE_CONFIG_MAKEFILE([loader],,[clean,config,install-lib,manpage])
 WINE_CONFIG_PROGRAM(arp,,[install])
 WINE_CONFIG_PROGRAM(aspnet_regiis,,[install])
 WINE_CONFIG_PROGRAM(attrib,,[install,po])
@@ -3571,7 +3565,7 @@ WINE_CONFIG_PROGRAM(winemenubuilder,,[install])
 WINE_CONFIG_PROGRAM(winemine,,[install,installbin,manpage,po])
 WINE_CONFIG_PROGRAM(winemsibuilder,,[install])
 WINE_CONFIG_PROGRAM(winepath,,[install,installbin,manpage])
-WINE_CONFIG_PROGRAM(winetest,,[clean])
+WINE_CONFIG_PROGRAM(winetest,,[clean,config])
 WINE_CONFIG_PROGRAM(winevdm,enable_win16,[install])
 WINE_CONFIG_PROGRAM(winhelp.exe16,enable_win16,[install])
 WINE_CONFIG_PROGRAM(winhlp32,,[install,po])
@@ -3586,12 +3580,13 @@ WINE_CONFIG_PROGRAM(wusa,,[install])
 WINE_CONFIG_PROGRAM(xcopy,,[install,po])
 WINE_CONFIG_TEST(programs/xcopy/tests)
 WINE_CONFIG_MAKEFILE([server],,[clean,install-lib,manpage])
-WINE_CONFIG_TOOL(tools,[clean,install-dev,install-lib,manpage])
+WINE_CONFIG_TOOL(tools,[clean])
 WINE_CONFIG_TOOL(tools/sfnt2fon,[clean])
 WINE_CONFIG_TOOL(tools/widl,[clean,install-dev,manpage])
 WINE_CONFIG_TOOL(tools/winebuild,[clean,install-dev,manpage])
 WINE_CONFIG_TOOL(tools/winedump,[clean,install-dev,manpage])
 WINE_CONFIG_TOOL(tools/winegcc,[clean,install-dev,manpage])
+WINE_CONFIG_TOOL(tools/winemaker,[install-dev,manpage])
 WINE_CONFIG_TOOL(tools/wmc,[clean,install-dev,manpage])
 WINE_CONFIG_TOOL(tools/wrc,[clean,install-dev,manpage])
 
@@ -3679,7 +3674,7 @@ _WINE_EOF
     AS_ERROR([could not create Makefile])
 }])
 
-AC_CONFIG_FILES([Make.tmp:Make.vars.in:Makefile.in])
+AC_CONFIG_FILES([Make.tmp:Makefile.in])
 
 dnl Some final makefile rules
 
@@ -3753,7 +3748,7 @@ clean::
 	\$(RM) fonts server tools $with_wine64/loader/wine $with_wine64/loader/wine-preloader])
 else
     AS_VAR_APPEND([LOADER_RULES],["
-install install-lib:: wine.inf install-man-pages
+install install-lib:: wine.inf
 	\$(INSTALL_DATA) wine.inf \$(DESTDIR)\$(datadir)/wine/wine.inf
 	\$(INSTALL_DATA) \$(srcdir)/l_intl.nls \$(DESTDIR)\$(datadir)/wine/l_intl.nls
 

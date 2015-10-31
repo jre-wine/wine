@@ -317,13 +317,15 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
      * anyway. If we're not clearing the color buffer we don't have to copy either since we're not going to set
      * the drawable up to date. We have to check all settings that limit the clear area though. Do not bother
      * checking all this if the dest surface is in the drawable anyway. */
-    if (flags & WINED3DCLEAR_TARGET && !is_full_clear(target, draw_rect, clear_rect))
+    for (i = 0; i < rt_count; ++i)
     {
-        for (i = 0; i < rt_count; ++i)
+        struct wined3d_surface *rt = wined3d_rendertarget_view_get_surface(fb->render_targets[i]);
+        if (rt && rt->resource.format->id != WINED3DFMT_NULL)
         {
-            struct wined3d_surface *rt = wined3d_rendertarget_view_get_surface(fb->render_targets[i]);
-            if (rt)
+            if (flags & WINED3DCLEAR_TARGET && !is_full_clear(target, draw_rect, clear_rect))
                 surface_load_location(rt, context, rt->container->resource.draw_binding);
+            else
+                wined3d_surface_prepare(rt, context, rt->container->resource.draw_binding);
         }
     }
 
@@ -338,6 +340,9 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
         drawable_width = depth_stencil->pow2Width;
         drawable_height = depth_stencil->pow2Height;
     }
+
+    if (depth_stencil && render_offscreen)
+        wined3d_surface_prepare(depth_stencil, context, depth_stencil->container->resource.draw_binding);
 
     if (flags & WINED3DCLEAR_ZBUFFER)
     {
@@ -3632,19 +3637,6 @@ HRESULT CDECL wined3d_device_update_texture(struct wined3d_device *device,
     return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_device_get_front_buffer_data(const struct wined3d_device *device,
-        UINT swapchain_idx, struct wined3d_surface *dst_surface)
-{
-    struct wined3d_swapchain *swapchain;
-
-    TRACE("device %p, swapchain_idx %u, dst_surface %p.\n", device, swapchain_idx, dst_surface);
-
-    if (!(swapchain = wined3d_device_get_swapchain(device, swapchain_idx)))
-        return WINED3DERR_INVALIDCALL;
-
-    return wined3d_swapchain_get_front_buffer_data(swapchain, dst_surface);
-}
-
 HRESULT CDECL wined3d_device_validate_device(const struct wined3d_device *device, DWORD *num_passes)
 {
     const struct wined3d_state *state = &device->state;
@@ -4203,14 +4195,22 @@ static struct wined3d_texture *wined3d_device_create_cursor_texture(struct wined
 }
 
 HRESULT CDECL wined3d_device_set_cursor_properties(struct wined3d_device *device,
-        UINT x_hotspot, UINT y_hotspot, struct wined3d_surface *cursor_image)
+        UINT x_hotspot, UINT y_hotspot, struct wined3d_texture *texture, unsigned int sub_resource_idx)
 {
     struct wined3d_display_mode mode;
     struct wined3d_map_desc map_desc;
+    struct wined3d_resource *sub_resource;
+    struct wined3d_surface *cursor_image;
     HRESULT hr;
 
-    TRACE("device %p, x_hotspot %u, y_hotspot %u, cursor_image %p.\n",
-            device, x_hotspot, y_hotspot, cursor_image);
+    TRACE("device %p, x_hotspot %u, y_hotspot %u, texture %p, sub_resource_idx %u.\n",
+            device, x_hotspot, y_hotspot, texture, sub_resource_idx);
+
+    if (!(sub_resource = wined3d_texture_get_sub_resource(texture, sub_resource_idx))
+            || sub_resource->type != WINED3D_RTYPE_SURFACE)
+        return WINED3DERR_INVALIDCALL;
+
+    cursor_image = surface_from_resource(sub_resource);
 
     if (device->cursor_texture)
     {

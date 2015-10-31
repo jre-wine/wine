@@ -123,12 +123,22 @@ static int (__cdecl *p_tr2_sys__Copy_file)(char const*, char const*, MSVCP_bool)
 static int (__cdecl *p_tr2_sys__Copy_file_wchar)(WCHAR const*, WCHAR const*, MSVCP_bool);
 static int (__cdecl *p_tr2_sys__Rename)(char const*, char const*);
 static int (__cdecl *p_tr2_sys__Rename_wchar)(WCHAR const*, WCHAR const*);
-static struct space_info (__cdecl *p_tr2_sys__Statvfs)(char const*);
-static struct space_info (__cdecl *p_tr2_sys__Statvfs_wchar)(WCHAR const*);
+static struct space_info* (__cdecl *p_tr2_sys__Statvfs)(struct space_info*, char const*);
+static struct space_info* (__cdecl *p_tr2_sys__Statvfs_wchar)(struct space_info*, WCHAR const*);
 static enum file_type (__cdecl *p_tr2_sys__Stat)(char const*, int *);
 static enum file_type (__cdecl *p_tr2_sys__Lstat)(char const*, int *);
 static __int64 (__cdecl *p_tr2_sys__Last_write_time)(char const*);
 static void (__cdecl *p_tr2_sys__Last_write_time_set)(char const*, __int64);
+
+/* thrd */
+typedef struct
+{
+    HANDLE hnd;
+    DWORD  id;
+} _Thrd_t;
+
+static int (__cdecl *p__Thrd_equal)(_Thrd_t, _Thrd_t);
+static int (__cdecl *p__Thrd_lt)(_Thrd_t, _Thrd_t);
 
 static HMODULE msvcp;
 #define SETNOFAIL(x,y) x = (void*)GetProcAddress(msvcp,y)
@@ -253,6 +263,10 @@ static BOOL init(void)
         SET(p_tr2_sys__Last_write_time_set,
                 "?_Last_write_time@sys@tr2@std@@YAXPBD_J@Z");
     }
+    SET(p__Thrd_equal,
+            "_Thrd_equal");
+    SET(p__Thrd_lt,
+            "_Thrd_lt");
 
     msvcr = GetModuleHandleA("msvcr120.dll");
     p_setlocale = (void*)GetProcAddress(msvcr, "setlocale");
@@ -970,15 +984,15 @@ static void test_tr2_sys__Statvfs(void)
     memset(current_path_wchar, 0, MAX_PATH);
     p_tr2_sys__Current_get_wchar(current_path_wchar);
 
-    info = p_tr2_sys__Statvfs(current_path);
+    p_tr2_sys__Statvfs(&info, current_path);
     ok(info.capacity >= info.free, "test_tr2_sys__Statvfs(): info.capacity < info.free\n");
     ok(info.free >= info.available, "test_tr2_sys__Statvfs(): info.free < info.available\n");
 
-    info = p_tr2_sys__Statvfs_wchar(current_path_wchar);
+    p_tr2_sys__Statvfs_wchar(&info, current_path_wchar);
     ok(info.capacity >= info.free, "tr2_sys__Statvfs_wchar(): info.capacity < info.free\n");
     ok(info.free >= info.available, "tr2_sys__Statvfs_wchar(): info.free < info.available\n");
 
-    info = p_tr2_sys__Statvfs(NULL);
+    p_tr2_sys__Statvfs(&info, NULL);
     ok(info.available == 0, "test_tr2_sys__Statvfs(): info.available expect: %d, got %s\n",
             0, debugstr_longlong(info.available));
     ok(info.capacity == 0, "test_tr2_sys__Statvfs(): info.capacity expect: %d, got %s\n",
@@ -986,7 +1000,7 @@ static void test_tr2_sys__Statvfs(void)
     ok(info.free == 0, "test_tr2_sys__Statvfs(): info.free expect: %d, got %s\n",
             0, debugstr_longlong(info.free));
 
-    info = p_tr2_sys__Statvfs("not_exist");
+    p_tr2_sys__Statvfs(&info, "not_exist");
     ok(info.available == 0, "test_tr2_sys__Statvfs(): info.available expect: %d, got %s\n",
             0, debugstr_longlong(info.available));
     ok(info.capacity == 0, "test_tr2_sys__Statvfs(): info.capacity expect: %d, got %s\n",
@@ -1120,6 +1134,47 @@ static void test_tr2_sys__Last_write_time(void)
     ok(ret == 1, "test_tr2_sys__Remove_dir(): expect 1 got %d\n", ret);
 }
 
+static void test_thrd(void)
+{
+    int ret, i;
+    struct test {
+        _Thrd_t a;
+        _Thrd_t b;
+        int     r;
+    };
+    const HANDLE hnd1 = (HANDLE)0xcccccccc;
+    const HANDLE hnd2 = (HANDLE)0xdeadbeef;
+
+    struct test testeq[] = {
+        { {0,    0}, {0,    0}, 1 },
+        { {0,    1}, {0,    0}, 0 },
+        { {hnd1, 0}, {hnd1, 1}, 0 },
+        { {hnd1, 0}, {hnd2, 0}, 1 }
+    };
+
+    struct test testlt[] = {
+        { {0,    0}, {0,    0}, 0 },
+        { {0,    0}, {0,    1}, 1 },
+        { {0,    1}, {0,    0}, 0 },
+        { {hnd1, 0}, {hnd2, 0}, 0 },
+        { {hnd1, 0}, {hnd2, 1}, 1 }
+    };
+
+    /* test for equal */
+    for(i=0; i<sizeof(testeq)/sizeof(testeq[0]); i++) {
+        ret = p__Thrd_equal(testeq[i].a, testeq[i].b);
+        ok(ret == testeq[i].r, "(%p %u) = (%p %u) expected %d, got %d\n",
+            testeq[i].a.hnd, testeq[i].a.id, testeq[i].b.hnd, testeq[i].b.id, testeq[i].r, ret);
+    }
+
+    /* test for less than */
+    for(i=0; i<sizeof(testlt)/sizeof(testlt[0]); i++) {
+        ret = p__Thrd_lt(testlt[i].a, testlt[i].b);
+        ok(ret == testlt[i].r, "(%p %u) < (%p %u) expected %d, got %d\n",
+            testlt[i].a.hnd, testlt[i].a.id, testlt[i].b.hnd, testlt[i].b.id, testlt[i].r, ret);
+    }
+}
+
 START_TEST(msvcp120)
 {
     if(!init()) return;
@@ -1143,5 +1198,8 @@ START_TEST(msvcp120)
     test_tr2_sys__Statvfs();
     test_tr2_sys__Stat();
     test_tr2_sys__Last_write_time();
+
+    test_thrd();
+
     FreeLibrary(msvcp);
 }

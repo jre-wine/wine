@@ -248,6 +248,8 @@ static void test_create_device(void)
 
 static void test_device_interfaces(void)
 {
+    IDXGIAdapter *dxgi_adapter;
+    IDXGIDevice *dxgi_device;
     ID3D11Device *device;
     IUnknown *iface;
     ULONG refcount;
@@ -270,8 +272,24 @@ static void test_device_interfaces(void)
         ok(SUCCEEDED(hr), "Device should implement IDXGIObject interface, hr %#x.\n", hr);
         IUnknown_Release(iface);
 
-        hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDevice, (void **)&iface);
-        ok(SUCCEEDED(hr), "Device should implement IDXGIDevice interface, hr %#x.\n", hr);
+        hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDevice, (void **)&dxgi_device);
+        ok(SUCCEEDED(hr), "Device should implement IDXGIDevice.\n");
+        hr = IDXGIDevice_GetParent(dxgi_device, &IID_IDXGIAdapter, (void **)&dxgi_adapter);
+        ok(SUCCEEDED(hr), "Device parent should implement IDXGIAdapter.\n");
+        hr = IDXGIAdapter_GetParent(dxgi_adapter, &IID_IDXGIFactory, (void **)&iface);
+        ok(SUCCEEDED(hr), "Adapter parent should implement IDXGIFactory.\n");
+        IUnknown_Release(iface);
+        IDXGIAdapter_Release(dxgi_adapter);
+        hr = IDXGIDevice_GetParent(dxgi_device, &IID_IDXGIAdapter1, (void **)&dxgi_adapter);
+        ok(SUCCEEDED(hr), "Device parent should implement IDXGIAdapter1.\n");
+        hr = IDXGIAdapter_GetParent(dxgi_adapter, &IID_IDXGIFactory1, (void **)&iface);
+        ok(SUCCEEDED(hr), "Adapter parent should implement IDXGIFactory1.\n");
+        IUnknown_Release(iface);
+        IDXGIAdapter_Release(dxgi_adapter);
+        IDXGIDevice_Release(dxgi_device);
+
+        hr = ID3D11Device_QueryInterface(device, &IID_IDXGIDevice1, (void **)&iface);
+        ok(SUCCEEDED(hr), "Device should implement IDXGIDevice1.\n");
         IUnknown_Release(iface);
 
         hr = ID3D11Device_QueryInterface(device, &IID_ID3D10Multithread, (void **)&iface);
@@ -1282,6 +1300,10 @@ static void test_create_shader_resource_view(void)
     ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* Not available on all Windows versions. */,
             "Shader resource view should implement ID3D10ShaderResourceView.\n");
     if (SUCCEEDED(hr)) IUnknown_Release(iface);
+    hr = ID3D11ShaderResourceView_QueryInterface(srview, &IID_ID3D10ShaderResourceView1, (void **)&iface);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* Not available on all Windows versions. */,
+            "Shader resource view should implement ID3D10ShaderResourceView1.\n");
+    if (SUCCEEDED(hr)) IUnknown_Release(iface);
 
     ID3D11ShaderResourceView_Release(srview);
     ID3D11Buffer_Release(buffer);
@@ -1307,6 +1329,10 @@ static void test_create_shader_resource_view(void)
     hr = ID3D11ShaderResourceView_QueryInterface(srview, &IID_ID3D10ShaderResourceView, (void **)&iface);
     ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* Not available on all Windows versions. */,
             "Shader resource view should implement ID3D10ShaderResourceView.\n");
+    if (SUCCEEDED(hr)) IUnknown_Release(iface);
+    hr = ID3D11ShaderResourceView_QueryInterface(srview, &IID_ID3D10ShaderResourceView1, (void **)&iface);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* Not available on all Windows versions. */,
+            "Shader resource view should implement ID3D10ShaderResourceView1.\n");
     if (SUCCEEDED(hr)) IUnknown_Release(iface);
 
     ID3D11ShaderResourceView_GetDesc(srview, &srv_desc);
@@ -1866,6 +1892,7 @@ static void test_create_blend_state(void)
     ULONG refcount, expected_refcount;
     ID3D11Device *device, *tmp;
     unsigned int i, j;
+    IUnknown *iface;
     HRESULT hr;
 
     if (!(device = create_device(NULL)))
@@ -1937,6 +1964,15 @@ static void test_create_blend_state(void)
                 "Got unexpected render target write mask %#x for render target %u.\n",
                 obtained_desc.RenderTarget[0].RenderTargetWriteMask, i);
     }
+
+    hr = ID3D11BlendState_QueryInterface(blend_state1, &IID_ID3D10BlendState, (void **)&iface);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* Not available on all Windows versions. */,
+            "Blend state should implement ID3D10BlendState.\n");
+    if (SUCCEEDED(hr)) IUnknown_Release(iface);
+    hr = ID3D11BlendState_QueryInterface(blend_state1, &IID_ID3D10BlendState1, (void **)&iface);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* Not available on all Windows versions. */,
+            "Blend state should implement ID3D10BlendState1.\n");
+    if (SUCCEEDED(hr)) IUnknown_Release(iface);
 
     refcount = ID3D11BlendState_Release(blend_state1);
     ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
@@ -2135,6 +2171,77 @@ static void test_create_rasterizer_state(void)
     ok(refcount == 1, "Got unexpected refcount %u.\n", refcount);
     refcount = ID3D11RasterizerState_Release(rast_state1);
     ok(!refcount, "Got unexpected refcount %u.\n", refcount);
+
+    refcount = ID3D11Device_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
+}
+
+static void test_create_predicate(void)
+{
+    static const D3D11_QUERY other_queries[] =
+    {
+        D3D11_QUERY_EVENT,
+        D3D11_QUERY_OCCLUSION,
+        D3D11_QUERY_TIMESTAMP,
+        D3D11_QUERY_TIMESTAMP_DISJOINT,
+        D3D11_QUERY_PIPELINE_STATISTICS,
+        D3D11_QUERY_SO_STATISTICS,
+        D3D11_QUERY_SO_STATISTICS_STREAM0,
+        D3D11_QUERY_SO_STATISTICS_STREAM1,
+        D3D11_QUERY_SO_STATISTICS_STREAM2,
+        D3D11_QUERY_SO_STATISTICS_STREAM3,
+    };
+
+    ULONG refcount, expected_refcount;
+    D3D11_QUERY_DESC query_desc;
+    ID3D11Predicate *predicate;
+    ID3D11Device *device, *tmp;
+    IUnknown *iface;
+    unsigned int i;
+    HRESULT hr;
+
+    if (!(device = create_device(NULL)))
+    {
+        skip("Failed to create device.\n");
+        return;
+    }
+
+    hr = ID3D11Device_CreatePredicate(device, NULL, &predicate);
+    ok(hr == E_INVALIDARG, "Got unexpected hr %#x.\n", hr);
+
+    query_desc.MiscFlags = 0;
+
+    for (i = 0; i < sizeof(other_queries) / sizeof(*other_queries); ++i)
+    {
+        query_desc.Query = other_queries[i];
+        hr = ID3D11Device_CreatePredicate(device, &query_desc, &predicate);
+        ok(hr == E_INVALIDARG, "Got unexpected hr %#x for query type %u.\n", hr, other_queries[i]);
+    }
+
+    query_desc.Query = D3D11_QUERY_OCCLUSION_PREDICATE;
+    expected_refcount = get_refcount((IUnknown *)device) + 1;
+    hr = ID3D11Device_CreatePredicate(device, &query_desc, &predicate);
+    ok(SUCCEEDED(hr), "Failed to create predicate, hr %#x.\n", hr);
+    refcount = get_refcount((IUnknown *)device);
+    ok(refcount >= expected_refcount, "Got unexpected refcount %u, expected >= %u.\n", refcount, expected_refcount);
+    tmp = NULL;
+    expected_refcount = refcount + 1;
+    ID3D11Predicate_GetDevice(predicate, &tmp);
+    ok(tmp == device, "Got unexpected device %p, expected %p.\n", tmp, device);
+    refcount = get_refcount((IUnknown *)device);
+    ok(refcount == expected_refcount, "Got unexpected refcount %u, expected %u.\n", refcount, expected_refcount);
+    ID3D11Device_Release(tmp);
+    hr = ID3D11Predicate_QueryInterface(predicate, &IID_ID3D10Predicate, (void **)&iface);
+    ok(SUCCEEDED(hr) || broken(hr == E_NOINTERFACE) /* Not available on all Windows versions. */,
+            "Predicate should implement ID3D10Predicate.\n");
+    if (SUCCEEDED(hr)) IUnknown_Release(iface);
+    ID3D11Predicate_Release(predicate);
+
+    query_desc.Query = D3D11_QUERY_SO_OVERFLOW_PREDICATE;
+    hr = ID3D11Device_CreatePredicate(device, &query_desc, &predicate);
+    todo_wine ok(SUCCEEDED(hr), "Failed to create predicate, hr %#x.\n", hr);
+    if (SUCCEEDED(hr))
+        ID3D11Predicate_Release(predicate);
 
     refcount = ID3D11Device_Release(device);
     ok(!refcount, "Device has %u references left.\n", refcount);
@@ -2355,6 +2462,7 @@ START_TEST(d3d11)
     test_create_blend_state();
     test_create_depthstencil_state();
     test_create_rasterizer_state();
+    test_create_predicate();
     test_device_removed_reason();
     test_private_data();
 }

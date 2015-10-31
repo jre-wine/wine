@@ -176,7 +176,7 @@ HRESULT WINAPI D3D11CreateDevice(IDXGIAdapter *adapter, D3D_DRIVER_TYPE driver_t
     }
     else
     {
-        hr = CreateDXGIFactory(&IID_IDXGIFactory, (void **)&factory);
+        hr = CreateDXGIFactory1(&IID_IDXGIFactory, (void **)&factory);
         if (FAILED(hr))
         {
             WARN("Failed to create dxgi factory, returning %#x.\n", hr);
@@ -347,8 +347,7 @@ cleanup:
         *obtained_feature_level = 0;
     if (immediate_context)
     {
-        /* FIXME: Remove the following NULL check once the d3d11_device_GetImmediateContext() is implemented. */
-        if (*immediate_context) ID3D11DeviceContext_Release(*immediate_context);
+        ID3D11DeviceContext_Release(*immediate_context);
         *immediate_context = NULL;
     }
 
