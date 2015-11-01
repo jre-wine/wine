@@ -74,10 +74,11 @@ debian/bug-control: debian/bug-control.in
 	dh $@ --parallel --with autoreconf
 
 override_dh_auto_configure:
+	./tools/make_fir
 	cd dlls/opengl32 && ./make_opengl
 	ln -s /usr/share/misc/config.sub tools
 	ln -s /usr/share/misc/config.guess tools
-	dh_auto_configure -- $(CONFLAGS)
+	./configure $(CONFLAGS)
 
 override_dh_bugfiles:
 	dh_bugfiles -A

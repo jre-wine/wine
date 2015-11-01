@@ -16,6 +16,9 @@ addons-path.patch
 glu32-link.patch
 
 opengl.patch
+openal.patch
 
 #kfreebsd-include.patch
+
+file-handling.patch
 font-divbyzero.patch

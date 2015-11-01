@@ -1,3 +1,17 @@
+wine-development (1.7.54-1) unstable; urgency=medium
+
+  * New upstream release 1.7.54, released Oct 30, 2015.
+    - Implementation of the TransmitFile function.
+    - More implementation of the Web Services DLL.
+    - Improved video decoding.
+    - Alternative for the deprecated prelink tool.
+    - Major Turkish translation update.
+    - Various bug fixes.
+  * Fix opening of read-only files.
+  * Add support for OpenAL EFX extensions (closes: #793548).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 31 Oct 2015 20:19:49 +0000
+
 wine-development (1.7.52-1) unstable; urgency=medium
 
   [ Michael Gilbert ]

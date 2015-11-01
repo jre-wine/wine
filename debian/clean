@@ -5,6 +5,10 @@ debian/control
 include/config.h.in
 programs/cscript/ihost.h
 
+tools/winemaker/*.man
+
+dlls/dsound/fir.h
+
 # automatically generated opengl spec files
 include/wine/wgl*
 dlls/opengl32/opengl_ext.c
