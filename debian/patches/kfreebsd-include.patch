@@ -8,6 +8,6 @@ author: Michael Gilbert <mgilbert@debian.org>
  #endif
  #ifdef HAVE_SYS_VNODE_H
 +#include <stdint.h>
- #include <sys/vnode.h>
- #endif
- #ifdef HAVE_SYS_IOCTL_H
+ /* Work around a conflict with Solaris' system list defined in sys/list.h. */
+ #define list SYSLIST
+ #define list_next SYSLIST_NEXT

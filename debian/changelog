@@ -1,3 +1,10 @@
+wine-development (1.7.54-2) unstable; urgency=medium
+
+  * Fix kfreebsd patch.
+  * Build the arch:all package on i386 (closes: #803778).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 14 Nov 2015 17:42:24 +0000
+
 wine-development (1.7.54-1) unstable; urgency=medium
 
   * New upstream release 1.7.54, released Oct 30, 2015.
