@@ -518,6 +518,10 @@ struct wined3d_resource *wined3d_resource_from_d3d11_resource(ID3D11Resource *re
             return wined3d_texture_get_resource(unsafe_impl_from_ID3D11Texture2D(
                     (ID3D11Texture2D *)resource)->wined3d_texture);
 
+        case D3D11_RESOURCE_DIMENSION_TEXTURE3D:
+            return wined3d_texture_get_resource(unsafe_impl_from_ID3D11Texture3D(
+                    (ID3D11Texture3D *)resource)->wined3d_texture);
+
         default:
             FIXME("Unhandled resource dimension %#x.\n", dimension);
             return NULL;
@@ -546,20 +550,20 @@ struct wined3d_resource *wined3d_resource_from_d3d10_resource(ID3D10Resource *re
     }
 }
 
-DWORD wined3d_map_flags_from_d3d10_map_type(D3D10_MAP map_type)
+DWORD wined3d_map_flags_from_d3d11_map_type(D3D11_MAP map_type)
 {
     switch (map_type)
     {
-        case D3D10_MAP_READ_WRITE:
+        case D3D11_MAP_READ_WRITE:
             return 0;
 
-        case D3D10_MAP_READ:
+        case D3D11_MAP_READ:
             return WINED3D_MAP_READONLY;
 
-        case D3D10_MAP_WRITE_DISCARD:
+        case D3D11_MAP_WRITE_DISCARD:
             return WINED3D_MAP_DISCARD;
 
-        case D3D10_MAP_WRITE_NO_OVERWRITE:
+        case D3D11_MAP_WRITE_NO_OVERWRITE:
             return WINED3D_MAP_NOOVERWRITE;
 
         default:

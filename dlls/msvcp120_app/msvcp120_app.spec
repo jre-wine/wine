@@ -1602,8 +1602,8 @@
 @ cdecl -arch=win64 ?_New_Locimp@_Locimp@locale@std@@CAPEAV123@AEBV123@@Z(ptr) msvcp120.?_New_Locimp@_Locimp@locale@std@@CAPEAV123@AEBV123@@Z
 @ cdecl -arch=win32 ?_New_Locimp@_Locimp@locale@std@@CAPAV123@_N@Z(long) msvcp120.?_New_Locimp@_Locimp@locale@std@@CAPAV123@_N@Z
 @ cdecl -arch=win64 ?_New_Locimp@_Locimp@locale@std@@CAPEAV123@_N@Z(long) msvcp120.?_New_Locimp@_Locimp@locale@std@@CAPEAV123@_N@Z
-@ stub -arch=win32 ?_Open_dir@sys@tr2@std@@YAPAXAAY0BAE@DPBDAAHAAW4file_type@123@@Z
-@ stub -arch=win64 ?_Open_dir@sys@tr2@std@@YAPEAXAEAY0BAE@DPEBDAEAHAEAW4file_type@123@@Z
+@ cdecl -arch=win32 ?_Open_dir@sys@tr2@std@@YAPAXAAY0BAE@DPBDAAHAAW4file_type@123@@Z(ptr str long long) msvcp120.?_Open_dir@sys@tr2@std@@YAPAXAAY0BAE@DPBDAAHAAW4file_type@123@@Z
+@ cdecl -arch=win64 ?_Open_dir@sys@tr2@std@@YAPEAXAEAY0BAE@DPEBDAEAHAEAW4file_type@123@@Z(ptr str long long) msvcp120.?_Open_dir@sys@tr2@std@@YAPEAXAEAY0BAE@DPEBDAEAHAEAW4file_type@123@@Z
 @ stub -arch=win32 ?_Open_dir@sys@tr2@std@@YAPAXAAY0BAE@_WPB_WAAHAAW4file_type@123@@Z
 @ stub -arch=win64 ?_Open_dir@sys@tr2@std@@YAPEAXAEAY0BAE@_WPEB_WAEAHAEAW4file_type@123@@Z
 @ cdecl -arch=arm ?_Orphan_all@_Container_base0@std@@QAAXXZ(ptr) msvcp120.?_Orphan_all@_Container_base0@std@@QAAXXZ
@@ -3670,15 +3670,15 @@
 @ cdecl -arch=win64 ?xsputn@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MEAA_JPEB_W_J@Z(ptr ptr long) msvcp120.?xsputn@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MEAA_JPEB_W_J@Z
 @ cdecl _Call_once(ptr ptr) msvcp120._Call_once
 @ cdecl _Call_onceEx(ptr ptr ptr) msvcp120._Call_onceEx
-@ stub _Cnd_broadcast
-@ stub _Cnd_destroy
+@ cdecl _Cnd_broadcast(ptr) msvcp120._Cnd_broadcast
+@ cdecl _Cnd_destroy(ptr) msvcp120._Cnd_destroy
 @ stub _Cnd_do_broadcast_at_thread_exit
-@ stub _Cnd_init
+@ cdecl _Cnd_init(ptr) msvcp120._Cnd_init
 @ stub _Cnd_register_at_thread_exit
-@ stub _Cnd_signal
-@ stub _Cnd_timedwait
+@ cdecl _Cnd_signal(ptr) msvcp120._Cnd_signal
+@ cdecl _Cnd_timedwait(ptr ptr ptr) msvcp120._Cnd_timedwait
 @ stub _Cnd_unregister_at_thread_exit
-@ stub _Cnd_wait
+@ cdecl _Cnd_wait(ptr ptr) msvcp120._Cnd_wait
 @ stub _Cosh
 @ extern _Denorm msvcp120._Denorm
 @ stub _Dint
@@ -3803,16 +3803,16 @@
 @ cdecl _Strcoll(ptr ptr ptr ptr ptr) msvcp120._Strcoll
 @ stub _Strxfrm
 @ stub _Thrd_abort
-@ stub _Thrd_create
-@ stub _Thrd_current
+@ cdecl _Thrd_create(ptr ptr ptr) msvcp120._Thrd_create
+@ cdecl _Thrd_current() msvcp120._Thrd_current
 @ stub _Thrd_detach
 @ cdecl _Thrd_equal(ptr ptr) msvcp120._Thrd_equal
 @ stub _Thrd_exit
-@ stub _Thrd_join
+@ cdecl _Thrd_join(ptr long) msvcp120._Thrd_join
 @ cdecl _Thrd_lt(ptr ptr) msvcp120._Thrd_lt
-@ stub _Thrd_sleep
+@ cdecl _Thrd_sleep(ptr) msvcp120._Thrd_sleep
 @ stub _Thrd_start
-@ stub _Thrd_yield
+@ cdecl _Thrd_yield() msvcp120._Thrd_yield
 @ cdecl _Tolower(long ptr) msvcp120._Tolower
 @ cdecl _Toupper(long ptr) msvcp120._Toupper
 @ cdecl _Towlower(long ptr) msvcp120._Towlower

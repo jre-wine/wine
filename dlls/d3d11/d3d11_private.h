@@ -65,7 +65,7 @@ enum wined3d_format_id wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSP
 DWORD wined3d_usage_from_d3d11(UINT bind_flags, enum D3D11_USAGE usage) DECLSPEC_HIDDEN;
 struct wined3d_resource *wined3d_resource_from_d3d11_resource(ID3D11Resource *resource) DECLSPEC_HIDDEN;
 struct wined3d_resource *wined3d_resource_from_d3d10_resource(ID3D10Resource *resource) DECLSPEC_HIDDEN;
-DWORD wined3d_map_flags_from_d3d10_map_type(D3D10_MAP map_type) DECLSPEC_HIDDEN;
+DWORD wined3d_map_flags_from_d3d11_map_type(D3D11_MAP map_type) DECLSPEC_HIDDEN;
 
 enum D3D11_USAGE d3d11_usage_from_d3d10_usage(enum D3D10_USAGE usage) DECLSPEC_HIDDEN;
 enum D3D10_USAGE d3d10_usage_from_d3d11_usage(enum D3D11_USAGE usage) DECLSPEC_HIDDEN;
@@ -133,6 +133,7 @@ struct d3d_texture3d
 
 HRESULT d3d_texture3d_create(struct d3d_device *device, const D3D11_TEXTURE3D_DESC *desc,
         const D3D11_SUBRESOURCE_DATA *data, struct d3d_texture3d **texture) DECLSPEC_HIDDEN;
+struct d3d_texture3d *unsafe_impl_from_ID3D11Texture3D(ID3D11Texture3D *iface) DECLSPEC_HIDDEN;
 
 /* ID3D11Buffer, ID3D10Buffer */
 struct d3d_buffer
@@ -168,6 +169,7 @@ struct d3d_depthstencil_view
 
 HRESULT d3d_depthstencil_view_create(struct d3d_device *device, ID3D11Resource *resource,
         const D3D11_DEPTH_STENCIL_VIEW_DESC *desc, struct d3d_depthstencil_view **view) DECLSPEC_HIDDEN;
+struct d3d_depthstencil_view *unsafe_impl_from_ID3D11DepthStencilView(ID3D11DepthStencilView *iface) DECLSPEC_HIDDEN;
 struct d3d_depthstencil_view *unsafe_impl_from_ID3D10DepthStencilView(ID3D10DepthStencilView *iface) DECLSPEC_HIDDEN;
 
 /* ID3D11RenderTargetView, ID3D10RenderTargetView */
@@ -205,6 +207,8 @@ struct d3d_shader_resource_view
 
 HRESULT d3d_shader_resource_view_create(struct d3d_device *device, ID3D11Resource *resource,
         const D3D11_SHADER_RESOURCE_VIEW_DESC *desc, struct d3d_shader_resource_view **view) DECLSPEC_HIDDEN;
+struct d3d_shader_resource_view *unsafe_impl_from_ID3D11ShaderResourceView(
+        ID3D11ShaderResourceView *iface) DECLSPEC_HIDDEN;
 struct d3d_shader_resource_view *unsafe_impl_from_ID3D10ShaderResourceView(
         ID3D10ShaderResourceView *iface) DECLSPEC_HIDDEN;
 
@@ -295,6 +299,7 @@ struct d3d_blend_state
 
 HRESULT d3d_blend_state_init(struct d3d_blend_state *state, struct d3d_device *device,
         const D3D11_BLEND_DESC *desc) DECLSPEC_HIDDEN;
+struct d3d_blend_state *unsafe_impl_from_ID3D11BlendState(ID3D11BlendState *iface) DECLSPEC_HIDDEN;
 struct d3d_blend_state *unsafe_impl_from_ID3D10BlendState(ID3D10BlendState *iface) DECLSPEC_HIDDEN;
 
 /* ID3D11DepthStencilState, ID3D10DepthStencilState */
@@ -330,6 +335,7 @@ struct d3d_rasterizer_state
 
 HRESULT d3d_rasterizer_state_init(struct d3d_rasterizer_state *state, struct d3d_device *device,
         const D3D11_RASTERIZER_DESC *desc) DECLSPEC_HIDDEN;
+struct d3d_rasterizer_state *unsafe_impl_from_ID3D11RasterizerState(ID3D11RasterizerState *iface) DECLSPEC_HIDDEN;
 struct d3d_rasterizer_state *unsafe_impl_from_ID3D10RasterizerState(ID3D10RasterizerState *iface) DECLSPEC_HIDDEN;
 
 /* ID3D11SamplerState, ID3D10SamplerState */
@@ -348,6 +354,7 @@ struct d3d_sampler_state
 
 HRESULT d3d_sampler_state_init(struct d3d_sampler_state *state, struct d3d_device *device,
         const D3D11_SAMPLER_DESC *desc) DECLSPEC_HIDDEN;
+struct d3d_sampler_state *unsafe_impl_from_ID3D11SamplerState(ID3D11SamplerState *iface) DECLSPEC_HIDDEN;
 struct d3d_sampler_state *unsafe_impl_from_ID3D10SamplerState(ID3D10SamplerState *iface) DECLSPEC_HIDDEN;
 
 /* ID3D11Query, ID3D10Query */
@@ -365,6 +372,7 @@ struct d3d_query
 
 HRESULT d3d_query_create(struct d3d_device *device, const D3D11_QUERY_DESC *desc, BOOL predicate,
         struct d3d_query **query) DECLSPEC_HIDDEN;
+struct d3d_query *unsafe_impl_from_ID3D11Query(ID3D11Query *iface) DECLSPEC_HIDDEN;
 struct d3d_query *unsafe_impl_from_ID3D10Query(ID3D10Query *iface) DECLSPEC_HIDDEN;
 
 /* ID3D11DeviceContext - immediate context */

@@ -1082,9 +1082,9 @@ typedef union _printf_arg
 } printf_arg;
 typedef printf_arg (*args_clbk)(void*, int, int, __ms_va_list*);
 int pf_printf_a(puts_clbk_a, void*, const char*, MSVCRT__locale_t,
-        BOOL, BOOL, args_clbk, void*, __ms_va_list*) DECLSPEC_HIDDEN;
+        DWORD, args_clbk, void*, __ms_va_list*) DECLSPEC_HIDDEN;
 int pf_printf_w(puts_clbk_w, void*, const MSVCRT_wchar_t*, MSVCRT__locale_t,
-        BOOL, BOOL, args_clbk, void*, __ms_va_list*) DECLSPEC_HIDDEN;
+        DWORD, args_clbk, void*, __ms_va_list*) DECLSPEC_HIDDEN;
 printf_arg arg_clbk_valist(void*, int, int, __ms_va_list*) DECLSPEC_HIDDEN;
 
 #define MSVCRT_FLT_MIN 1.175494351e-38F
@@ -1123,5 +1123,22 @@ extern char* __cdecl __unDName(char *,const char*,int,malloc_func_t,free_func_t,
 #define UNDNAME_NO_ARGUMENTS             (0x2000) /* Don't show method arguments */
 #define UNDNAME_NO_SPECIAL_SYMS          (0x4000)
 #define UNDNAME_NO_COMPLEX_TYPE          (0x8000)
+
+#define UCRTBASE_PRINTF_LEGACY_VSPRINTF_NULL_TERMINATION (0x0001)
+#define UCRTBASE_PRINTF_STANDARD_SNPRINTF_BEHAVIOUR      (0x0002)
+#define UCRTBASE_PRINTF_LEGACY_WIDE_SPECIFIERS           (0x0004)
+#define UCRTBASE_PRINTF_LEGACY_MSVCRT_COMPATIBILITY      (0x0008)
+#define UCRTBASE_PRINTF_LEGACY_THREE_DIGIT_EXPONENTS     (0x0010)
+
+#define UCRTBASE_PRINTF_MASK                             (0x001F)
+
+#define MSVCRT_PRINTF_POSITIONAL_PARAMS                  (0x0100)
+#define MSVCRT_PRINTF_INVOKE_INVALID_PARAM_HANDLER       (0x0200)
+
+#define UCRTBASE_SCANF_SECURECRT                         (0x0001)
+#define UCRTBASE_SCANF_LEGACY_WIDE_SPECIFIERS            (0x0002)
+#define UCRTBASE_SCANF_LEGACY_MSVCRT_COMPATIBILITY       (0x0004)
+
+#define UCRTBASE_SCANF_MASK                              (0x0007)
 
 #endif /* __WINE_MSVCRT_H */

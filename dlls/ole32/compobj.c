@@ -1025,7 +1025,7 @@ static HRESULT get_local_server_stream(APARTMENT *apt, IStream **ret)
  * SEE ALSO
  *  CoRegisterClassObject
  */
-HRESULT WINAPI CoRevokeClassObject(
+HRESULT WINAPI DECLSPEC_HOTPATCH CoRevokeClassObject(
         DWORD dwRegister)
 {
   HRESULT hr = E_INVALIDARG;
@@ -1873,7 +1873,7 @@ HRESULT WINAPI CoInitialize(LPVOID lpReserved)
  * SEE ALSO
  *   CoUninitialize
  */
-HRESULT WINAPI CoInitializeEx(LPVOID lpReserved, DWORD dwCoInit)
+HRESULT WINAPI DECLSPEC_HOTPATCH CoInitializeEx(LPVOID lpReserved, DWORD dwCoInit)
 {
   struct oletls *info = COM_CurrentInfo();
   HRESULT hr = S_OK;
@@ -3326,7 +3326,7 @@ HRESULT WINAPI DECLSPEC_HOTPATCH CoCreateInstanceEx(
 /***********************************************************************
  *           CoGetInstanceFromFile [OLE32.@]
  */
-HRESULT WINAPI CoGetInstanceFromFile(
+HRESULT WINAPI DECLSPEC_HOTPATCH CoGetInstanceFromFile(
   COSERVERINFO *server_info,
   CLSID        *rclsid,
   IUnknown     *outer,

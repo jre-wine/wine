@@ -172,14 +172,14 @@
   
   - ES_AUTOHSCROLL
   - ES_AUTOVSCROLL
-  - ES_CENTER
+  + ES_CENTER
   + ES_DISABLENOSCROLL (scrollbar is always visible)
   - ES_EX_NOCALLOLEINIT
-  - ES_LEFT
+  + ES_LEFT
   - ES_MULTILINE (currently single line controls aren't supported)
   - ES_NOIME
   - ES_READONLY (I'm not sure if beeping is the proper behaviour)
-  - ES_RIGHT
+  + ES_RIGHT
   - ES_SAVESEL
   - ES_SELFIME
   - ES_SUNKEN
@@ -533,7 +533,7 @@ void ME_RTFCharAttrHook(RTF_Info *info)
     ME_Style *style2;
     RTFFlushOutputBuffer(info);
     /* FIXME too slow ? how come ? */
-    style2 = ME_ApplyStyle(info->style, &fmt);
+    style2 = ME_ApplyStyle(info->editor, info->style, &fmt);
     ME_ReleaseStyle(info->style);
     info->style = style2;
     info->styleChanged = TRUE;
@@ -1268,18 +1268,19 @@ static void ME_RTFReadShpPictGroup( RTF_Info *info )
 static DWORD read_hex_data( RTF_Info *info, BYTE **out )
 {
     DWORD read = 0, size = 1024;
-    BYTE *buf = HeapAlloc( GetProcessHeap(), 0, size );
-    BYTE val;
+    BYTE *buf, val;
     BOOL flip;
 
     *out = NULL;
-    if (!buf) return 0;
 
     if (info->rtfClass != rtfText)
     {
         ERR("Called with incorrect token\n");
         return 0;
     }
+
+    buf = HeapAlloc( GetProcessHeap(), 0, size );
+    if (!buf) return 0;
 
     val = info->rtfMajor;
     for (flip = TRUE;; flip = !flip)
@@ -1563,7 +1564,7 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
                           ME_GetTextLength(editor), FALSE);
     from = to = 0;
     ME_ClearTempStyle(editor);
-    ME_SetDefaultParaFormat(editor->pCursors[0].pPara->member.para.pFmt);
+    ME_SetDefaultParaFormat(editor, editor->pCursors[0].pPara->member.para.pFmt);
   }
 
 
@@ -2364,7 +2365,7 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
               ME_InsertTextFromCursor(editor, 0, &endl, 1,
                                       editor->pCursors[0].pRun->member.run.style);
               para = editor->pBuffer->pFirst->member.para.next_para;
-              ME_SetDefaultParaFormat(para->member.para.pFmt);
+              ME_SetDefaultParaFormat(editor, para->member.para.pFmt);
               para->member.para.nFlags = MEPF_REWRAP;
               editor->pCursors[0].pPara = para;
               editor->pCursors[0].pRun = ME_FindItemFwd(para, diRun);
@@ -2790,7 +2791,7 @@ static BOOL ME_ShowContextMenu(ME_TextEditor *editor, int x, int y)
   return TRUE;
 }
 
-ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
+ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10, DWORD csStyle)
 {
   ME_TextEditor *ed = ALLOC_OBJ(ME_TextEditor);
   int i;
@@ -2804,6 +2805,11 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ed->reOle = NULL;
   ed->bEmulateVersion10 = bEmulateVersion10;
   ed->styleFlags = 0;
+  ed->alignStyle = PFA_LEFT;
+  if (csStyle & ES_RIGHT)
+      ed->alignStyle = PFA_RIGHT;
+  if (csStyle & ES_CENTER)
+      ed->alignStyle = PFA_CENTER;
   ITextHost_TxGetPropertyBits(texthost,
                               (TXTBIT_RICHTEXT|TXTBIT_MULTILINE|
                                TXTBIT_READONLY|TXTBIT_USEPASSWORD|
@@ -2915,6 +2921,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
 
   ed->wheel_remain = 0;
 
+  list_init( &ed->style_list );
   OleInitialize(NULL);
 
   return ed;
@@ -2924,6 +2931,7 @@ void ME_DestroyEditor(ME_TextEditor *editor)
 {
   ME_DisplayItem *pFirst = editor->pBuffer->pFirst;
   ME_DisplayItem *p = pFirst, *pNext = NULL;
+  ME_Style *s, *cursor2;
   int i;
 
   ME_ClearTempStyle(editor);
@@ -2933,6 +2941,10 @@ void ME_DestroyEditor(ME_TextEditor *editor)
     ME_DestroyDisplayItem(p);
     p = pNext;
   }
+
+  LIST_FOR_EACH_ENTRY_SAFE( s, cursor2, &editor->style_list, ME_Style, entry )
+      ME_DestroyStyle( s );
+
   ME_ReleaseStyle(editor->pBuffer->pDefaultStyle);
   for (i=0; i<HFONT_CACHE_SIZE; i++)
   {

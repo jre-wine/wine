@@ -3912,11 +3912,9 @@ HRESULT WINAPI D3DXLoadMeshHierarchyFromXInMemory(const void *memory, DWORD memo
 
     if (!memory || !memory_size || !device || !frame_hierarchy || !alloc_hier)
         return D3DERR_INVALIDCALL;
-    if (load_user_data || anim_controller) {
-        if (load_user_data)
-            FIXME("Loading user data not implemented\n");
-        if (anim_controller)
-            FIXME("Animation controller creation not implemented\n");
+    if (load_user_data)
+    {
+        FIXME("Loading user data not implemented.\n");
         return E_NOTIMPL;
     }
 
@@ -3984,6 +3982,12 @@ HRESULT WINAPI D3DXLoadMeshHierarchyFromXInMemory(const void *memory, DWORD memo
     } else {
         *frame_hierarchy = first_frame;
         hr = D3D_OK;
+    }
+
+    if (anim_controller)
+    {
+        *anim_controller = NULL;
+        FIXME("Animation controller creation not implemented.\n");
     }
 
 cleanup:
@@ -7012,7 +7016,6 @@ HRESULT WINAPI D3DXWeldVertices(ID3DXMesh *mesh, DWORD flags, const D3DXWELDEPSI
     DWORD *point_reps = NULL;
     struct d3dx9_mesh *This = impl_from_ID3DXMesh(mesh);
     DWORD *vertex_face_map = NULL;
-    ID3DXBuffer *vertex_remap = NULL;
     BYTE *vertices = NULL;
 
     TRACE("mesh %p, flags %#x, epsilons %p, adjacency %p, adjacency_out %p, face_remap_out %p, vertex_remap_out %p.\n",
@@ -7179,7 +7182,6 @@ cleanup:
     HeapFree(GetProcessHeap(), 0, vertex_face_map);
     if (attributes) mesh->lpVtbl->UnlockAttributeBuffer(mesh);
     if (indices) mesh->lpVtbl->UnlockIndexBuffer(mesh);
-    if (vertex_remap) ID3DXBuffer_Release(vertex_remap);
     if (vertices) mesh->lpVtbl->UnlockVertexBuffer(mesh);
 
     return hr;

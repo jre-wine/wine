@@ -92,6 +92,8 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION wgl_section = { &critsect_debug, -1, 0, 0, 0, 0 };
 
+static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
+
 static inline struct opengl_funcs *get_dc_funcs( HDC hdc )
 {
     struct opengl_funcs *funcs = __wine_get_wgl_driver( hdc, WINE_WGL_DRIVER_VERSION );
@@ -827,7 +829,7 @@ static BOOL is_extension_supported(const char* extension)
 
             /* Compare the major/minor version numbers of the native OpenGL library and what is required by the function.
              * The gl_version string is guaranteed to have at least a major/minor and sometimes it has a release number as well. */
-            if( (gl_version[0] >= version[0]) || ((gl_version[0] == version[0]) && (gl_version[2] >= version[2])) ) {
+            if( (gl_version[0] > version[0]) || ((gl_version[0] == version[0]) && (gl_version[2] >= version[2])) ) {
                 return TRUE;
             }
             WARN("The function requires OpenGL version '%c.%c' while your drivers only provide '%c.%c'\n", version[0], version[2], gl_version[0], gl_version[2]);
@@ -1057,7 +1059,7 @@ BOOL WINAPI wglGetPixelFormatAttribfvARB( HDC hdc, int format, int layer, UINT c
  */
 HPBUFFERARB WINAPI wglCreatePbufferARB( HDC hdc, int format, int width, int height, const int *attribs )
 {
-    HPBUFFERARB ret = 0;
+    HPBUFFERARB ret;
     struct wgl_pbuffer *pbuffer;
     struct opengl_funcs *funcs = get_dc_funcs( hdc );
 
@@ -1212,7 +1214,6 @@ static BOOL wglUseFontBitmaps_common( HDC hdc, DWORD first, DWORD count, DWORD l
      funcs->gl.p_glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 
      for (glyph = first; glyph < first + count; glyph++) {
-         static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
          unsigned int needed_size, height, width, width_int;
 
          if (unicode)
@@ -1479,7 +1480,6 @@ static BOOL wglUseFontOutlines_common(HDC hdc,
 {
     const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
     UINT glyph;
-    const MAT2 identity = {{0,1},{0,0},{0,0},{0,1}};
     GLUtesselator *tess = NULL;
     LOGFONTW lf;
     HFONT old_font, unscaled_font;
@@ -1749,7 +1749,7 @@ GLint WINAPI glDebugEntry( GLint unknown1, GLint unknown2 )
 
 static GLubyte *filter_extensions_list(const char *extensions, const char *disabled)
 {
-    char *p, *str = NULL;
+    char *p, *str;
     const char *end;
 
     p = str = HeapAlloc(GetProcessHeap(), 0, strlen(extensions) + 2);
@@ -1785,7 +1785,7 @@ static GLuint *filter_extensions_index(const char *disabled)
 {
     const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
     const char *ext, *end, *gl_ext;
-    GLuint *disabled_exts = NULL, *new_disabled_exts;
+    GLuint *disabled_exts, *new_disabled_exts;
     unsigned int i = 0, j, disabled_size;
     GLint extensions_count;
 

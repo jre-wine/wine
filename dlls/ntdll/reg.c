@@ -84,6 +84,21 @@ NTSTATUS WINAPI NtCreateKey( PHANDLE retkey, ACCESS_MASK access, const OBJECT_AT
     return ret;
 }
 
+NTSTATUS WINAPI NtCreateKeyTransacted( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
+                                       ULONG TitleIndex, const UNICODE_STRING *class, ULONG options,
+                                       HANDLE transacted, ULONG *dispos )
+{
+    FIXME( "(%p,%s,%s,%x,%x,%p,%p)\n", attr->RootDirectory, debugstr_us(attr->ObjectName),
+           debugstr_us(class), options, access, transacted, retkey );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS WINAPI NtRenameKey( HANDLE handle, UNICODE_STRING *name )
+{
+    FIXME( "(%p %s)\n", handle, debugstr_us(name) );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 /******************************************************************************
  *  RtlpNtCreateKey [NTDLL.@]
  *
@@ -106,14 +121,10 @@ NTSTATUS WINAPI RtlpNtCreateKey( PHANDLE retkey, ACCESS_MASK access, const OBJEC
 }
 
 /******************************************************************************
- * NtOpenKey [NTDLL.@]
- * ZwOpenKey [NTDLL.@]
- *
- *   OUT	HANDLE			retkey (returns 0 when failure)
- *   IN		ACCESS_MASK		access
- *   IN		POBJECT_ATTRIBUTES 	attr
+ * NtOpenKeyEx [NTDLL.@]
+ * ZwOpenKeyEx [NTDLL.@]
  */
-NTSTATUS WINAPI NtOpenKey( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
+NTSTATUS WINAPI NtOpenKeyEx( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr, ULONG options )
 {
     NTSTATUS ret;
     DWORD len;
@@ -123,6 +134,8 @@ NTSTATUS WINAPI NtOpenKey( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTR
     len = attr->ObjectName->Length;
     TRACE( "(%p,%s,%x,%p)\n", attr->RootDirectory,
            debugstr_us(attr->ObjectName), access, retkey );
+    if (options)
+        FIXME("options %x not implemented\n", options);
 
     if (len > MAX_NAME_LENGTH) return STATUS_BUFFER_OVERFLOW;
 
@@ -138,6 +151,32 @@ NTSTATUS WINAPI NtOpenKey( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTR
     SERVER_END_REQ;
     TRACE("<- %p\n", *retkey);
     return ret;
+}
+
+/******************************************************************************
+ * NtOpenKey [NTDLL.@]
+ * ZwOpenKey [NTDLL.@]
+ *
+ *   OUT	HANDLE			retkey (returns 0 when failure)
+ *   IN		ACCESS_MASK		access
+ *   IN		POBJECT_ATTRIBUTES 	attr
+ */
+NTSTATUS WINAPI NtOpenKey( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr )
+{
+    return NtOpenKeyEx( retkey, access, attr, 0 );
+}
+
+NTSTATUS WINAPI NtOpenKeyTransactedEx( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
+                                       ULONG options, HANDLE transaction )
+{
+    FIXME( "(%p %x %p %x %p)\n", retkey, access, attr, options, transaction );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS WINAPI NtOpenKeyTransacted( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
+                                     HANDLE transaction )
+{
+    return NtOpenKeyTransactedEx( retkey, access, attr, 0, transaction );
 }
 
 /******************************************************************************
@@ -218,10 +257,11 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
 
     switch(info_class)
     {
-    case KeyBasicInformation: data_ptr = ((KEY_BASIC_INFORMATION *)info)->Name; break;
-    case KeyFullInformation:  data_ptr = ((KEY_FULL_INFORMATION *)info)->Class; break;
-    case KeyNodeInformation:  data_ptr = ((KEY_NODE_INFORMATION *)info)->Name;  break;
-    case KeyNameInformation:  data_ptr = ((KEY_NAME_INFORMATION *)info)->Name;  break;
+    case KeyBasicInformation:  data_ptr = ((KEY_BASIC_INFORMATION *)info)->Name; break;
+    case KeyFullInformation:   data_ptr = ((KEY_FULL_INFORMATION *)info)->Class; break;
+    case KeyNodeInformation:   data_ptr = ((KEY_NODE_INFORMATION *)info)->Name;  break;
+    case KeyNameInformation:   data_ptr = ((KEY_NAME_INFORMATION *)info)->Name;  break;
+    case KeyCachedInformation: data_ptr = ((KEY_CACHED_INFORMATION *)info)+1;    break;
     default:
         FIXME( "Information class %d not implemented\n", info_class );
         return STATUS_INVALID_PARAMETER;
@@ -292,6 +332,23 @@ static NTSTATUS enumerate_key( HANDLE handle, int index, KEY_INFORMATION_CLASS i
                     keyinfo.NameLength = reply->namelen;
                     memcpy( info, &keyinfo, min( length, fixed_size ) );
                 }
+                break;
+            case KeyCachedInformation:
+                {
+                    KEY_CACHED_INFORMATION keyinfo;
+                    fixed_size = sizeof(keyinfo);
+                    keyinfo.LastWriteTime.QuadPart = reply->modif;
+                    keyinfo.TitleIndex = 0;
+                    keyinfo.SubKeys = reply->subkeys;
+                    keyinfo.MaxNameLen = reply->max_subkey;
+                    keyinfo.Values = reply->values;
+                    keyinfo.MaxValueNameLen = reply->max_value;
+                    keyinfo.MaxValueDataLen = reply->max_data;
+                    keyinfo.NameLength = reply->namelen;
+                    memcpy( info, &keyinfo, min( length, fixed_size ) );
+                }
+                break;
+            default:
                 break;
             }
             *result_len = fixed_size + reply->total;
@@ -622,28 +679,30 @@ NTSTATUS WINAPI NtLoadKey( const OBJECT_ATTRIBUTES *attr, OBJECT_ATTRIBUTES *fil
 }
 
 /******************************************************************************
- *  NtNotifyChangeKey	[NTDLL.@]
- *  ZwNotifyChangeKey   [NTDLL.@]
+ *  NtNotifyChangeMultipleKeys  [NTDLL.@]
+ *  ZwNotifyChangeMultipleKeys  [NTDLL.@]
  */
-NTSTATUS WINAPI NtNotifyChangeKey(
-	IN HANDLE KeyHandle,
-	IN HANDLE Event,
-	IN PIO_APC_ROUTINE ApcRoutine OPTIONAL,
-	IN PVOID ApcContext OPTIONAL,
-	OUT PIO_STATUS_BLOCK IoStatusBlock,
-	IN ULONG CompletionFilter,
-	IN BOOLEAN Asynchronous,
-	OUT PVOID ChangeBuffer,
-	IN ULONG Length,
-	IN BOOLEAN WatchSubtree)
+NTSTATUS WINAPI NtNotifyChangeMultipleKeys(
+        HANDLE KeyHandle,
+        ULONG Count,
+        OBJECT_ATTRIBUTES *SubordinateObjects,
+        HANDLE Event,
+        PIO_APC_ROUTINE ApcRoutine,
+        PVOID ApcContext,
+        PIO_STATUS_BLOCK IoStatusBlock,
+        ULONG CompletionFilter,
+        BOOLEAN WatchSubtree,
+        PVOID ChangeBuffer,
+        ULONG Length,
+        BOOLEAN Asynchronous)
 {
     NTSTATUS ret;
 
-    TRACE("(%p,%p,%p,%p,%p,0x%08x, 0x%08x,%p,0x%08x,0x%08x)\n",
-        KeyHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, CompletionFilter,
+    TRACE("(%p,%u,%p,%p,%p,%p,%p,0x%08x, 0x%08x,%p,0x%08x,0x%08x)\n",
+        KeyHandle, Count, SubordinateObjects, Event, ApcRoutine, ApcContext, IoStatusBlock, CompletionFilter,
         Asynchronous, ChangeBuffer, Length, WatchSubtree);
 
-    if (ApcRoutine || ApcContext || ChangeBuffer || Length)
+    if (Count || SubordinateObjects || ApcRoutine || ApcContext || ChangeBuffer || Length)
         FIXME("Unimplemented optional parameter\n");
 
     if (!Asynchronous)
@@ -667,12 +726,33 @@ NTSTATUS WINAPI NtNotifyChangeKey(
  
     if (!Asynchronous)
     {
-        if (ret == STATUS_SUCCESS)
-            NtWaitForSingleObject( Event, FALSE, NULL );
+        if (ret == STATUS_PENDING)
+            ret = NtWaitForSingleObject( Event, FALSE, NULL );
         NtClose( Event );
     }
 
-    return STATUS_SUCCESS;
+    return ret;
+}
+
+/******************************************************************************
+ *  NtNotifyChangeKey	[NTDLL.@]
+ *  ZwNotifyChangeKey   [NTDLL.@]
+ */
+NTSTATUS WINAPI NtNotifyChangeKey(
+	IN HANDLE KeyHandle,
+	IN HANDLE Event,
+	IN PIO_APC_ROUTINE ApcRoutine OPTIONAL,
+	IN PVOID ApcContext OPTIONAL,
+	OUT PIO_STATUS_BLOCK IoStatusBlock,
+	IN ULONG CompletionFilter,
+	IN BOOLEAN WatchSubtree,
+	OUT PVOID ChangeBuffer,
+	IN ULONG Length,
+	IN BOOLEAN Asynchronous)
+{
+    return NtNotifyChangeMultipleKeys(KeyHandle, 0, NULL, Event, ApcRoutine, ApcContext,
+                                      IoStatusBlock, CompletionFilter, WatchSubtree,
+                                      ChangeBuffer, Length, Asynchronous);
 }
 
 /******************************************************************************

@@ -494,10 +494,23 @@ static int ctl2_alloc_guid(
     MSFT_GuidEntry *guid_space;
     int hash_key;
 
+    chat("adding uuid {%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\n",
+         guid->guid.Data1, guid->guid.Data2, guid->guid.Data3,
+         guid->guid.Data4[0], guid->guid.Data4[1], guid->guid.Data4[2], guid->guid.Data4[3],
+         guid->guid.Data4[4], guid->guid.Data4[5], guid->guid.Data4[6], guid->guid.Data4[7]);
+
     hash_key = ctl2_hash_guid(&guid->guid);
 
     offset = ctl2_find_guid(typelib, hash_key, &guid->guid);
-    if (offset != -1) return offset;
+    if (offset != -1)
+    {
+        if (pedantic)
+            warning("duplicate uuid {%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\n",
+                    guid->guid.Data1, guid->guid.Data2, guid->guid.Data3,
+                    guid->guid.Data4[0], guid->guid.Data4[1], guid->guid.Data4[2], guid->guid.Data4[3],
+                    guid->guid.Data4[4], guid->guid.Data4[5], guid->guid.Data4[6], guid->guid.Data4[7]);
+        return -1;
+    }
 
     offset = ctl2_alloc_segment(typelib, MSFT_SEG_GUID, sizeof(MSFT_GuidEntry), 0);
 
@@ -1978,7 +1991,7 @@ static msft_typeinfo_t *create_msft_typeinfo(msft_typelib_t *typelib, enum type_
 
 static void add_dispatch(msft_typelib_t *typelib)
 {
-    int guid_offset, impfile_offset;
+    int guid_offset, impfile_offset, hash_key;
     MSFT_GuidEntry guidentry;
     MSFT_ImpInfo impinfo;
     GUID stdole =        {0x00020430,0x0000,0x0000,{0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
@@ -1989,7 +2002,10 @@ static void add_dispatch(msft_typelib_t *typelib)
     guidentry.guid = stdole;
     guidentry.hreftype = 2;
     guidentry.next_hash = -1;
-    guid_offset = ctl2_alloc_guid(typelib, &guidentry);
+    hash_key = ctl2_hash_guid(&guidentry.guid);
+    guid_offset = ctl2_find_guid(typelib, hash_key, &guidentry.guid);
+    if (guid_offset == -1)
+        guid_offset = ctl2_alloc_guid(typelib, &guidentry);
     impfile_offset = alloc_importfile(typelib, guid_offset, 2, 0, "stdole2.tlb");
 
     guidentry.guid = iid_idispatch;
@@ -1997,7 +2013,11 @@ static void add_dispatch(msft_typelib_t *typelib)
     guidentry.next_hash = -1;
     impinfo.flags = TKIND_INTERFACE << 24 | MSFT_IMPINFO_OFFSET_IS_GUID;
     impinfo.oImpFile = impfile_offset;
-    impinfo.oGuid = ctl2_alloc_guid(typelib, &guidentry);
+    hash_key = ctl2_hash_guid(&guidentry.guid);
+    guid_offset = ctl2_find_guid(typelib, hash_key, &guidentry.guid);
+    if (guid_offset == -1)
+        guid_offset = ctl2_alloc_guid(typelib, &guidentry);
+    impinfo.oGuid = guid_offset;
     typelib->typelib_header.dispatchpos = alloc_msft_importinfo(typelib, &impinfo) | 0x01;
 }
 
@@ -2077,6 +2097,10 @@ static void add_interface_typeinfo(msft_typelib_t *typelib, type_t *interface)
            inherit->typelib_idx == -1)
             add_interface_typeinfo(typelib, inherit);
     }
+
+    /* check typelib_idx again, it could have been added while resolving the parent interface */
+    if (-1 < interface->typelib_idx)
+        return;
 
     interface->typelib_idx = typelib->typelib_header.nrtypeinfos;
     msft_typeinfo = create_msft_typeinfo(typelib, TKIND_INTERFACE, interface->name, interface->attrs);
@@ -2170,7 +2194,7 @@ static void add_union_typeinfo(msft_typelib_t *typelib, type_t *tunion)
 static void add_typedef_typeinfo(msft_typelib_t *typelib, type_t *tdef)
 {
     msft_typeinfo_t *msft_typeinfo = NULL;
-    int alignment, datatype1, datatype2, size;
+    int alignment, datatype1, datatype2, size, duplicate = 0;
     type_t *type;
 
     if (-1 < tdef->typelib_idx)
@@ -2183,6 +2207,8 @@ static void add_typedef_typeinfo(msft_typelib_t *typelib, type_t *tdef)
         tdef->typelib_idx = typelib->typelib_header.nrtypeinfos;
         msft_typeinfo = create_msft_typeinfo(typelib, TKIND_ALIAS, tdef->name, tdef->attrs);
     }
+    else
+        duplicate = 1;
 
     encode_type(typelib, get_type_vt(type), type,
                 &datatype1, &size, &alignment, &datatype2);
@@ -2194,6 +2220,10 @@ static void add_typedef_typeinfo(msft_typelib_t *typelib, type_t *tdef)
         msft_typeinfo->typeinfo->datatype2 = datatype2;
         msft_typeinfo->typeinfo->typekind |= (alignment << 11 | alignment << 6);
     }
+
+    /* avoid adding duplicate type definitions */
+    if (duplicate)
+        tdef->typelib_idx = type->typelib_idx;
 }
 
 static void add_coclass_typeinfo(msft_typelib_t *typelib, type_t *cls)

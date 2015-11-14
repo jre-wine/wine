@@ -25,6 +25,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "wine/debug.h"
 WINE_DEFAULT_DEBUG_CHANNEL(msvcp);
 
@@ -527,6 +528,101 @@ critical_section* __cdecl _Mtx_getconcrtcs(_Mtx_t *mtx)
 {
     return &(*mtx)->cs;
 }
+
+static inline LONG interlocked_dec_if_nonzero( LONG *dest )
+{
+    LONG val, tmp;
+    for (val = *dest;; val = tmp)
+    {
+        if (!val || (tmp = InterlockedCompareExchange( dest, val - 1, val )) == val)
+            break;
+    }
+    return val;
+}
+
+#define CND_TIMEDOUT 2
+
+typedef struct
+{
+    CONDITION_VARIABLE cv;
+} *_Cnd_t;
+
+static HANDLE keyed_event;
+
+int __cdecl _Cnd_init(_Cnd_t *cnd)
+{
+    *cnd = MSVCRT_operator_new(sizeof(**cnd));
+    InitializeConditionVariable(&(*cnd)->cv);
+
+    if(!keyed_event) {
+        HANDLE event;
+
+        NtCreateKeyedEvent(&event, GENERIC_READ|GENERIC_WRITE, NULL, 0);
+        if(InterlockedCompareExchangePointer(&keyed_event, event, NULL) != NULL)
+            NtClose(event);
+    }
+
+    return 0;
+}
+
+int __cdecl _Cnd_wait(_Cnd_t *cnd, _Mtx_t *mtx)
+{
+    CONDITION_VARIABLE *cv = &(*cnd)->cv;
+
+    InterlockedExchangeAdd( (LONG *)&cv->Ptr, 1 );
+    _Mtx_unlock(mtx);
+
+    NtWaitForKeyedEvent(keyed_event, &cv->Ptr, FALSE, NULL);
+
+    _Mtx_lock(mtx);
+    return 0;
+}
+
+int __cdecl _Cnd_timedwait(_Cnd_t *cnd, _Mtx_t *mtx, const xtime *xt)
+{
+    CONDITION_VARIABLE *cv = &(*cnd)->cv;
+    LARGE_INTEGER timeout;
+    NTSTATUS status;
+
+    InterlockedExchangeAdd( (LONG *)&cv->Ptr, 1 );
+    _Mtx_unlock(mtx);
+
+    timeout.QuadPart = (ULONGLONG)_Xtime_diff_to_millis(xt) * -10000;
+    status = NtWaitForKeyedEvent(keyed_event, &cv->Ptr, FALSE, &timeout);
+    if (status)
+    {
+        if (!interlocked_dec_if_nonzero( (LONG *)&cv->Ptr ))
+            status = NtWaitForKeyedEvent( keyed_event, &cv->Ptr, FALSE, NULL );
+    }
+
+    _Mtx_lock(mtx);
+    return status ? CND_TIMEDOUT : 0;
+}
+
+int __cdecl _Cnd_broadcast(_Cnd_t *cnd)
+{
+    CONDITION_VARIABLE *cv = &(*cnd)->cv;
+    LONG val = InterlockedExchange( (LONG *)&cv->Ptr, 0 );
+    while (val-- > 0)
+        NtReleaseKeyedEvent( keyed_event, &cv->Ptr, FALSE, NULL );
+    return 0;
+}
+
+int __cdecl _Cnd_signal(_Cnd_t *cnd)
+{
+    CONDITION_VARIABLE *cv = &(*cnd)->cv;
+    if (interlocked_dec_if_nonzero( (LONG *)&cv->Ptr ))
+        NtReleaseKeyedEvent( keyed_event, &cv->Ptr, FALSE, NULL );
+    return 0;
+}
+
+void __cdecl _Cnd_destroy(_Cnd_t *cnd)
+{
+    if(cnd) {
+        _Cnd_broadcast(cnd);
+        MSVCRT_operator_delete(*cnd);
+    }
+}
 #endif
 
 #if _MSVCP_VER == 100
@@ -684,12 +780,24 @@ void init_misc(void *base)
 #endif
 }
 
+void free_misc(void)
+{
+#if _MSVCP_VER >= 110
+    if(keyed_event)
+        NtClose(keyed_event);
+#endif
+}
+
 #if _MSVCP_VER >= 110
 typedef struct
 {
     HANDLE hnd;
     DWORD  id;
 } _Thrd_t;
+
+typedef int (__cdecl *_Thrd_start_t)(void*);
+
+#define _THRD_ERROR 4
 
 int __cdecl _Thrd_equal(_Thrd_t a, _Thrd_t b)
 {
@@ -701,5 +809,73 @@ int __cdecl _Thrd_lt(_Thrd_t a, _Thrd_t b)
 {
     TRACE("(%p %u %p %u)\n", a.hnd, a.id, b.hnd, b.id);
     return a.id < b.id;
+}
+
+void __cdecl _Thrd_sleep(const xtime *t)
+{
+    TRACE("(%p)\n", t);
+    Sleep(_Xtime_diff_to_millis(t));
+}
+
+void __cdecl _Thrd_yield(void)
+{
+    TRACE("()\n");
+    Sleep(0);
+}
+
+static _Thrd_t thread_current(void)
+{
+    _Thrd_t ret;
+
+    if(DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
+                       GetCurrentProcess(), &ret.hnd, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+        CloseHandle(ret.hnd);
+    } else {
+        ret.hnd = 0;
+    }
+    ret.id  = GetCurrentThreadId();
+
+    TRACE("(%p %u)\n", ret.hnd, ret.id);
+    return ret;
+}
+
+#ifndef __i386__
+_Thrd_t __cdecl _Thrd_current(void)
+{
+    return thread_current();
+}
+#else
+ULONGLONG __cdecl _Thrd_current(void)
+{
+    union {
+        _Thrd_t thr;
+        ULONGLONG ull;
+    } ret;
+
+    C_ASSERT(sizeof(_Thrd_t) <= sizeof(ULONGLONG));
+
+    ret.thr = thread_current();
+    return ret.ull;
+}
+#endif
+
+int __cdecl _Thrd_join(_Thrd_t thr, int *code)
+{
+    TRACE("(%p %u %p)\n", thr.hnd, thr.id, code);
+    if (WaitForSingleObject(thr.hnd, INFINITE))
+        return _THRD_ERROR;
+
+    if (code)
+        GetExitCodeThread(thr.hnd, (DWORD *)code);
+
+    CloseHandle(thr.hnd);
+    return 0;
+}
+
+int __cdecl _Thrd_create(_Thrd_t *thr, _Thrd_start_t proc, void *arg)
+{
+    TRACE("(%p %p %p)\n", thr, proc, arg);
+    thr->hnd = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)proc, arg, 0, &thr->id);
+    return !thr->hnd;
 }
 #endif

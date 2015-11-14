@@ -225,24 +225,13 @@ wine_fn_has_flag ()
 
 wine_fn_depend_rules ()
 {
-    if wine_fn_has_flag config
-    then
-        wine_fn_append_rule \
-"$ac_dir/Makefile: $srcdir/$ac_dir/Makefile.in Makefile config.status \$(MAKEDEP)
-	@./config.status --file $ac_dir/Makefile && \$(MAKEDEP) -iMakefile $ac_dir
-depend: $ac_dir/depend
-.PHONY: $ac_dir/depend
-$ac_dir/depend: \$(MAKEDEP) dummy
-	@./config.status --file $ac_dir/Makefile && \$(MAKEDEP) -iMakefile $ac_dir"
-    else
-        wine_fn_append_rule \
+    wine_fn_append_rule \
 "$ac_dir/Makefile: $srcdir/$ac_dir/Makefile.in Makefile \$(MAKEDEP)
 	\$(MAKEDEP) $ac_dir
 depend: $ac_dir/depend
 .PHONY: $ac_dir/depend
 $ac_dir/depend: \$(MAKEDEP) dummy
 	\$(MAKEDEP) $ac_dir"
-    fi
 }
 
 wine_fn_pot_rules ()
@@ -341,11 +330,9 @@ wine_fn_disabled_rules ()
     ac_extraclean="$ac_dir/Makefile"
     test "$srcdir" = . && ac_extraclean="$ac_extraclean $ac_dir/.gitignore"
 
-    wine_fn_append_rule \
-"__clean__: $ac_dir/clean
-.PHONY: $ac_dir/clean
-$ac_dir/clean: dummy
-	\$(RM) \$(CLEAN_FILES:%=$ac_dir/%) $ac_clean $ac_extraclean"
+    wine_fn_depend_rules
+    wine_fn_clean_rules $ac_clean
+    wine_fn_pot_rules
 }
 
 wine_fn_config_makefile ()
@@ -414,6 +401,7 @@ wine_fn_config_dll ()
                then
                    wine_fn_depend_rules
                    wine_fn_clean_rules $ac_clean
+                   wine_fn_pot_rules
                else
                    wine_fn_disabled_rules $ac_clean
                    return
@@ -432,10 +420,10 @@ __uninstall__: $ac_dir/uninstall"
                 then
                     wine_fn_append_rule \
 "$ac_dir/install-lib:: $ac_dir
-	\$(INSTALL_PROGRAM) $ac_dir/$ac_dll$DLLEXT \$(DESTDIR)\$(dlldir)/$DLLPREFIX$ac_dll$DLLEXT
+	\$(INSTALL_PROGRAM) $ac_dir/$ac_dll$DLLEXT \$(DESTDIR)\$(dlldir)/$ac_dll$DLLEXT
 	\$(INSTALL_DATA) $ac_dir/$ac_dll.fake \$(DESTDIR)\$(fakedlldir)/$ac_dll
 $ac_dir/uninstall::
-	\$(RM) \$(DESTDIR)\$(dlldir)/$DLLPREFIX$ac_dll$DLLEXT \$(DESTDIR)\$(fakedlldir)/$ac_dll"
+	\$(RM) \$(DESTDIR)\$(dlldir)/$ac_dll$DLLEXT \$(DESTDIR)\$(fakedlldir)/$ac_dll"
                 else
                     wine_fn_append_rule \
 "$ac_dir/install-lib:: $ac_dir
@@ -562,10 +550,10 @@ __uninstall__: $ac_dir/uninstall"
     then
         wine_fn_append_rule \
 "$ac_dir/install:: $ac_dir
-	\$(INSTALL_PROGRAM) $ac_dir/$ac_program$DLLEXT \$(DESTDIR)\$(dlldir)/$DLLPREFIX$ac_program$DLLEXT
+	\$(INSTALL_PROGRAM) $ac_dir/$ac_program$DLLEXT \$(DESTDIR)\$(dlldir)/$ac_program$DLLEXT
 	\$(INSTALL_DATA) $ac_dir/$ac_program.fake \$(DESTDIR)\$(fakedlldir)/$ac_program
 $ac_dir/uninstall::
-	\$(RM) \$(DESTDIR)\$(dlldir)/$DLLPREFIX$ac_program$DLLEXT \$(DESTDIR)\$(fakedlldir)/$ac_program"
+	\$(RM) \$(DESTDIR)\$(dlldir)/$ac_program$DLLEXT \$(DESTDIR)\$(fakedlldir)/$ac_program"
 
         if test -z "$with_wine64" && wine_fn_has_flag installbin
         then
@@ -789,7 +777,7 @@ Use the --without-$1 option if you really want this.]) ;;
 esac])])
 
 AC_DEFUN([WINE_PRINT_MESSAGES],[ac_save_IFS="$IFS"
-if test "x$wine_notices != "x; then
+if test "x$wine_notices" != x; then
     echo >&AS_MESSAGE_FD
     IFS="|"
     for msg in $wine_notices; do
