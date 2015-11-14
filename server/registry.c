@@ -93,7 +93,7 @@ struct key_value
 {
     WCHAR            *name;    /* value name */
     unsigned short    namelen; /* length of value name */
-    unsigned short    type;    /* value type */
+    unsigned int      type;    /* value type */
     data_size_t       len;     /* value data length in bytes */
     void             *data;    /* pointer to value data */
 };
@@ -814,6 +814,7 @@ static struct key *create_key( struct key *key, const struct unicode_str *name,
         free(key->class);
         if (!(key->class = memdup( class->str, key->classlen ))) key->classlen = 0;
     }
+    touch_key( key->parent, REG_NOTIFY_CHANGE_NAME );
     grab_object( key );
     return key;
 }
@@ -905,26 +906,25 @@ static void enum_key( const struct key *key, int index, int info_class,
         reply->max_data   = 0;
         break;
     case KeyFullInformation:
+    case KeyCachedInformation:
         for (i = 0; i <= key->last_subkey; i++)
         {
-            struct key *subkey = key->subkeys[i];
-            len = subkey->namelen / sizeof(WCHAR);
-            if (len > max_subkey) max_subkey = len;
-            len = subkey->classlen / sizeof(WCHAR);
-            if (len > max_class) max_class = len;
+            if (key->subkeys[i]->namelen > max_subkey) max_subkey = key->subkeys[i]->namelen;
+            if (key->subkeys[i]->classlen > max_class) max_class = key->subkeys[i]->classlen;
         }
         for (i = 0; i <= key->last_value; i++)
         {
-            len = key->values[i].namelen / sizeof(WCHAR);
-            if (len > max_value) max_value = len;
-            len = key->values[i].len;
-            if (len > max_data) max_data = len;
+            if (key->values[i].namelen > max_value) max_value = key->values[i].namelen;
+            if (key->values[i].len > max_data) max_data = key->values[i].len;
         }
         reply->max_subkey = max_subkey;
         reply->max_class  = max_class;
         reply->max_value  = max_value;
         reply->max_data   = max_data;
-        namelen = 0;  /* only return the class */
+        reply->namelen    = namelen;
+        if (info_class == KeyCachedInformation)
+            classlen = 0; /* don't return any data, only its size */
+        namelen = 0;  /* don't return name */
         break;
     default:
         set_error( STATUS_INVALID_PARAMETER );
@@ -2288,6 +2288,11 @@ DECL_HANDLER(set_registry_notification)
                     notify->process = current->process;
                     list_add_head( &key->notify_list, &notify->entry );
                 }
+            }
+            if (notify)
+            {
+                reset_event( event );
+                set_error( STATUS_PENDING );
             }
             release_object( event );
         }

@@ -9,7 +9,7 @@
 @ stub WsAddErrorString
 @ stub WsAddMappedHeader
 @ stub WsAddressMessage
-@ stub WsAlloc
+@ stdcall WsAlloc(ptr long ptr ptr)
 @ stub WsAsyncExecute
 @ stub WsCall
 @ stub WsCheckMustUnderstandHeaders
@@ -93,7 +93,7 @@
 @ stub WsInitializeMessage
 @ stub WsMarkHeaderAsUnderstood
 @ stub WsMatchPolicyAlternative
-@ stub WsMoveReader
+@ stdcall WsMoveReader(ptr long ptr ptr)
 @ stub WsMoveWriter
 @ stub WsOpenChannel
 @ stub WsOpenListener
@@ -171,23 +171,23 @@
 @ stub WsWriteChars
 @ stub WsWriteCharsUtf8
 @ stub WsWriteElement
-@ stub WsWriteEndAttribute
+@ stdcall WsWriteEndAttribute(ptr ptr)
 @ stub WsWriteEndCData
-@ stub WsWriteEndElement
-@ stub WsWriteEndStartElement
+@ stdcall WsWriteEndElement(ptr ptr)
+@ stdcall WsWriteEndStartElement(ptr ptr)
 @ stub WsWriteEnvelopeEnd
 @ stub WsWriteEnvelopeStart
 @ stub WsWriteMessageEnd
 @ stub WsWriteMessageStart
 @ stub WsWriteNode
 @ stub WsWriteQualifiedName
-@ stub WsWriteStartAttribute
+@ stdcall WsWriteStartAttribute(ptr ptr ptr ptr long ptr)
 @ stub WsWriteStartCData
-@ stub WsWriteStartElement
-@ stub WsWriteText
+@ stdcall WsWriteStartElement(ptr ptr ptr ptr ptr)
+@ stdcall WsWriteText(ptr ptr ptr)
 @ stub WsWriteType
 @ stub WsWriteValue
 @ stub WsWriteXmlBuffer
 @ stub WsWriteXmlBufferToBytes
 @ stub WsWriteXmlnsAttribute
-@ stub WsXmlStringEquals
+@ stdcall WsXmlStringEquals(ptr ptr ptr)

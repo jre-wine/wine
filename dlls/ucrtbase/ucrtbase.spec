@@ -142,7 +142,7 @@
 @ cdecl __setusermatherr(ptr) MSVCRT___setusermatherr
 @ stub __std_exception_copy
 @ stub __std_exception_destroy
-@ stub __std_type_info_compare
+@ cdecl __std_type_info_compare(ptr ptr) MSVCRT_type_info_compare
 @ stub __std_type_info_destroy_list
 @ stub __std_type_info_hash
 @ stub __std_type_info_name
@@ -373,7 +373,7 @@
 @ cdecl _get_pgmptr(ptr)
 @ cdecl _get_printf_count_output() MSVCRT__get_printf_count_output
 @ stub _get_purecall_handler
-@ stub _get_stream_buffer_pointers
+@ cdecl _get_stream_buffer_pointers(ptr ptr ptr ptr) MSVCRT__get_stream_buffer_pointers
 @ cdecl _get_terminate() MSVCRT__get_terminate
 @ stub _get_thread_local_invalid_parameter_handler
 @ cdecl _get_timezone(ptr)
@@ -1874,8 +1874,8 @@
 @ cdecl -arch=arm,x86_64 _scalbf(float long) MSVCRT__scalbf
 @ cdecl _searchenv(str str ptr) MSVCRT__searchenv
 @ cdecl _searchenv_s(str str ptr long) MSVCRT__searchenv_s
-@ stub _seh_filter_dll
-@ stub _seh_filter_exe
+@ cdecl -arch=i386,x86_64,arm _seh_filter_dll(long ptr) __CppXcptFilter
+@ cdecl _seh_filter_exe(long ptr) _XcptFilter
 @ stub _set_FMA3_enable
 @ stdcall -arch=i386 _seh_longjmp_unwind4(ptr)
 @ stdcall -arch=i386 _seh_longjmp_unwind(ptr)

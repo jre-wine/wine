@@ -47,46 +47,10 @@ my %exported_wine_headers = (
     "wine/svcctl.idl" => 1,
 );
 
-my %private_idl_headers = (
-    "access.idl" => 1,
-    "asynot.idl" => 1,
-    "asysta.idl" => 1,
-    "axcore.idl" => 1,
-    "axextend.idl" => 1,
-    "binres.idl" => 1,
-    "chprst.idl" => 1,
-    "cmdbas.idl" => 1,
-    "cmdtxt.idl" => 1,
-    "crtrow.idl" => 1,
-    "dbccmd.idl" => 1,
-    "dbcses.idl" => 1,
-    "dbdsad.idl" => 1,
-    "dbinit.idl" => 1,
-    "dbprop.idl" => 1,
-    "dbs.idl" => 1,
-    "devenum.idl" => 1,
-    "dyngraph.idl" => 1,
-    "errrec.idl" => 1,
-    "opnrst.idl" => 1,
-    "row.idl" => 1,
-    "rowchg.idl" => 1,
-    "rowpos.idl" => 1,
-    "rowpsc.idl" => 1,
-    "rstbas.idl" => 1,
-    "rstinf.idl" => 1,
-    "rstloc.idl" => 1,
-    "rstnot.idl" => 1,
-    "srcrst.idl" => 1,
-    "sesprp.idl" => 1,
-    "vmrender.idl" => 1,
-    "xmldom.idl" => 1,
-    "xmldso.idl" => 1,
-    "wine/winedxgi.idl" => 1,
-);
-
 my %ignored_source_files = (
     "dlls/wineps.drv/afm2c.c" => 1,
     "dlls/wineps.drv/mkagl.c" => 1,
+    "include/config.h.in" => 1,
     "programs/winetest/dist.rc" => 1,
     "tools/makedep.c" => 1,
 );
@@ -236,6 +200,10 @@ sub parse_makefile($)
         while (/\\$/) { chop; $_ .= <MAKE>; chomp; }  # merge continued lines
         next if (/^\s*$/);
 
+        if (/\@[A-Z_]+\@/)  # config.status substitution variable
+        {
+            die "Configure substitution is not allowed in $file";
+        }
         if (/^\s*(MODULE|IMPORTLIB|TESTDLL|PARENTSRC|APPMODE)\s*=\s*(.*)/)
         {
             my $var = $1;
@@ -243,7 +211,7 @@ sub parse_makefile($)
             ${$make{"=flags"}}{"implib"} = 1 if $var eq "IMPORTLIB";
             next;
         }
-        if (/^\s*(BISON_SRCS|LEX_SRCS|IDL_SRCS|IMPLIB_SRCS|C_SRCS|OBJC_SRCS|MC_SRCS|RC_SRCS|SVG_SRCS|FONT_SRCS|IN_SRCS|PROGRAMS|EXTRA_TARGETS|MANPAGES|INSTALL_LIB|INSTALL_DEV)\s*=\s*(.*)/)
+        if (/^\s*(BISON_SRCS|LEX_SRCS|IDL_SRCS|C_SRCS|OBJC_SRCS|MC_SRCS|RC_SRCS|SVG_SRCS|FONT_SRCS|IN_SRCS|PROGRAMS|EXTRA_TARGETS|MANPAGES|EXTRA_OBJS|INSTALL_LIB|INSTALL_DEV)\s*=\s*(.*)/)
         {
             my $var = $1;
             my @list = split(/\s+/, $2);
@@ -258,10 +226,6 @@ sub parse_makefile($)
         if (/^\s*(TOPSRCDIR|TOPOBJDIR|SRCDIR|VPATH)\s*=\s*(.*)/)
         {
             die "Variable $1 in $file.in is obsolete";
-        }
-        if (/\@[A-Z_]+\@/)  # config.status substitution variable
-        {
-            ${$make{"=flags"}}{"config"} = 1;
         }
     }
 
@@ -284,7 +248,7 @@ sub parse_makefile($)
         ${$make{"=flags"}}{"install-lib"} = 1 if defined $make{"INSTALL_LIB"};
         ${$make{"=flags"}}{"install-dev"} = 1 if defined $make{"INSTALL_DEV"};
     }
-    ${$make{"=flags"}}{"clean"} = 1 if defined $make{"PROGRAMS"} || defined $make{"EXTRA_TARGETS"};
+    ${$make{"=flags"}}{"clean"} = 1 if defined $make{"PROGRAMS"} || defined $make{"EXTRA_TARGETS"} || defined $make{"EXTRA_OBJS"};
 
     if (defined $make{"=flags"} && defined $make{"MODULE"})
     {
@@ -302,13 +266,32 @@ sub get_makedep_flags($)
     my %flags;
 
     open FILE, $file or die "cannot open $file";
-    while (<FILE>)
+    if ($file =~ /\.sfd$/)
     {
-        next unless /^#\s*pragma\s+makedep\s+(.*)/;
-        foreach my $flag (split /\s+/, $1)
+        while (<FILE>)
         {
-            last if $flag eq "depend";
-            $flags{$flag} = 1;
+            next unless /^UComments:\s*\"(.*)\"$/;
+            foreach my $pragma (split /\+AAoA/, $1)
+            {
+                next unless $pragma =~ /^#\s*pragma\s+makedep\s+(.*)/;
+                foreach my $flag (split /\s+/, $1)
+                {
+                    $flags{$flag} = 1;
+                    last if $flag eq "font";
+                }
+            }
+        }
+    }
+    else
+    {
+        while (<FILE>)
+        {
+            next unless /^#\s*pragma\s+makedep\s+(.*)/;
+            foreach my $flag (split /\s+/, $1)
+            {
+                last if $flag eq "depend";
+                $flags{$flag} = 1;
+            }
         }
     }
     close FILE;
@@ -365,77 +348,62 @@ sub assign_sources_to_makefiles(@)
 
         my $make = $makefiles{"$dir/Makefile"};
         my $name = substr( $file, length($dir) + 1 );
+        my %flags = get_makedep_flags( $file );
+
+        next if $file =~ /^include\/wine\// && !%flags && !$exported_wine_headers{$name};
 
         ${$make}{"=flags"}{"clean"} = 1 if $subdir;
 
-        if ($dir eq "include")
+        if ($name =~ /\.m$/) { push @{${$make}{"=OBJC_SRCS"}}, $name; }
+        elsif ($name =~ /\.l$/) { push @{${$make}{"=LEX_SRCS"}}, $name; }
+        elsif ($name =~ /\.y$/) { push @{${$make}{"=BISON_SRCS"}}, $name; }
+        elsif ($name =~ /\.x$/) { push @{${$make}{"=XTEMPLATE_SRCS"}}, $name; }
+        elsif ($name =~ /\.rh$/) { push @{${$make}{"=HEADER_SRCS"}}, $name; }
+        elsif ($name =~ /\.inl$/) { push @{${$make}{"=HEADER_SRCS"}}, $name; }
+        elsif ($name =~ /\.svg$/) { push @{${$make}{"=SVG_SRCS"}}, $name; }
+        elsif ($name =~ /\.sfd$/)
         {
-            next if ($name =~ /\.in$/);
-            if ($name =~ /^wine\// && !$exported_wine_headers{$name})
-            {
-                if ($private_idl_headers{$name}) { push @{${$make}{"=PRIVATE_IDL_H_SRCS"}}, $name; }
-                next;
-            }
-            if ($name =~ /stdole2\.idl$/) { push @{${$make}{"=IDL_TLB_SRCS"}}, $name; }
-            elsif ($private_idl_headers{$name}) { push @{${$make}{"=SRCDIR_INCLUDES"}}, $name; }
-            elsif ($name =~ /\.h$/) { push @{${$make}{"=SRCDIR_INCLUDES"}}, $name; }
-            elsif ($name =~ /\.x$/) { push @{${$make}{"=XTEMPLATE_SRCS"}}, $name; }
-            elsif ($name =~ /\.rh$/) { push @{${$make}{"=SRCDIR_INCLUDES"}}, $name; }
-            elsif ($name =~ /\.inl$/) { push @{${$make}{"=SRCDIR_INCLUDES"}}, $name; }
-            elsif ($name =~ /\.idl$/) { push @{${$make}{"=PUBLIC_IDL_H_SRCS"}}, $name; }
-            else { die "unknown file $name in include dir"; }
+            ${${$make}{"=flags"}}{"clean"} = 1 if defined $flags{"font"};
+            ${${$make}{"=flags"}}{"install-lib"} = 1 if defined $flags{"install"};
+            push @{${$make}{"=FONT_SRCS"}}, $name;
         }
-        else
+        elsif ($name =~ /\.c$/)
         {
-            if ($name =~ /\.m$/) { push @{${$make}{"=OBJC_SRCS"}}, $name; }
-            elsif ($name =~ /\.l$/) { push @{${$make}{"=LEX_SRCS"}}, $name; }
-            elsif ($name =~ /\.y$/) { push @{${$make}{"=BISON_SRCS"}}, $name; }
-            elsif ($name =~ /\.svg$/) { push @{${$make}{"=SVG_SRCS"}}, $name; }
-            elsif ($name =~ /\.sfd$/) { push @{${$make}{"=FONT_SRCS"}}, $name; }
-            elsif ($name =~ /\.c$/)
-            {
-                my %flags = get_makedep_flags( $file );
-                if (defined $flags{"implib"})
-                {
-                    push @{${$make}{"=IMPLIB_SRCS"}}, $name;
-                    ${${$make}{"=flags"}}{"staticimplib"} = 1;
-                }
-                push @{${$make}{"=C_SRCS"}}, $name;
-            }
-            elsif ($name =~ /\.rc$/)
-            {
-                my %flags = get_makedep_flags( $file );
-                ${${$make}{"=flags"}}{"po"} = 1 if defined $flags{"po"};
-                push @{${$make}{"=RC_SRCS"}}, $name;
-            }
-            elsif ($name =~ /\.mc$/)
-            {
-                push @{${$make}{"=MC_SRCS"}}, $name;
-                ${${$make}{"=flags"}}{"mc"} = 1;
-            }
-            elsif ($name =~ /\.idl$/)
-            {
-                push @{${$make}{"=IDL_SRCS"}}, $name;
-                ${${$make}{"=flags"}}{"clean"} = 1;
-            }
-            elsif ($name =~ /\.man\.in$/)
-            {
-                push @{${$make}{"=MANPAGES"}}, $name;
-                ${${$make}{"=flags"}}{"manpage"} = 1;
-            }
-            elsif ($name =~ /\.in$/)
-            {
-                push @{${$make}{"=IN_SRCS"}}, $name;
-            }
+            ${${$make}{"=flags"}}{"staticimplib"} = 1 if defined $flags{"implib"};
+            push @{${$make}{"=C_SRCS"}}, $name;
+        }
+        elsif ($name =~ /\.h$/)
+        {
+            next if $dir ne "include";
+            push @{${$make}{"=HEADER_SRCS"}}, $name;
+            ${${$make}{"=flags"}}{"install-dev"} = 1;
+        }
+        elsif ($name =~ /\.rc$/)
+        {
+            ${${$make}{"=flags"}}{"po"} = 1 if defined $flags{"po"};
+            push @{${$make}{"=RC_SRCS"}}, $name;
+        }
+        elsif ($name =~ /\.mc$/)
+        {
+            push @{${$make}{"=MC_SRCS"}}, $name;
+            ${${$make}{"=flags"}}{"mc"} = 1;
+        }
+        elsif ($name =~ /\.idl$/)
+        {
+            die "no makedep flags specified in $file" unless %flags || $dir eq "include";
+            push @{${$make}{"=IDL_SRCS"}}, $name;
+            ${${$make}{"=flags"}}{"clean"} = 1;
+        }
+        elsif ($name =~ /\.man\.in$/)
+        {
+            push @{${$make}{"=MANPAGES"}}, $name;
+            ${${$make}{"=flags"}}{($file =~ /^programs\//) ? "manpage" : "clean"} = 1;
+        }
+        elsif ($name =~ /\.in$/)
+        {
+            push @{${$make}{"=IN_SRCS"}}, $name;
         }
     }
-
-    # add extra variables to include source list
-    my $make = $makefiles{"include/Makefile"};
-    unshift @{${$make}{"=SRCDIR_INCLUDES"}}, "\$(XTEMPLATE_SRCS)";
-    unshift @{${$make}{"=SRCDIR_INCLUDES"}}, "\$(PUBLIC_IDL_H_SRCS)";
-    unshift @{${$make}{"=SRCDIR_INCLUDES"}}, "\$(IDL_TLB_SRCS)";
-    unshift @{${$make}{"=IDL_SRCS"}}, "\$(IDL_H_SRCS) \$(IDL_TLB_SRCS)";
 
     # preserve shared source files from the parent makefile
     foreach my $file (@makefiles)
@@ -549,15 +517,10 @@ sub update_makefiles(@)
         replace_makefile_variable( $file, "OBJC_SRCS" );
         replace_makefile_variable( $file, "RC_SRCS" );
         replace_makefile_variable( $file, "IDL_SRCS" );
+        replace_makefile_variable( $file, "HEADER_SRCS" );
         replace_makefile_variable( $file, "XTEMPLATE_SRCS" );
         replace_makefile_variable( $file, "IN_SRCS" );
-        replace_makefile_variable( $file, "IMPLIB_SRCS" );
         replace_makefile_variable( $file, "MANPAGES" );
-        next unless $file eq "include/Makefile";
-        replace_makefile_variable( $file, "PRIVATE_IDL_H_SRCS" );
-        replace_makefile_variable( $file, "PUBLIC_IDL_H_SRCS" );
-        replace_makefile_variable( $file, "IDL_TLB_SRCS" );
-        replace_makefile_variable( $file, "SRCDIR_INCLUDES" );
     }
 
     push @lines, "dnl End of auto-generated output commands\n";

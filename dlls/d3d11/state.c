@@ -313,6 +313,15 @@ HRESULT d3d_blend_state_init(struct d3d_blend_state *state, struct d3d_device *d
     return S_OK;
 }
 
+struct d3d_blend_state *unsafe_impl_from_ID3D11BlendState(ID3D11BlendState *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d3d11_blend_state_vtbl);
+
+    return impl_from_ID3D11BlendState(iface);
+}
+
 struct d3d_blend_state *unsafe_impl_from_ID3D10BlendState(ID3D10BlendState *iface)
 {
     if (!iface)
@@ -863,6 +872,15 @@ HRESULT d3d_rasterizer_state_init(struct d3d_rasterizer_state *state, struct d3d
     return S_OK;
 }
 
+struct d3d_rasterizer_state *unsafe_impl_from_ID3D11RasterizerState(ID3D11RasterizerState *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d3d11_rasterizer_state_vtbl);
+
+    return impl_from_ID3D11RasterizerState(iface);
+}
+
 struct d3d_rasterizer_state *unsafe_impl_from_ID3D10RasterizerState(ID3D10RasterizerState *iface)
 {
     if (!iface)
@@ -1201,6 +1219,15 @@ HRESULT d3d_sampler_state_init(struct d3d_sampler_state *state, struct d3d_devic
     ID3D11Device_AddRef(state->device);
 
     return S_OK;
+}
+
+struct d3d_sampler_state *unsafe_impl_from_ID3D11SamplerState(ID3D11SamplerState *iface)
+{
+    if (!iface)
+        return NULL;
+    assert(iface->lpVtbl == &d3d11_sampler_state_vtbl);
+
+    return impl_from_ID3D11SamplerState(iface);
 }
 
 struct d3d_sampler_state *unsafe_impl_from_ID3D10SamplerState(ID3D10SamplerState *iface)

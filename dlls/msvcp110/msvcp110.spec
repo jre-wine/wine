@@ -1641,8 +1641,8 @@
 @ cdecl -arch=win64 ?_New_Locimp@_Locimp@locale@std@@CAPEAV123@AEBV123@@Z(ptr) locale__Locimp__New_Locimp
 @ cdecl -arch=win32 ?_New_Locimp@_Locimp@locale@std@@CAPAV123@_N@Z(long) locale__Locimp__New_Locimp_transparent
 @ cdecl -arch=win64 ?_New_Locimp@_Locimp@locale@std@@CAPEAV123@_N@Z(long) locale__Locimp__New_Locimp_transparent
-@ stub -arch=win32 ?_Open_dir@sys@tr2@std@@YAPAXPADPBDAAHAAW4file_type@123@@Z
-@ stub -arch=win64 ?_Open_dir@sys@tr2@std@@YAPEAXPEADPEBDAEAHAEAW4file_type@123@@Z
+@ cdecl -arch=win32 ?_Open_dir@sys@tr2@std@@YAPAXPADPBDAAHAAW4file_type@123@@Z(ptr str long long) tr2_sys__Open_dir
+@ cdecl -arch=win64 ?_Open_dir@sys@tr2@std@@YAPEAXAEAY0BAE@DPEBDAEAHAEAW4file_type@123@@Z(ptr str long long) tr2_sys__Open_dir
 @ stub -arch=win32 ?_Open_dir@sys@tr2@std@@YAPAXPA_WPB_WAAHAAW4file_type@123@@Z
 @ stub -arch=win64 ?_Open_dir@sys@tr2@std@@YAPEAXPEA_WPEB_WAEAHAEAW4file_type@123@@Z
 @ cdecl -arch=arm ?_Orphan_all@_Container_base0@std@@QAAXXZ(ptr) Container_base0_Orphan_all
@@ -3729,15 +3729,15 @@
 @ cdecl -arch=win64 ?xsputn@?$basic_streambuf@_WU?$char_traits@_W@std@@@std@@MEAA_JPEB_W_J@Z(ptr ptr long) basic_streambuf_wchar_xsputn
 @ cdecl _Call_once(ptr ptr)
 @ cdecl _Call_onceEx(ptr ptr ptr)
-@ stub _Cnd_broadcast
-@ stub _Cnd_destroy
+@ cdecl _Cnd_broadcast(ptr)
+@ cdecl _Cnd_destroy(ptr)
 @ stub _Cnd_do_broadcast_at_thread_exit
-@ stub _Cnd_init
+@ cdecl  _Cnd_init(ptr)
 @ stub _Cnd_register_at_thread_exit
-@ stub _Cnd_signal
-@ stub _Cnd_timedwait
+@ cdecl _Cnd_signal(ptr)
+@ cdecl _Cnd_timedwait(ptr ptr ptr)
 @ stub _Cnd_unregister_at_thread_exit
-@ stub _Cnd_wait
+@ cdecl _Cnd_wait(ptr ptr)
 @ stub _Cosh
 @ extern _Denorm
 @ stub _Dint
@@ -3856,16 +3856,16 @@
 @ cdecl _Strcoll(ptr ptr ptr ptr ptr)
 @ stub _Strxfrm
 @ stub _Thrd_abort
-@ stub _Thrd_create
-@ stub _Thrd_current
+@ cdecl _Thrd_create(ptr ptr ptr)
+@ cdecl _Thrd_current()
 @ stub _Thrd_detach
 @ cdecl _Thrd_equal(ptr ptr)
 @ stub _Thrd_exit
-@ stub _Thrd_join
+@ cdecl _Thrd_join(ptr long)
 @ cdecl _Thrd_lt(ptr ptr)
-@ stub _Thrd_sleep
+@ cdecl _Thrd_sleep(ptr)
 @ stub _Thrd_start
-@ stub _Thrd_yield
+@ cdecl _Thrd_yield()
 @ cdecl _Tolower(long ptr)
 @ cdecl _Toupper(long ptr)
 @ cdecl _Towlower(long ptr)

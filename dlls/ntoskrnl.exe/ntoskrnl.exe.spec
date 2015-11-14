@@ -111,7 +111,7 @@
 @ stub DbgPrompt
 @ stub DbgQueryDebugFilterState
 @ stub DbgSetDebugFilterState
-@ stub ExAcquireResourceExclusiveLite
+@ stdcall ExAcquireResourceExclusiveLite(ptr long)
 @ stub ExAcquireResourceSharedLite
 @ stub ExAcquireSharedStarveExclusive
 @ stub ExAcquireSharedWaitForExclusive
@@ -123,9 +123,9 @@
 @ stub ExAllocatePoolWithTagPriority
 @ stub ExConvertExclusiveToSharedLite
 @ stdcall ExCreateCallback(ptr ptr long long)
-@ stub ExDeleteNPagedLookasideList
-@ stub ExDeletePagedLookasideList
-@ stub ExDeleteResourceLite
+@ stdcall ExDeleteNPagedLookasideList(ptr)
+@ stdcall ExDeletePagedLookasideList(ptr)
+@ stdcall ExDeleteResourceLite(ptr)
 @ stub ExDesktopObjectType
 @ stub ExDisableResourceBoostLite
 @ stub ExEnumHandleTable
@@ -168,7 +168,7 @@
 @ stub ExRaiseStatus
 @ stub ExRegisterCallback
 @ stub ExReinitializeResourceLite
-@ stub ExReleaseResourceForThreadLite
+@ stdcall ExReleaseResourceForThreadLite(ptr long)
 @ stub ExSemaphoreObjectType
 @ stub ExSetResourceOwnerPointer
 @ stub ExSetTimerResolution
@@ -835,8 +835,8 @@
 @ stub PoShutdownBugCheck
 @ stub PoStartNextPowerIrp
 @ stub PoUnregisterSystemState
-@ stub ProbeForRead
-@ stub ProbeForWrite
+@ stdcall ProbeForRead(ptr long long)
+@ stdcall ProbeForWrite(ptr long long)
 @ stub PsAssignImpersonationToken
 @ stub PsChargePoolQuota
 @ stub PsChargeProcessNonPagedPoolQuota

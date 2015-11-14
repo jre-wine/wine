@@ -1431,6 +1431,24 @@ NTSTATUS WINAPI ExCreateCallback(PCALLBACK_OBJECT *obj, POBJECT_ATTRIBUTES attr,
 
 
 /***********************************************************************
+ *           ExDeleteNPagedLookasideList   (NTOSKRNL.EXE.@)
+ */
+void WINAPI ExDeleteNPagedLookasideList( PNPAGED_LOOKASIDE_LIST lookaside )
+{
+    FIXME("(%p) stub\n", lookaside);
+}
+
+
+/***********************************************************************
+ *           ExDeletePagedLookasideList  (NTOSKRNL.EXE.@)
+ */
+void WINAPI ExDeletePagedLookasideList( PPAGED_LOOKASIDE_LIST lookaside )
+{
+    FIXME("(%p) stub\n", lookaside);
+}
+
+
+/***********************************************************************
  *           ExFreePool   (NTOSKRNL.EXE.@)
  */
 void WINAPI ExFreePool( void *ptr )
@@ -2280,6 +2298,24 @@ NTSTATUS WINAPI IoCsqInitialize(PIO_CSQ csq, PIO_CSQ_INSERT_IRP insert_irp, PIO_
     return STATUS_SUCCESS;
 }
 
+/***********************************************************************
+ *           ExAcquireResourceExclusiveLite  (NTOSKRNL.EXE.@)
+ */
+BOOLEAN WINAPI ExAcquireResourceExclusiveLite( PERESOURCE resource, BOOLEAN wait )
+{
+    FIXME( ":%p %u stub\n", resource, wait );
+    return TRUE;
+}
+
+/***********************************************************************
+ *           ExDeleteResourceLite  (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI ExDeleteResourceLite(PERESOURCE resource)
+{
+    FIXME("(%p): stub\n", resource);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 /*****************************************************
  *           ExInterlockedRemoveHeadList  (NTOSKRNL.EXE.@)
  */
@@ -2304,6 +2340,14 @@ PLIST_ENTRY WINAPI ExfInterlockedRemoveHeadList(PLIST_ENTRY head, PKSPIN_LOCK lo
 }
 
 /***********************************************************************
+ *           ExReleaseResourceForThreadLite   (NTOSKRNL.EXE.@)
+ */
+void WINAPI ExReleaseResourceForThreadLite( PERESOURCE resource, ERESOURCE_THREAD tid )
+{
+    FIXME( "stub: %p %lu\n", resource, tid );
+}
+
+/***********************************************************************
  *           KeEnterCriticalRegion  (NTOSKRNL.EXE.@)
  */
 void WINAPI KeEnterCriticalRegion(void)
@@ -2317,4 +2361,20 @@ void WINAPI KeEnterCriticalRegion(void)
 void WINAPI KeLeaveCriticalRegion(void)
 {
     FIXME(": stub\n");
+}
+
+/***********************************************************************
+ *           ProbeForRead   (NTOSKRNL.EXE.@)
+ */
+void WINAPI ProbeForRead(void *address, SIZE_T length, ULONG alignment)
+{
+    FIXME("(%p %lu %u) stub\n", address, length, alignment);
+}
+
+/***********************************************************************
+ *           ProbeForWrite   (NTOSKRNL.EXE.@)
+ */
+void WINAPI ProbeForWrite(void *address, SIZE_T length, ULONG alignment)
+{
+    FIXME("(%p %lu %u) stub\n", address, length, alignment);
 }

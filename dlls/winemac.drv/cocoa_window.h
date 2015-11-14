@@ -43,6 +43,9 @@
     void* surface;
     pthread_mutex_t* surface_mutex;
 
+    CGDirectDisplayID _lastDisplayID;
+    NSTimeInterval _lastDisplayTime;
+
     NSBezierPath* shape;
     NSData* shapeData;
     BOOL shapeChangedSinceLastDraw;
@@ -54,7 +57,6 @@
 
     NSUInteger lastModifierFlags;
 
-    NSTimer* liveResizeDisplayTimer;
     NSRect frameAtResizeStart;
     BOOL resizingFromLeft, resizingFromTop;
 

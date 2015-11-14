@@ -2130,7 +2130,7 @@ HRESULT __cdecl wined3d_device_clear_rendertarget_view(struct wined3d_device *de
         struct wined3d_rendertarget_view *view, const RECT *rect, const struct wined3d_color *color);
 void __cdecl wined3d_device_copy_resource(struct wined3d_device *device,
         struct wined3d_resource *dst_resource, struct wined3d_resource *src_resource);
-void __cdecl wined3d_device_copy_sub_resource_region(struct wined3d_device *device,
+HRESULT __cdecl wined3d_device_copy_sub_resource_region(struct wined3d_device *device,
         struct wined3d_resource *dst_resource, unsigned int dst_sub_resource_idx, unsigned int dst_x,
         unsigned int dst_y, unsigned int dst_z, struct wined3d_resource *src_resource,
         unsigned int src_sub_resource_idx, const struct wined3d_box *src_box);
@@ -2422,8 +2422,11 @@ void __cdecl wined3d_resource_get_desc(const struct wined3d_resource *resource,
         struct wined3d_resource_desc *desc);
 void * __cdecl wined3d_resource_get_parent(const struct wined3d_resource *resource);
 DWORD __cdecl wined3d_resource_get_priority(const struct wined3d_resource *resource);
+HRESULT __cdecl wined3d_resource_map(struct wined3d_resource *resource, unsigned int sub_resource_idx,
+        struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags);
 void __cdecl wined3d_resource_set_parent(struct wined3d_resource *resource, void *parent);
 DWORD __cdecl wined3d_resource_set_priority(struct wined3d_resource *resource, DWORD priority);
+HRESULT __cdecl wined3d_resource_unmap(struct wined3d_resource *resource, unsigned int sub_resource_idx);
 
 HRESULT __cdecl wined3d_rendertarget_view_create(const struct wined3d_rendertarget_view_desc *desc,
         struct wined3d_resource *resource, void *parent, const struct wined3d_parent_ops *parent_ops,
@@ -2551,10 +2554,7 @@ HRESULT __cdecl wined3d_texture_set_autogen_filter_type(struct wined3d_texture *
 HRESULT __cdecl wined3d_texture_set_color_key(struct wined3d_texture *texture,
         DWORD flags, const struct wined3d_color_key *color_key);
 DWORD __cdecl wined3d_texture_set_lod(struct wined3d_texture *texture, DWORD lod);
-HRESULT __cdecl wined3d_texture_map(struct wined3d_texture *texture, unsigned int sub_resource_idx,
-        struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags);
 HRESULT __cdecl wined3d_texture_release_dc(struct wined3d_texture *texture, unsigned int sub_resource_idx, HDC dc);
-HRESULT __cdecl wined3d_texture_unmap(struct wined3d_texture *texture, unsigned int sub_resource_idx);
 HRESULT __cdecl wined3d_texture_update_desc(struct wined3d_texture *texture,
         UINT width, UINT height, enum wined3d_format_id format_id,
         enum wined3d_multisample_type multisample_type, UINT multisample_quality,

@@ -27,7 +27,7 @@
 #include "winecon_private.h"
 #include "winnls.h"
 #include "winuser.h"
-
+#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wineconsole);
@@ -421,9 +421,19 @@ void     WINECON_SetConfig(struct inner_data* data, const struct config_data* cf
     }
     data->curcfg.menu_mask = cfg->menu_mask;
     data->curcfg.quick_edit = cfg->quick_edit;
-    if (1 /* FIXME: font info has changed */)
+    if (strcmpiW(data->curcfg.face_name, cfg->face_name) || data->curcfg.cell_width != cfg->cell_width ||
+        data->curcfg.cell_height != cfg->cell_height || data->curcfg.font_weight != cfg->font_weight)
     {
         data->fnSetFont(data, cfg->face_name, cfg->cell_height, cfg->font_weight);
+        SERVER_START_REQ(set_console_output_info)
+        {
+            req->handle = wine_server_obj_handle( data->hConOut );
+            req->mask = SET_CONSOLE_OUTPUT_INFO_FONT;
+            req->font_width = cfg->cell_width;
+            req->font_height = cfg->cell_height;
+            wine_server_call( req );
+        }
+        SERVER_END_REQ;
     }
     if (data->curcfg.def_attr != cfg->def_attr)
     {

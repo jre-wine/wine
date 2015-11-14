@@ -193,6 +193,7 @@ GpStatus WINGDIPAPI GdipRecordMetafile(HDC hdc, EmfType type, GDIPCONST GpRectF 
                                        MetafileFrameUnit frameUnit, GDIPCONST WCHAR *desc, GpMetafile **metafile)
 {
     HDC record_dc;
+    REAL dpix, dpiy;
     REAL framerect_factor_x, framerect_factor_y;
     RECT rc;
     GpStatus stat;
@@ -208,11 +209,14 @@ GpStatus WINGDIPAPI GdipRecordMetafile(HDC hdc, EmfType type, GDIPCONST GpRectF 
         return NotImplemented;
     }
 
+    dpix = (REAL)GetDeviceCaps(hdc, HORZRES) / GetDeviceCaps(hdc, HORZSIZE) * 25.4;
+    dpiy = (REAL)GetDeviceCaps(hdc, VERTRES) / GetDeviceCaps(hdc, VERTSIZE) * 25.4;
+
     switch (frameUnit)
     {
     case MetafileFrameUnitPixel:
-        framerect_factor_x = 2540.0 / GetDeviceCaps(hdc, LOGPIXELSX);
-        framerect_factor_y = 2540.0 / GetDeviceCaps(hdc, LOGPIXELSY);
+        framerect_factor_x = 2540.0 / dpix;
+        framerect_factor_y = 2540.0 / dpiy;
         break;
     case MetafileFrameUnitPoint:
         framerect_factor_x = framerect_factor_y = 2540.0 / 72.0;
@@ -254,8 +258,8 @@ GpStatus WINGDIPAPI GdipRecordMetafile(HDC hdc, EmfType type, GDIPCONST GpRectF 
     (*metafile)->image.picture = NULL;
     (*metafile)->image.flags   = ImageFlagsNone;
     (*metafile)->image.palette = NULL;
-    (*metafile)->image.xres = 72.0;
-    (*metafile)->image.yres = 72.0;
+    (*metafile)->image.xres = dpix;
+    (*metafile)->image.yres = dpiy;
     (*metafile)->bounds = *frameRect;
     (*metafile)->unit = frameUnit;
     (*metafile)->metafile_type = type;
@@ -883,44 +887,6 @@ GpStatus WINGDIPAPI GdipEnumerateMetafileDestPointI(GpGraphics *graphics,
     return GdipEnumerateMetafileDestPoint(graphics, metafile, &ptf, callback, cb_data, attrs);
 }
 
-static int CALLBACK get_metafile_type_proc(HDC hDC, HANDLETABLE *lpHTable, const ENHMETARECORD *lpEMFR,
-    int nObj, LPARAM lpData)
-{
-    MetafileType *result = (MetafileType*)lpData;
-
-    if (lpEMFR->iType == EMR_GDICOMMENT)
-    {
-        const EMRGDICOMMENT *comment = (const EMRGDICOMMENT*)lpEMFR;
-
-        if (comment->cbData >= 4 && memcmp(comment->Data, "EMF+", 4) == 0)
-        {
-            const EmfPlusRecordHeader *header = (const EmfPlusRecordHeader*)&comment->Data[4];
-
-            if (4 + sizeof(EmfPlusRecordHeader) <= comment->cbData &&
-                header->Type == EmfPlusRecordTypeHeader)
-            {
-                if ((header->Flags & 1) == 1)
-                    *result = MetafileTypeEmfPlusDual;
-                else
-                    *result = MetafileTypeEmfPlusOnly;
-            }
-        }
-        else
-            *result = MetafileTypeEmf;
-    }
-    else
-        *result = MetafileTypeEmf;
-
-    return FALSE;
-}
-
-static MetafileType METAFILE_GetEmfType(HENHMETAFILE hemf)
-{
-    MetafileType result = MetafileTypeInvalid;
-    EnumEnhMetaFile(NULL, hemf, get_metafile_type_proc, &result, NULL);
-    return result;
-}
-
 GpStatus WINGDIPAPI GdipGetMetafileHeaderFromMetafile(GpMetafile * metafile,
     MetafileHeader * header)
 {
@@ -939,18 +905,87 @@ GpStatus WINGDIPAPI GdipGetMetafileHeaderFromMetafile(GpMetafile * metafile,
     return Ok;
 }
 
-GpStatus WINGDIPAPI GdipGetMetafileHeaderFromEmf(HENHMETAFILE hEmf,
+static int CALLBACK get_emfplus_header_proc(HDC hDC, HANDLETABLE *lpHTable, const ENHMETARECORD *lpEMFR,
+    int nObj, LPARAM lpData)
+{
+    EmfPlusHeader *dst_header = (EmfPlusHeader*)lpData;
+
+    if (lpEMFR->iType == EMR_GDICOMMENT)
+    {
+        const EMRGDICOMMENT *comment = (const EMRGDICOMMENT*)lpEMFR;
+
+        if (comment->cbData >= 4 && memcmp(comment->Data, "EMF+", 4) == 0)
+        {
+            const EmfPlusRecordHeader *header = (const EmfPlusRecordHeader*)&comment->Data[4];
+
+            if (4 + sizeof(EmfPlusHeader) <= comment->cbData &&
+                header->Type == EmfPlusRecordTypeHeader)
+            {
+                memcpy(dst_header, header, sizeof(*dst_header));
+            }
+        }
+    }
+    else if (lpEMFR->iType == EMR_HEADER)
+        return TRUE;
+
+    return FALSE;
+}
+
+GpStatus WINGDIPAPI GdipGetMetafileHeaderFromEmf(HENHMETAFILE hemf,
     MetafileHeader *header)
 {
-    static int calls;
+    ENHMETAHEADER3 emfheader;
+    EmfPlusHeader emfplusheader;
+    MetafileType metafile_type;
 
-    if(!hEmf || !header)
+    TRACE("(%p,%p)\n", hemf, header);
+
+    if(!hemf || !header)
         return InvalidParameter;
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (GetEnhMetaFileHeader(hemf, sizeof(emfheader), (ENHMETAHEADER*)&emfheader) == 0)
+        return GenericError;
 
-    memset(header, 0, sizeof(MetafileHeader));
+    emfplusheader.Header.Type = 0;
+
+    EnumEnhMetaFile(NULL, hemf, get_emfplus_header_proc, &emfplusheader, NULL);
+
+    if (emfplusheader.Header.Type == EmfPlusRecordTypeHeader)
+    {
+        if ((emfplusheader.Header.Flags & 1) == 1)
+            metafile_type = MetafileTypeEmfPlusDual;
+        else
+            metafile_type = MetafileTypeEmfPlusOnly;
+    }
+    else
+        metafile_type = MetafileTypeEmf;
+
+    header->Type = metafile_type;
+    header->Size = emfheader.nBytes;
+    header->DpiX = (REAL)emfheader.szlDevice.cx * 25.4 / emfheader.szlMillimeters.cx;
+    header->DpiY = (REAL)emfheader.szlDevice.cy * 25.4 / emfheader.szlMillimeters.cy;
+    header->X = gdip_round((REAL)emfheader.rclFrame.left / 2540.0 * header->DpiX);
+    header->Y = gdip_round((REAL)emfheader.rclFrame.top / 2540.0 * header->DpiY);
+    header->Width = gdip_round((REAL)(emfheader.rclFrame.right - emfheader.rclFrame.left) / 2540.0 * header->DpiX);
+    header->Height = gdip_round((REAL)(emfheader.rclFrame.bottom - emfheader.rclFrame.top) / 2540.0 * header->DpiY);
+    header->EmfHeader = emfheader;
+
+    if (metafile_type == MetafileTypeEmfPlusDual || metafile_type == MetafileTypeEmfPlusOnly)
+    {
+        header->Version = emfplusheader.Version;
+        header->EmfPlusFlags = emfplusheader.EmfPlusFlags;
+        header->EmfPlusHeaderSize = emfplusheader.Header.Size;
+        header->LogicalDpiX = emfplusheader.LogicalDpiX;
+        header->LogicalDpiY = emfplusheader.LogicalDpiY;
+    }
+    else
+    {
+        header->Version = emfheader.nVersion;
+        header->EmfPlusFlags = 0;
+        header->EmfPlusHeaderSize = 0;
+        header->LogicalDpiX = 0;
+        header->LogicalDpiY = 0;
+    }
 
     return Ok;
 }
@@ -994,21 +1029,17 @@ GpStatus WINGDIPAPI GdipGetMetafileHeaderFromStream(IStream *stream,
 GpStatus WINGDIPAPI GdipCreateMetafileFromEmf(HENHMETAFILE hemf, BOOL delete,
     GpMetafile **metafile)
 {
-    ENHMETAHEADER header;
-    MetafileType metafile_type;
+    GpStatus stat;
+    MetafileHeader header;
 
     TRACE("(%p,%i,%p)\n", hemf, delete, metafile);
 
     if(!hemf || !metafile)
         return InvalidParameter;
 
-    if (GetEnhMetaFileHeader(hemf, sizeof(header), &header) == 0)
-        return GenericError;
-
-    metafile_type = METAFILE_GetEmfType(hemf);
-
-    if (metafile_type == MetafileTypeInvalid)
-        return GenericError;
+    stat = GdipGetMetafileHeaderFromEmf(hemf, &header);
+    if (stat != Ok)
+        return stat;
 
     *metafile = heap_alloc_zero(sizeof(GpMetafile));
     if (!*metafile)
@@ -1017,14 +1048,16 @@ GpStatus WINGDIPAPI GdipCreateMetafileFromEmf(HENHMETAFILE hemf, BOOL delete,
     (*metafile)->image.type = ImageTypeMetafile;
     (*metafile)->image.format = ImageFormatEMF;
     (*metafile)->image.frame_count = 1;
-    (*metafile)->image.xres = (REAL)header.szlDevice.cx;
-    (*metafile)->image.yres = (REAL)header.szlDevice.cy;
-    (*metafile)->bounds.X = (REAL)header.rclBounds.left;
-    (*metafile)->bounds.Y = (REAL)header.rclBounds.top;
-    (*metafile)->bounds.Width = (REAL)(header.rclBounds.right - header.rclBounds.left);
-    (*metafile)->bounds.Height = (REAL)(header.rclBounds.bottom - header.rclBounds.top);
+    (*metafile)->image.xres = header.DpiX;
+    (*metafile)->image.yres = header.DpiY;
+    (*metafile)->bounds.X = (REAL)header.EmfHeader.rclFrame.left / 2540.0 * header.DpiX;
+    (*metafile)->bounds.Y = (REAL)header.EmfHeader.rclFrame.top / 2540.0 * header.DpiY;
+    (*metafile)->bounds.Width = (REAL)(header.EmfHeader.rclFrame.right - header.EmfHeader.rclFrame.left)
+                                / 2540.0 * header.DpiX;
+    (*metafile)->bounds.Height = (REAL)(header.EmfHeader.rclFrame.bottom - header.EmfHeader.rclFrame.top)
+                                 / 2540.0 * header.DpiY;
     (*metafile)->unit = UnitPixel;
-    (*metafile)->metafile_type = metafile_type;
+    (*metafile)->metafile_type = header.Type;
     (*metafile)->hemf = hemf;
     (*metafile)->preserve_hemf = !delete;
 
@@ -1043,7 +1076,7 @@ GpStatus WINGDIPAPI GdipCreateMetafileFromWmf(HMETAFILE hwmf, BOOL delete,
 
     TRACE("(%p, %d, %p, %p)\n", hwmf, delete, placeable, metafile);
 
-    if(!hwmf || !metafile || !placeable)
+    if(!hwmf || !metafile)
         return InvalidParameter;
 
     *metafile = NULL;
@@ -1061,15 +1094,20 @@ GpStatus WINGDIPAPI GdipCreateMetafileFromWmf(HMETAFILE hwmf, BOOL delete,
 
     if (retval == Ok)
     {
-        (*metafile)->image.xres = (REAL)placeable->Inch;
-        (*metafile)->image.yres = (REAL)placeable->Inch;
-        (*metafile)->bounds.X = ((REAL)placeable->BoundingBox.Left) / ((REAL)placeable->Inch);
-        (*metafile)->bounds.Y = ((REAL)placeable->BoundingBox.Top) / ((REAL)placeable->Inch);
-        (*metafile)->bounds.Width = (REAL)(placeable->BoundingBox.Right -
-                                           placeable->BoundingBox.Left);
-        (*metafile)->bounds.Height = (REAL)(placeable->BoundingBox.Bottom -
-                                            placeable->BoundingBox.Top);
-        (*metafile)->metafile_type = MetafileTypeWmfPlaceable;
+        if (placeable)
+        {
+            (*metafile)->image.xres = (REAL)placeable->Inch;
+            (*metafile)->image.yres = (REAL)placeable->Inch;
+            (*metafile)->bounds.X = ((REAL)placeable->BoundingBox.Left) / ((REAL)placeable->Inch);
+            (*metafile)->bounds.Y = ((REAL)placeable->BoundingBox.Top) / ((REAL)placeable->Inch);
+            (*metafile)->bounds.Width = (REAL)(placeable->BoundingBox.Right -
+                                               placeable->BoundingBox.Left);
+            (*metafile)->bounds.Height = (REAL)(placeable->BoundingBox.Bottom -
+                                                placeable->BoundingBox.Top);
+            (*metafile)->metafile_type = MetafileTypeWmfPlaceable;
+        }
+        else
+            (*metafile)->metafile_type = MetafileTypeWmf;
         (*metafile)->image.format = ImageFormatWMF;
 
         if (delete) DeleteMetaFile(hwmf);
@@ -1108,14 +1146,9 @@ GpStatus WINGDIPAPI GdipCreateMetafileFromStream(IStream *stream,
 GpStatus WINGDIPAPI GdipSetMetafileDownLevelRasterizationLimit(GpMetafile *metafile,
     UINT limitDpi)
 {
-    static int calls;
-
     TRACE("(%p,%u)\n", metafile, limitDpi);
 
-    if(!(calls++))
-        FIXME("not implemented\n");
-
-    return NotImplemented;
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipConvertToEmfPlus(const GpGraphics* ref,

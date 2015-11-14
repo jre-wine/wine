@@ -39,7 +39,7 @@
 @ stub __std_exception_copy
 @ stub __std_exception_destroy
 @ stub __std_terminate
-@ stub __std_type_info_compare
+@ cdecl __std_type_info_compare(ptr ptr) ucrtbase.__std_type_info_compare
 @ stub __std_type_info_destroy_list
 @ stub __std_type_info_hash
 @ stub __std_type_info_name
@@ -51,7 +51,7 @@
 @ stub __uncaught_exceptions
 @ stub __vcrt_GetModuleFileNameW
 @ stub __vcrt_GetModuleHandleW
-@ stub __vcrt_InitializeCriticalSectionEx
+@ cdecl __vcrt_InitializeCriticalSectionEx(ptr long long)
 @ stub __vcrt_LoadLibraryExW
 @ cdecl -arch=i386 -norelay _chkesp() ucrtbase._chkesp
 @ cdecl -arch=i386 _except_handler2(ptr ptr ptr ptr) ucrtbase._except_handler2

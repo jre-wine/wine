@@ -208,10 +208,10 @@ void device_switch_onscreen_ds(struct wined3d_device *device,
         surface_modify_ds_location(device->onscreen_depth_stencil, WINED3D_LOCATION_TEXTURE_RGB,
                 device->onscreen_depth_stencil->ds_current_size.cx,
                 device->onscreen_depth_stencil->ds_current_size.cy);
-        wined3d_surface_decref(device->onscreen_depth_stencil);
+        wined3d_texture_decref(device->onscreen_depth_stencil->container);
     }
     device->onscreen_depth_stencil = depth_stencil;
-    wined3d_surface_incref(device->onscreen_depth_stencil);
+    wined3d_texture_incref(device->onscreen_depth_stencil->container);
 }
 
 static BOOL is_full_clear(const struct wined3d_surface *target, const RECT *draw_rect, const RECT *clear_rect)
@@ -1102,7 +1102,7 @@ HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
     {
         surface = device->onscreen_depth_stencil;
         device->onscreen_depth_stencil = NULL;
-        wined3d_surface_decref(surface);
+        wined3d_texture_decref(surface->container);
     }
 
     if (device->fb.depth_stencil)
@@ -1234,7 +1234,8 @@ struct wined3d_buffer * CDECL wined3d_device_get_stream_output(struct wined3d_de
         return NULL;
     }
 
-    *offset = device->state.stream_output[idx].offset;
+    if (offset)
+        *offset = device->state.stream_output[idx].offset;
     return device->state.stream_output[idx].buffer;
 }
 
@@ -3867,7 +3868,7 @@ void CDECL wined3d_device_copy_resource(struct wined3d_device *device,
     }
 }
 
-void CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *device,
+HRESULT CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *device,
         struct wined3d_resource *dst_resource, unsigned int dst_sub_resource_idx, unsigned int dst_x,
         unsigned int dst_y, unsigned int dst_z, struct wined3d_resource *src_resource,
         unsigned int src_sub_resource_idx, const struct wined3d_box *src_box)
@@ -3886,7 +3887,7 @@ void CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *device
     if (src_resource == dst_resource && src_sub_resource_idx == dst_sub_resource_idx)
     {
         WARN("Source and destination are the same sub-resource.\n");
-        return;
+        return WINED3DERR_INVALIDCALL;
     }
 
     if (src_resource->type != dst_resource->type)
@@ -3894,7 +3895,7 @@ void CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *device
         WARN("Resource types (%s / %s) don't match.\n",
                 debug_d3dresourcetype(dst_resource->type),
                 debug_d3dresourcetype(src_resource->type));
-        return;
+        return WINED3DERR_INVALIDCALL;
     }
 
     if (src_resource->format->id != dst_resource->format->id)
@@ -3902,20 +3903,20 @@ void CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *device
         WARN("Resource formats (%s / %s) don't match.\n",
                 debug_d3dformat(dst_resource->format->id),
                 debug_d3dformat(src_resource->format->id));
-        return;
+        return WINED3DERR_INVALIDCALL;
     }
 
     if (dst_resource->type != WINED3D_RTYPE_TEXTURE)
     {
         FIXME("Not implemented for %s resources.\n", debug_d3dresourcetype(dst_resource->type));
-        return;
+        return WINED3DERR_INVALIDCALL;
     }
 
     dst_texture = wined3d_texture_from_resource(dst_resource);
     if (!(tmp = wined3d_texture_get_sub_resource(dst_texture, dst_sub_resource_idx)))
     {
         WARN("Invalid dst_sub_resource_idx %u.\n", dst_sub_resource_idx);
-        return;
+        return WINED3DERR_INVALIDCALL;
     }
     dst_surface = surface_from_resource(tmp);
 
@@ -3923,7 +3924,7 @@ void CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *device
     if (!(tmp = wined3d_texture_get_sub_resource(src_texture, src_sub_resource_idx)))
     {
         WARN("Invalid src_sub_resource_idx %u.\n", src_sub_resource_idx);
-        return;
+        return WINED3DERR_INVALIDCALL;
     }
     src_surface = surface_from_resource(tmp);
 
@@ -3939,6 +3940,8 @@ void CDECL wined3d_device_copy_sub_resource_region(struct wined3d_device *device
 
     if (FAILED(hr = wined3d_surface_blt(dst_surface, &dst_rect, src_surface, &src_rect, 0, NULL, WINED3D_TEXF_POINT)))
         ERR("Failed to blit, hr %#x.\n", hr);
+
+    return hr;
 }
 
 void CDECL wined3d_device_update_sub_resource(struct wined3d_device *device, struct wined3d_resource *resource,
@@ -4523,7 +4526,7 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
 
     if (device->onscreen_depth_stencil)
     {
-        wined3d_surface_decref(device->onscreen_depth_stencil);
+        wined3d_texture_decref(device->onscreen_depth_stencil->container);
         device->onscreen_depth_stencil = NULL;
     }
 

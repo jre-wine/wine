@@ -498,7 +498,7 @@ static void EDIT_BuildLineDefs_ML(EDITSTATE *es, INT istart, INT iend, INT delta
 	LINEDEF *current_line;
 	LINEDEF *previous_line;
 	LINEDEF *start_line;
-	INT line_index = 0, nstart_line = 0, nstart_index = 0;
+	INT line_index = 0, nstart_line, nstart_index;
 	INT line_count = es->line_count;
 	INT orig_net_length;
 	RECT rc;
@@ -1079,7 +1079,7 @@ static LRESULT EDIT_EM_PosFromChar(EDITSTATE *es, INT index, BOOL after_wrap)
 	INT x = 0;
 	INT y = 0;
 	INT w;
-	INT lw = 0;
+	INT lw;
 	LINEDEF *line_def;
 
 	index = min(index, len);
@@ -2577,7 +2577,7 @@ static void EDIT_EM_ReplaceSel(EDITSTATE *es, BOOL can_undo, LPCWSTR lpsz_replac
 	LPWSTR p;
 	HRGN hrgn = 0;
 	LPWSTR buf = NULL;
-	UINT bufl = 0;
+	UINT bufl;
 
 	TRACE("%s, can_undo %d, send_update %d\n",
 	    debugstr_w(lpsz_replace), can_undo, send_update);
@@ -2726,8 +2726,7 @@ static void EDIT_EM_ReplaceSel(EDITSTATE *es, BOOL can_undo, LPCWSTR lpsz_replac
 			EDIT_EM_EmptyUndoBuffer(es);
 	}
 
-	if (bufl)
-		HeapFree(GetProcessHeap(), 0, buf);
+	HeapFree(GetProcessHeap(), 0, buf);
  
 	s += strl;
 
@@ -2883,7 +2882,7 @@ static void EDIT_EM_SetLimitText(EDITSTATE *es, UINT limit)
  */
 static int calc_min_set_margin_size(HDC dc, INT left, INT right)
 {
-    WCHAR magic_string[] = {'\'','*','*','\'', 0};
+    static const WCHAR magic_string[] = {'\'','*','*','\'', 0};
     SIZE sz;
 
     GetTextExtentPointW(dc, magic_string, sizeof(magic_string)/sizeof(WCHAR) - 1, &sz);
@@ -4300,7 +4299,7 @@ static LRESULT EDIT_EM_GetThumb(EDITSTATE *es)
 static void EDIT_GetCompositionStr(HIMC hIMC, LPARAM CompFlag, EDITSTATE *es)
 {
     LONG buflen;
-    LPWSTR lpCompStr = NULL;
+    LPWSTR lpCompStr;
     LPSTR lpCompStrAttr = NULL;
     DWORD dwBufLenAttr;
 
@@ -4343,8 +4342,6 @@ static void EDIT_GetCompositionStr(HIMC hIMC, LPARAM CompFlag, EDITSTATE *es)
                     dwBufLenAttr);
             lpCompStrAttr[dwBufLenAttr] = 0;
         }
-        else
-            lpCompStrAttr = NULL;
     }
 
     /* check for change in composition start */

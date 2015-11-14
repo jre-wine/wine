@@ -1872,6 +1872,7 @@ static LRESULT handle_internal_message( HWND hwnd, UINT msg, WPARAM wparam, LPAR
         return EnableWindow( hwnd, wparam );
     case WM_WINE_SETACTIVEWINDOW:
         if (is_desktop_window( hwnd )) return 0;
+        if (!wparam && GetForegroundWindow() == hwnd) return 0;
         return (LRESULT)SetActiveWindow( (HWND)wparam );
     case WM_WINE_KEYBOARD_LL_HOOK:
     case WM_WINE_MOUSE_LL_HOOK:
@@ -1995,7 +1996,7 @@ static BOOL post_dde_message( struct packed_message *data, const struct send_mes
     void*       ptr = NULL;
     int         size = 0;
     UINT_PTR    uiLo, uiHi;
-    LPARAM      lp = 0;
+    LPARAM      lp;
     HGLOBAL     hunlock = 0;
     int         i;
     DWORD       res;

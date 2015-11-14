@@ -4016,77 +4016,6 @@ unsigned int count_bits(unsigned int mask)
     return count;
 }
 
-/* Helper function for retrieving color info for ChoosePixelFormat and wglChoosePixelFormatARB.
- * The later function requires individual color components. */
-BOOL getColorBits(const struct wined3d_format *format,
-        BYTE *redSize, BYTE *greenSize, BYTE *blueSize, BYTE *alphaSize, BYTE *totalSize)
-{
-    TRACE("format %s.\n", debug_d3dformat(format->id));
-
-    switch (format->id)
-    {
-        case WINED3DFMT_B10G10R10A2_UNORM:
-        case WINED3DFMT_R10G10B10A2_UNORM:
-        case WINED3DFMT_B8G8R8X8_UNORM:
-        case WINED3DFMT_B8G8R8_UNORM:
-        case WINED3DFMT_B8G8R8A8_UNORM:
-        case WINED3DFMT_R8G8B8A8_UNORM:
-        case WINED3DFMT_B5G5R5X1_UNORM:
-        case WINED3DFMT_B5G5R5A1_UNORM:
-        case WINED3DFMT_B5G6R5_UNORM:
-        case WINED3DFMT_B4G4R4X4_UNORM:
-        case WINED3DFMT_B4G4R4A4_UNORM:
-        case WINED3DFMT_B2G3R3_UNORM:
-        case WINED3DFMT_P8_UINT_A8_UNORM:
-        case WINED3DFMT_P8_UINT:
-            break;
-        default:
-            FIXME("Unsupported format %s.\n", debug_d3dformat(format->id));
-            return FALSE;
-    }
-
-    *redSize = format->red_size;
-    *greenSize = format->green_size;
-    *blueSize = format->blue_size;
-    *alphaSize = format->alpha_size;
-    *totalSize = *redSize + *greenSize + *blueSize + *alphaSize;
-
-    TRACE("Returning red: %d, green: %d, blue: %d, alpha: %d, total: %d for format %s.\n",
-            *redSize, *greenSize, *blueSize, *alphaSize, *totalSize, debug_d3dformat(format->id));
-    return TRUE;
-}
-
-/* Helper function for retrieving depth/stencil info for ChoosePixelFormat and wglChoosePixelFormatARB */
-BOOL getDepthStencilBits(const struct wined3d_format *format, BYTE *depthSize, BYTE *stencilSize)
-{
-    TRACE("format %s.\n", debug_d3dformat(format->id));
-
-    switch (format->id)
-    {
-        case WINED3DFMT_D16_LOCKABLE:
-        case WINED3DFMT_D16_UNORM:
-        case WINED3DFMT_S1_UINT_D15_UNORM:
-        case WINED3DFMT_X8D24_UNORM:
-        case WINED3DFMT_S4X4_UINT_D24_UNORM:
-        case WINED3DFMT_D24_UNORM_S8_UINT:
-        case WINED3DFMT_S8_UINT_D24_FLOAT:
-        case WINED3DFMT_D32_UNORM:
-        case WINED3DFMT_D32_FLOAT:
-        case WINED3DFMT_INTZ:
-            break;
-        default:
-            FIXME("Unsupported depth/stencil format %s.\n", debug_d3dformat(format->id));
-            return FALSE;
-    }
-
-    *depthSize = format->depth_size;
-    *stencilSize = format->stencil_size;
-
-    TRACE("Returning depthSize: %d and stencilSize: %d for format %s.\n",
-            *depthSize, *stencilSize, debug_d3dformat(format->id));
-    return TRUE;
-}
-
 /* Note: It's the caller's responsibility to ensure values can be expressed
  * in the requested format. UNORM formats for example can only express values
  * in the range 0.0f -> 1.0f. */
@@ -4673,6 +4602,11 @@ void gen_ffp_frag_op(const struct wined3d_context *context, const struct wined3d
 
     settings->pointsprite = state->render_states[WINED3D_RS_POINTSPRITEENABLE]
             && state->gl_primitive_type == GL_POINTS;
+
+    if (d3d_info->emulated_flatshading)
+        settings->flatshading = state->render_states[WINED3D_RS_SHADEMODE] == WINED3D_SHADE_FLAT;
+    else
+        settings->flatshading = FALSE;
 }
 
 const struct ffp_frag_desc *find_ffp_frag_shader(const struct wine_rb_tree *fragment_shaders,
@@ -4863,6 +4797,12 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
         }
         if (d3d_info->limits.varying_count >= wined3d_max_compat_varyings(gl_info))
             settings->texcoords = (1u << MAX_TEXTURES) - 1;
+
+        if (d3d_info->emulated_flatshading)
+            settings->flatshading = state->render_states[WINED3D_RS_SHADEMODE] == WINED3D_SHADE_FLAT;
+        else
+            settings->flatshading = FALSE;
+
         return;
     }
 
@@ -4942,6 +4882,11 @@ void wined3d_ffp_get_vs_settings(const struct wined3d_context *context,
         settings->fog_mode = WINED3D_FFP_VS_FOG_RANGE;
     else
         settings->fog_mode = WINED3D_FFP_VS_FOG_DEPTH;
+
+    if (d3d_info->emulated_flatshading)
+        settings->flatshading = state->render_states[WINED3D_RS_SHADEMODE] == WINED3D_SHADE_FLAT;
+    else
+        settings->flatshading = FALSE;
 
     settings->padding = 0;
 }

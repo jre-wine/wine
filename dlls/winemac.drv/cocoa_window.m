@@ -19,6 +19,7 @@
  */
 
 #import <Carbon/Carbon.h>
+#import <CoreVideo/CoreVideo.h>
 
 #import "cocoa_window.h"
 
@@ -155,6 +156,136 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 @end
 
 
+@interface WineDisplayLink : NSObject
+{
+    CGDirectDisplayID _displayID;
+    CVDisplayLinkRef _link;
+    NSMutableSet* _windows;
+
+    NSTimeInterval _actualRefreshPeriod;
+    NSTimeInterval _nominalRefreshPeriod;
+}
+
+    - (id) initWithDisplayID:(CGDirectDisplayID)displayID;
+
+    - (void) addWindow:(WineWindow*)window;
+    - (void) removeWindow:(WineWindow*)window;
+
+    - (NSTimeInterval) refreshPeriod;
+
+    - (void) start;
+
+@end
+
+@implementation WineDisplayLink
+
+static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTimeStamp* inNow, const CVTimeStamp* inOutputTime, CVOptionFlags flagsIn, CVOptionFlags* flagsOut, void* displayLinkContext);
+
+    - (id) initWithDisplayID:(CGDirectDisplayID)displayID
+    {
+        self = [super init];
+        if (self)
+        {
+            CVReturn status = CVDisplayLinkCreateWithCGDisplay(displayID, &_link);
+            if (status == kCVReturnSuccess && !_link)
+                status = kCVReturnError;
+            if (status == kCVReturnSuccess)
+                status = CVDisplayLinkSetOutputCallback(_link, WineDisplayLinkCallback, self);
+            if (status != kCVReturnSuccess)
+            {
+                [self release];
+                return nil;
+            }
+
+            _displayID = displayID;
+            _windows = [[NSMutableSet alloc] init];
+        }
+        return self;
+    }
+
+    - (void) dealloc
+    {
+        if (_link)
+        {
+            CVDisplayLinkStop(_link);
+            CVDisplayLinkRelease(_link);
+        }
+        [_windows release];
+        [super dealloc];
+    }
+
+    - (void) addWindow:(WineWindow*)window
+    {
+        @synchronized(self) {
+            BOOL needsStart = !_windows.count;
+            [_windows addObject:window];
+            if (needsStart)
+                CVDisplayLinkStart(_link);
+        }
+    }
+
+    - (void) removeWindow:(WineWindow*)window
+    {
+        @synchronized(self) {
+            BOOL wasRunning = _windows.count > 0;
+            [_windows removeObject:window];
+            if (wasRunning && !_windows.count)
+                CVDisplayLinkStop(_link);
+        }
+    }
+
+    - (void) fire
+    {
+        NSSet* windows;
+        @synchronized(self) {
+            windows = [_windows copy];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            BOOL anyDisplayed = FALSE;
+            for (WineWindow* window in windows)
+            {
+                if ([window viewsNeedDisplay])
+                {
+                    [window displayIfNeeded];
+                    anyDisplayed = YES;
+                }
+            }
+            if (!anyDisplayed)
+                CVDisplayLinkStop(_link);
+        });
+        [windows release];
+    }
+
+    - (NSTimeInterval) refreshPeriod
+    {
+        if (_actualRefreshPeriod || (_actualRefreshPeriod = CVDisplayLinkGetActualOutputVideoRefreshPeriod(_link)))
+            return _actualRefreshPeriod;
+
+        if (_nominalRefreshPeriod)
+            return _nominalRefreshPeriod;
+
+        CVTime time = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(_link);
+        if (time.flags & kCVTimeIsIndefinite)
+            return 1.0 / 60.0;
+        _nominalRefreshPeriod = time.timeValue / (double)time.timeScale;
+        return _nominalRefreshPeriod;
+    }
+
+    - (void) start
+    {
+        CVDisplayLinkStart(_link);
+    }
+
+static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTimeStamp* inNow, const CVTimeStamp* inOutputTime, CVOptionFlags flagsIn, CVOptionFlags* flagsOut, void* displayLinkContext)
+{
+    WineDisplayLink* link = displayLinkContext;
+    [link fire];
+    return kCVReturnSuccess;
+}
+
+@end
+
+
 @interface WineContentView : NSView <NSTextInputClient>
 {
     NSMutableArray* glContexts;
@@ -197,8 +328,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
 @property (assign, nonatomic) void* imeData;
 @property (nonatomic) BOOL commandDone;
-
-@property (retain, nonatomic) NSTimer* liveResizeDisplayTimer;
 
 @property (readonly, copy, nonatomic) NSArray* childWineWindows;
 
@@ -559,7 +688,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     @synthesize colorKeyed, colorKeyRed, colorKeyGreen, colorKeyBlue;
     @synthesize usePerPixelAlpha;
     @synthesize imeData, commandDone;
-    @synthesize liveResizeDisplayTimer;
 
     + (WineWindow*) createWindowWithFeatures:(const struct macdrv_window_features*)wf
                                  windowFrame:(NSRect)window_frame
@@ -592,11 +720,13 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [window setAcceptsMouseMovedEvents:YES];
         [window setColorSpace:[NSColorSpace genericRGBColorSpace]];
         [window setDelegate:window];
+        [window setAutodisplay:NO];
         window.hwnd = hwnd;
         window.queue = queue;
         window->savedContentMinSize = NSZeroSize;
         window->savedContentMaxSize = NSMakeSize(FLT_MAX, FLT_MAX);
         window->resizable = wf->resizable;
+        window->_lastDisplayTime = [[NSDate distantPast] timeIntervalSinceReferenceDate];
 
         [window registerForDraggedTypes:[NSArray arrayWithObjects:(NSString*)kUTTypeData,
                                                                   (NSString*)kUTTypeContent,
@@ -637,14 +767,17 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
                    name:NSApplicationDidUnhideNotification
                  object:NSApp];
 
+        [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:window
+                                                              selector:@selector(checkWineDisplayLink)
+                                                                  name:NSWorkspaceActiveSpaceDidChangeNotification
+                                                                object:[NSWorkspace sharedWorkspace]];
+
         return window;
     }
 
     - (void) dealloc
     {
         [[NSNotificationCenter defaultCenter] removeObserver:self];
-        [liveResizeDisplayTimer invalidate];
-        [liveResizeDisplayTimer release];
         [queue release];
         [latentChildWindows release];
         [latentParentWindow release];
@@ -945,6 +1078,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             if ([self level] > [child level])
                 [child setLevel:[self level]];
             [self addChildWindow:child ordered:NSWindowAbove];
+            [child checkWineDisplayLink];
             [latentChildWindows removeObjectIdenticalTo:child];
             child.latentParentWindow = nil;
             reordered = TRUE;
@@ -1207,6 +1341,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
                     if ([self level] != [other level])
                         [self setLevel:[other level]];
                     [self orderWindow:orderingMode relativeTo:[other windowNumber]];
+                    [self checkWineDisplayLink];
 
                     // The above call to -[NSWindow orderWindow:relativeTo:] won't
                     // reorder windows which are both children of the same parent
@@ -1225,6 +1360,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
                 if (next && [self level] < [next level])
                     [self setLevel:[next level]];
                 [self orderFront:nil];
+                [self checkWineDisplayLink];
                 needAdjustWindowLevels = TRUE;
             }
 
@@ -1278,6 +1414,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         }
         else
             [self orderOut:nil];
+        [self checkWineDisplayLink];
         savedVisibleState = FALSE;
         if (wasVisible && wasOnActiveSpace && fullscreen)
             [controller updateFullscreenWindows];
@@ -1452,16 +1589,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [self checkTransparency];
     }
 
-    - (void) setLiveResizeDisplayTimer:(NSTimer*)newTimer
-    {
-        if (newTimer != liveResizeDisplayTimer)
-        {
-            [liveResizeDisplayTimer invalidate];
-            [liveResizeDisplayTimer release];
-            liveResizeDisplayTimer = [newTimer retain];
-        }
-    }
-
     - (void) makeFocused:(BOOL)activate
     {
         if (activate)
@@ -1573,6 +1700,71 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         }
     }
 
+    - (NSMutableDictionary*) displayIDToDisplayLinkMap
+    {
+        static NSMutableDictionary* displayIDToDisplayLinkMap;
+        if (!displayIDToDisplayLinkMap)
+        {
+            displayIDToDisplayLinkMap = [[NSMutableDictionary alloc] init];
+
+            [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidChangeScreenParametersNotification
+                                                              object:NSApp
+                                                               queue:nil
+                                                          usingBlock:^(NSNotification *note){
+                NSMutableSet* badDisplayIDs = [NSMutableSet setWithArray:displayIDToDisplayLinkMap.allKeys];
+                NSSet* validDisplayIDs = [NSSet setWithArray:[[NSScreen screens] valueForKeyPath:@"deviceDescription.NSScreenNumber"]];
+                [badDisplayIDs minusSet:validDisplayIDs];
+                [displayIDToDisplayLinkMap removeObjectsForKeys:[badDisplayIDs allObjects]];
+            }];
+        }
+        return displayIDToDisplayLinkMap;
+    }
+
+    - (WineDisplayLink*) wineDisplayLink
+    {
+        if (!_lastDisplayID)
+            return nil;
+
+        NSMutableDictionary* displayIDToDisplayLinkMap = [self displayIDToDisplayLinkMap];
+        return [displayIDToDisplayLinkMap objectForKey:[NSNumber numberWithUnsignedInt:_lastDisplayID]];
+    }
+
+    - (void) checkWineDisplayLink
+    {
+        NSScreen* screen = self.screen;
+        if (![self isVisible] || ![self isOnActiveSpace] || [self isMiniaturized] || [self isEmptyShaped])
+            screen = nil;
+#if defined(MAC_OS_X_VERSION_10_9) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_9
+        if ([self respondsToSelector:@selector(occlusionState)] && !(self.occlusionState & NSWindowOcclusionStateVisible))
+            screen = nil;
+#endif
+
+        NSNumber* displayIDNumber = [screen.deviceDescription objectForKey:@"NSScreenNumber"];
+        CGDirectDisplayID displayID = [displayIDNumber unsignedIntValue];
+        if (displayID == _lastDisplayID)
+            return;
+
+        NSMutableDictionary* displayIDToDisplayLinkMap = [self displayIDToDisplayLinkMap];
+
+        if (_lastDisplayID)
+        {
+            WineDisplayLink* link = [displayIDToDisplayLinkMap objectForKey:[NSNumber numberWithUnsignedInt:_lastDisplayID]];
+            [link removeWindow:self];
+        }
+        if (displayID)
+        {
+            WineDisplayLink* link = [displayIDToDisplayLinkMap objectForKey:displayIDNumber];
+            if (!link)
+            {
+                link = [[[WineDisplayLink alloc] initWithDisplayID:displayID] autorelease];
+                [displayIDToDisplayLinkMap setObject:link forKey:displayIDNumber];
+            }
+            [link addWindow:self];
+            [self displayIfNeeded];
+        }
+        _lastDisplayID = displayID;
+    }
+
     - (BOOL) isEmptyShaped
     {
         return (self.shapeData.length == sizeof(CGRectZero) && !memcmp(self.shapeData.bytes, &CGRectZero, sizeof(CGRectZero)));
@@ -1649,7 +1841,12 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         }
 
         CGContextDrawImage(cgcontext, rect, windowImage);
-        [appImage drawInRect:NSMakeRect(156, 4, 96, 96)];
+        [appImage drawInRect:NSMakeRect(156, 4, 96, 96)
+                    fromRect:NSZeroRect
+                   operation:NSCompositeSourceOver
+                    fraction:1
+              respectFlipped:YES
+                       hints:nil];
 
         [dockIcon unlockFocus];
 
@@ -1674,6 +1871,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             self.dockTile.contentView = nil;
             lastDockIconSnapshot = 0;
         }
+        [self checkWineDisplayLink];
     }
 
 
@@ -1885,6 +2083,40 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             [super toggleFullScreen:sender];
     }
 
+    - (void) setViewsNeedDisplay:(BOOL)value
+    {
+        if (value && ![self viewsNeedDisplay])
+        {
+            WineDisplayLink* link = [self wineDisplayLink];
+            if (link)
+            {
+                NSTimeInterval now = [[NSProcessInfo processInfo] systemUptime];
+                if (_lastDisplayTime + [link refreshPeriod] < now)
+                    [self setAutodisplay:YES];
+                else
+                {
+                    [link start];
+                    _lastDisplayTime = now;
+                }
+            }
+        }
+        [super setViewsNeedDisplay:value];
+    }
+
+    - (void) display
+    {
+        _lastDisplayTime = [[NSProcessInfo processInfo] systemUptime];
+        [super display];
+        [self setAutodisplay:NO];
+    }
+
+    - (void) displayIfNeeded
+    {
+        _lastDisplayTime = [[NSProcessInfo processInfo] systemUptime];
+        [super displayIfNeeded];
+        [self setAutodisplay:NO];
+    }
+
     - (NSArray*) childWineWindows
     {
         NSArray* childWindows = self.childWindows;
@@ -2046,6 +2278,16 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         [controller windowGotFocus:self];
     }
 
+    - (void) windowDidChangeOcclusionState:(NSNotification*)notification
+    {
+        [self checkWineDisplayLink];
+    }
+
+    - (void) windowDidChangeScreen:(NSNotification*)notification
+    {
+        [self checkWineDisplayLink];
+    }
+
     - (void)windowDidDeminiaturize:(NSNotification *)notification
     {
         WineApplicationController* controller = [WineApplicationController sharedController];
@@ -2072,6 +2314,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
         }
 
         [self windowDidResize:notification];
+        [self checkWineDisplayLink];
     }
 
     - (void) windowDidEndLiveResize:(NSNotification *)notification
@@ -2082,8 +2325,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
             [queue postEvent:event];
             macdrv_release_event(event);
         }
-
-        self.liveResizeDisplayTimer = nil;
     }
 
     - (void) windowDidEnterFullScreen:(NSNotification*)notification
@@ -2115,6 +2356,7 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
     {
         if (fullscreen && [self isOnActiveSpace])
             [[WineApplicationController sharedController] updateFullscreenWindows];
+        [self checkWineDisplayLink];
     }
 
     - (void)windowDidMove:(NSNotification *)notification
@@ -2298,29 +2540,6 @@ static inline NSUInteger adjusted_modifiers_for_option_behavior(NSUInteger modif
 
         frameAtResizeStart = [self frame];
         resizingFromLeft = resizingFromTop = FALSE;
-
-        // There's a strange restriction in window redrawing during Cocoa-
-        // managed window resizing.  Only calls to -[NSView setNeedsDisplay...]
-        // that happen synchronously when Cocoa tells us that our window size
-        // has changed or asynchronously in a short interval thereafter provoke
-        // the window to redraw.  Calls to those methods that happen asynchronously
-        // a half second or more after the last change of the window size aren't
-        // heeded until the next resize-related user event (e.g. mouse movement).
-        //
-        // Wine often has a significant delay between when it's been told that
-        // the window has changed size and when it can flush completed drawing.
-        // So, our windows would get stuck with incomplete drawing for as long
-        // as the user holds the mouse button down and doesn't move it.
-        //
-        // We address this by "manually" asking our windows to check if they need
-        // redrawing every so often (during live resize only).
-        self.liveResizeDisplayTimer = [NSTimer scheduledTimerWithTimeInterval:1.0/30.0
-                                                                       target:self
-                                                                     selector:@selector(displayIfNeeded)
-                                                                     userInfo:nil
-                                                                      repeats:YES];
-        [[NSRunLoop currentRunLoop] addTimer:liveResizeDisplayTimer
-                                     forMode:NSRunLoopCommonModes];
     }
 
     - (NSRect) windowWillUseStandardFrame:(NSWindow*)window defaultFrame:(NSRect)proposedFrame

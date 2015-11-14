@@ -3054,6 +3054,7 @@ static void load_gl_funcs(struct wined3d_gl_info *gl_info)
     MAP_GL_FUNCTION(glDeleteShader, glDeleteObjectARB);
     MAP_GL_FUNCTION(glDetachShader, glDetachObjectARB);
     MAP_GL_FUNCTION(glDisableVertexAttribArray, glDisableVertexAttribArrayARB);
+    MAP_GL_FUNCTION(glDrawArraysInstanced, glDrawArraysInstancedARB);
     MAP_GL_FUNCTION(glDrawBuffers, glDrawBuffersARB);
     MAP_GL_FUNCTION(glDrawElementsInstanced, glDrawElementsInstancedARB);
     MAP_GL_FUNCTION(glEnableVertexAttribArray, glEnableVertexAttribArrayARB);
@@ -3553,6 +3554,8 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
 
     if (gl_version >= MAKEDWORD_VERSION(2, 0))
         gl_info->supported[WINED3D_GL_VERSION_2_0] = TRUE;
+    if (gl_version >= MAKEDWORD_VERSION(3, 2))
+        gl_info->supported[WINED3D_GL_VERSION_3_2] = TRUE;
 
     if (gl_info->supported[APPLE_FENCE])
     {
@@ -3722,6 +3725,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     adapter->d3d_info.xyzrhw = vertex_caps.xyzrhw;
     adapter->d3d_info.ffp_generic_attributes = vertex_caps.ffp_generic_attributes;
     adapter->d3d_info.limits.ffp_vertex_blend_matrices = vertex_caps.max_vertex_blend_matrices;
+    adapter->d3d_info.emulated_flatshading = vertex_caps.emulated_flatshading;
 
     adapter->fragment_pipe->get_caps(gl_info, &fragment_caps);
     adapter->d3d_info.limits.ffp_blend_stages = fragment_caps.MaxTextureBlendStages;
@@ -4268,49 +4272,27 @@ HRESULT CDECL wined3d_get_adapter_raster_status(const struct wined3d *wined3d, U
 static BOOL wined3d_check_pixel_format_color(const struct wined3d_gl_info *gl_info,
         const struct wined3d_pixel_format *cfg, const struct wined3d_format *format)
 {
-    BYTE redSize, greenSize, blueSize, alphaSize, colorBits;
-
     /* Float formats need FBOs. If FBOs are used this function isn't called */
     if (format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_FLOAT)
         return FALSE;
 
-    if(cfg->iPixelType == WGL_TYPE_RGBA_ARB) { /* Integer RGBA formats */
-        if (!getColorBits(format, &redSize, &greenSize, &blueSize, &alphaSize, &colorBits))
-        {
-            ERR("Unable to check compatibility for format %s.\n", debug_d3dformat(format->id));
-            return FALSE;
-        }
+    /* Probably a RGBA_float or color index mode. */
+    if (cfg->iPixelType != WGL_TYPE_RGBA_ARB)
+        return FALSE;
 
-        if(cfg->redSize < redSize)
-            return FALSE;
+    if (cfg->redSize < format->red_size
+            || cfg->greenSize < format->green_size
+            || cfg->blueSize < format->blue_size
+            || cfg->alphaSize < format->alpha_size)
+        return FALSE;
 
-        if(cfg->greenSize < greenSize)
-            return FALSE;
-
-        if(cfg->blueSize < blueSize)
-            return FALSE;
-
-        if(cfg->alphaSize < alphaSize)
-            return FALSE;
-
-        return TRUE;
-    }
-
-    /* Probably a RGBA_float or color index mode */
-    return FALSE;
+    return TRUE;
 }
 
 static BOOL wined3d_check_pixel_format_depth(const struct wined3d_gl_info *gl_info,
         const struct wined3d_pixel_format *cfg, const struct wined3d_format *format)
 {
-    BYTE depthSize, stencilSize;
     BOOL lockable = FALSE;
-
-    if (!getDepthStencilBits(format, &depthSize, &stencilSize))
-    {
-        ERR("Unable to check compatibility for format %s.\n", debug_d3dformat(format->id));
-        return FALSE;
-    }
 
     /* Float formats need FBOs. If FBOs are used this function isn't called */
     if (format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_FLOAT)
@@ -4319,15 +4301,19 @@ static BOOL wined3d_check_pixel_format_depth(const struct wined3d_gl_info *gl_in
     if ((format->id == WINED3DFMT_D16_LOCKABLE) || (format->id == WINED3DFMT_D32_FLOAT))
         lockable = TRUE;
 
-    /* On some modern cards like the Geforce8/9 GLX doesn't offer some dephthstencil formats which D3D9 reports.
-     * We can safely report 'compatible' formats (e.g. D24 can be used for D16) as long as we aren't dealing with
-     * a lockable format. This also helps D3D <= 7 as they expect D16 which isn't offered without this on Geforce8 cards. */
-    if(!(cfg->depthSize == depthSize || (!lockable && cfg->depthSize > depthSize)))
+    /* On some modern cards like the Geforce8/9, GLX doesn't offer some
+     * dephth/stencil formats which D3D9 reports. We can safely report
+     * "compatible" formats (e.g. D24 can be used for D16) as long as we
+     * aren't dealing with a lockable format. This also helps D3D <= 7 as they
+     * expect D16 which isn't offered without this on Geforce8 cards. */
+    if (!(cfg->depthSize == format->depth_size || (!lockable && cfg->depthSize > format->depth_size)))
         return FALSE;
 
-    /* Some cards like Intel i915 ones only offer D24S8 but lots of games also need a format without stencil, so
-     * allow more stencil bits than requested. */
-    if(cfg->stencilSize < stencilSize)
+    /* Some cards like Intel i915 ones only offer D24S8 but lots of games also
+     * need a format without stencil. We can allow a mismatch if the format
+     * doesn't have any stencil bits. If it does have stencil bits the size
+     * must match, or stencil wrapping would break. */
+    if (format->stencil_size && cfg->stencilSize != format->stencil_size)
         return FALSE;
 
     return TRUE;
@@ -4476,17 +4462,15 @@ static BOOL CheckRenderTargetCapability(const struct wined3d_adapter *adapter,
         return FALSE;
     if (wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER)
     {
-        BYTE AdapterRed, AdapterGreen, AdapterBlue, AdapterAlpha, AdapterTotalSize;
-        BYTE CheckRed, CheckGreen, CheckBlue, CheckAlpha, CheckTotalSize;
         const struct wined3d_pixel_format *cfgs = adapter->cfgs;
         unsigned int i;
 
-        getColorBits(adapter_format, &AdapterRed, &AdapterGreen, &AdapterBlue, &AdapterAlpha, &AdapterTotalSize);
-        getColorBits(check_format, &CheckRed, &CheckGreen, &CheckBlue, &CheckAlpha, &CheckTotalSize);
-
-        /* In backbuffer mode the front and backbuffer share the same WGL pixelformat.
-         * The format must match in RGB, alpha is allowed to be different. (Only the backbuffer can have alpha) */
-        if (!((AdapterRed == CheckRed) && (AdapterGreen == CheckGreen) && (AdapterBlue == CheckBlue)))
+        /* In backbuffer mode the front and backbuffer share the same WGL
+         * pixelformat. The format must match in RGB, alpha is allowed to be
+         * different. (Only the backbuffer can have alpha.) */
+        if (adapter_format->red_size != check_format->red_size
+                || adapter_format->green_size != check_format->green_size
+                || adapter_format->blue_size != check_format->blue_size)
         {
             TRACE("[FAILED]\n");
             return FALSE;
