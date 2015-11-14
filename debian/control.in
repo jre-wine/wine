@@ -95,10 +95,8 @@ Suggests:
  dosbox (>= 0.74-4.2~),
  wine32VERSION-preloader (= ${binary:Version}),
 Breaks:
- wineVERSION (<< 1.7.54-2~),
+ wineVERSION (<< 1.7.50-3~),
  wine32VERSION-preloader (<< 1.7.51-2~),
-Replaces:
- wineVERSION (<< 1.7.54-2~),
 Description: Windows API implementation - 32-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
