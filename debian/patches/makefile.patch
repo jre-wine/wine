@@ -3,15 +3,15 @@ author: Michael Gilbert <mgilbert@debian.org>
 
 --- a/configure.ac
 +++ b/configure.ac
-@@ -672,7 +672,7 @@ AC_CHECK_HEADERS([libprocstat.h],,,
+@@ -673,7 +673,7 @@ AC_CHECK_HEADERS([libprocstat.h],,,
  
  dnl **** Check for working dll ****
  
 -AC_SUBST(dlldir,"\${libdir}/wine")
 +AC_SUBST(dlldir,"\${libdir}")
- AC_SUBST(DLLPREFIX,"")
  AC_SUBST(DLLFLAGS,"-D_REENTRANT")
  AC_SUBST(LDRPATH_INSTALL,"")
+ AC_SUBST(LDRPATH_LOCAL,"")
 --- a/Makefile.in
 +++ b/Makefile.in
 @@ -29,7 +29,7 @@ datarootdir     = @datarootdir@
@@ -23,3 +23,13 @@ author: Michael Gilbert <mgilbert@debian.org>
  dlldir          = @dlldir@
  fakedlldir      = ${dlldir}/fakedlls
  top_srcdir      = @top_srcdir@
+--- a/dlls/rpcrt4/tests/Makefile.in
++++ b/dlls/rpcrt4/tests/Makefile.in
+@@ -4,7 +4,6 @@ EXTRAIDLFLAGS = --prefix-server=s_
+ 
+ C_SRCS = \
+ 	cstub.c \
+-	generated.c \
+ 	ndr_marshall.c \
+ 	rpc.c \
+ 	rpc_async.c \

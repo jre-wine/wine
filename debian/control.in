@@ -32,6 +32,7 @@ Build-Depends:
  sharutils,
  dctrl-tools,
  khronos-api,
+ unicode-data,
  libpng-dev,
  libssl-dev,
  libxml2-dev,
@@ -66,6 +67,7 @@ Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
 Package: wineVERSION
 Architecture: all
 Multi-Arch: foreign
+Built-Using: ${Built-Using}
 Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
@@ -77,8 +79,9 @@ Description: Windows API implementation - standard suite
  This package provides convenience tools for the standard Wine components.
 
 Package: wine32VERSION
-Architecture: any-i386 any-powerpc armhf
+Architecture: any-i386 any-powerpc armel armhf
 Multi-Arch: foreign
+Built-Using: ${Built-Using}
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
@@ -89,7 +92,7 @@ Depends:
 Recommends:
  wineVERSION (= ${source:Version}),
  libgl1-mesa-dri,
- libwine-gecko-2.40 [!armhf !arm64],
+ libwine-gecko-2.40 [!armel !armhf !arm64],
  libasound2-plugins,
 Suggests:
  dosbox (>= 0.74-4.2~),
@@ -106,6 +109,7 @@ Description: Windows API implementation - 32-bit binary loader
 Package: wine64VERSION
 Architecture: amd64 arm64
 Multi-Arch: foreign
+Built-Using: ${Built-Using}
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
@@ -115,7 +119,7 @@ Recommends:
  wineVERSION (= ${source:Version}),
  wine32VERSION (>= ${source:Version}),
  wine32VERSION (<< ${source:Version}.1~),
- libwine-gecko-2.40 [!armhf !arm64],
+ libwine-gecko-2.40 [!armel !armhf !arm64],
  libasound2-plugins,
 Suggests:
  wine64VERSION-preloader (= ${binary:Version}),
@@ -129,8 +133,9 @@ Description: Windows API implementation - 64-bit binary loader
  This package provides the binary loader for 64-bit Windows applications.
 
 Package: wine32VERSION-preloader
-Architecture: i386 powerpc armhf
+Architecture: i386 powerpc armel armhf
 Multi-Arch: foreign
+Built-Using: ${Built-Using}
 Depends:
  ${misc:Depends},
  wine32VERSION (= ${binary:Version}),
@@ -143,6 +148,7 @@ Description: Windows API implementation - prelinked 32-bit binary loader
 Package: wine64VERSION-preloader
 Architecture: amd64
 Multi-Arch: foreign
+Built-Using: ${Built-Using}
 Depends:
  ${misc:Depends},
  wine64VERSION (= ${binary:Version}),
@@ -153,9 +159,10 @@ Description: Windows API implementation - prelinked 64-bit binary loader
  This package provides the prelinked loader for 64-bit Windows applications.
 
 Package: wine32VERSION-tools
-Architecture: any-i386 any-powerpc armhf
+Architecture: any-i386 any-powerpc armel armhf
 Section: libdevel
 Multi-Arch: foreign
+Built-Using: ${Built-Using}
 Depends:
  gcc [any-i386 any-powerpc],
  ${perl:Depends},
@@ -172,6 +179,7 @@ Package: wine64VERSION-tools
 Architecture: amd64 arm64
 Section: libdevel
 Multi-Arch: foreign
+Built-Using: ${Built-Using}
 Depends:
  gcc [amd64],
  ${perl:Depends},
@@ -188,6 +196,7 @@ Package: fonts-wineVERSION
 Section: fonts
 Architecture: all
 Multi-Arch: foreign
+Built-Using: ${Built-Using}
 Depends:
  ${misc:Depends},
 Replaces:
@@ -202,8 +211,9 @@ Description: Windows API implementation - fonts
 
 Package: libwineVERSION
 Section: libs
-Architecture: amd64 any-i386 any-powerpc armhf arm64
+Architecture: amd64 any-i386 any-powerpc armel armhf arm64
 Multi-Arch: same
+Built-Using: ${Built-Using}
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
@@ -223,9 +233,10 @@ Description: Windows API implementation - library
  This package provides the wine library.
 
 Package: libwineVERSION-dev
-Architecture: amd64 any-i386 any-powerpc armhf arm64
+Architecture: amd64 any-i386 any-powerpc armel armhf arm64
 Section: libdevel
 Multi-Arch: same
+Built-Using: ${Built-Using}
 Depends:
  ${misc:Depends},
  libwineVERSION (= ${binary:Version}),
@@ -239,10 +250,11 @@ Description: Windows API implementation - development files
  This package provides wine's C header files and development libraries.
 
 Package: libwineVERSION-dbg
-Architecture: amd64 any-i386 any-powerpc armhf arm64
+Architecture: amd64 any-i386 any-powerpc armel armhf arm64
 Multi-Arch: same
 Section: debug
 Priority: extra
+Built-Using: ${Built-Using}
 Depends:
  ${misc:Depends},
  libwineVERSION (= ${binary:Version}),
