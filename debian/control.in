@@ -27,6 +27,7 @@ Build-Depends:
  lzma,
  flex,
  bison,
+ quilt,
  gettext,
  oss4-dev,
  sharutils,
@@ -51,8 +52,8 @@ Build-Depends:
  libmpg123-dev,
  libasound2-dev,
  libosmesa6-dev,
- libncurses5-dev,
  libgnutls28-dev,
+ libncurses5-dev,
  libgettextpo-dev,
  libfreetype6-dev (>= 2.5.1),
  libfontconfig1-dev,
@@ -67,7 +68,7 @@ Vcs-Git: git://anonscm.debian.org/pkg-wine/wine.git
 Package: wineVERSION
 Architecture: all
 Multi-Arch: foreign
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
@@ -81,13 +82,12 @@ Description: Windows API implementation - standard suite
 Package: wine32VERSION
 Architecture: any-i386 any-powerpc armel armhf
 Multi-Arch: foreign
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
+ ${dlopen:Depends},
  ${shlibs:Depends},
  x11-utils,
- libncurses5,
- libfreetype6,
  libwineVERSION (= ${binary:Version}),
 Recommends:
  wineVERSION (= ${source:Version}),
@@ -109,7 +109,7 @@ Description: Windows API implementation - 32-bit binary loader
 Package: wine64VERSION
 Architecture: amd64 arm64
 Multi-Arch: foreign
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
@@ -135,7 +135,7 @@ Description: Windows API implementation - 64-bit binary loader
 Package: wine32VERSION-preloader
 Architecture: i386 powerpc armel armhf
 Multi-Arch: foreign
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  wine32VERSION (= ${binary:Version}),
@@ -148,7 +148,7 @@ Description: Windows API implementation - prelinked 32-bit binary loader
 Package: wine64VERSION-preloader
 Architecture: amd64
 Multi-Arch: foreign
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  wine64VERSION (= ${binary:Version}),
@@ -162,7 +162,7 @@ Package: wine32VERSION-tools
 Architecture: any-i386 any-powerpc armel armhf
 Section: libdevel
 Multi-Arch: foreign
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  gcc [any-i386 any-powerpc],
  ${perl:Depends},
@@ -179,7 +179,7 @@ Package: wine64VERSION-tools
 Architecture: amd64 arm64
 Section: libdevel
 Multi-Arch: foreign
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  gcc [amd64],
  ${perl:Depends},
@@ -196,7 +196,7 @@ Package: fonts-wineVERSION
 Section: fonts
 Architecture: all
 Multi-Arch: foreign
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
 Replaces:
@@ -213,7 +213,7 @@ Package: libwineVERSION
 Section: libs
 Architecture: amd64 any-i386 any-powerpc armel armhf arm64
 Multi-Arch: same
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
@@ -236,7 +236,7 @@ Package: libwineVERSION-dev
 Architecture: amd64 any-i386 any-powerpc armel armhf arm64
 Section: libdevel
 Multi-Arch: same
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  libwineVERSION (= ${binary:Version}),
@@ -254,7 +254,7 @@ Architecture: amd64 any-i386 any-powerpc armel armhf arm64
 Multi-Arch: same
 Section: debug
 Priority: extra
-Built-Using: ${Built-Using}
+Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  libwineVERSION (= ${binary:Version}),

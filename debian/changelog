@@ -1,3 +1,10 @@
+wine-development (1.7.55-2) unstable; urgency=medium
+
+  * Simplify the clean rule.
+  * Compute ncurses and freetype dependencies at build time (closes: #804599).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 15 Nov 2015 16:41:03 +0000
+
 wine-development (1.7.55-1) unstable; urgency=medium
 
   * New upstream release 1.7.55, released Nov 13, 2015.

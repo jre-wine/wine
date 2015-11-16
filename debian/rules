@@ -10,6 +10,9 @@ DATDIR=usr/share/wine$(VERSION)
 INCDIR=usr/include/wine$(VERSION)
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
 
+NCURSES=$(shell ./debian/scripts/dpkg-depgrep ncurses)
+FREETYPE=$(shell ./debian/scripts/dpkg-depgrep freetype)
+
 # enable verbose build log
 export DH_VERBOSE=1
 
@@ -111,19 +114,14 @@ override_dh_strip:
 	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine$(VERSION)-dbg
 
 override_dh_gencontrol:
-	dh_gencontrol -- -VBuilt-Using="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), ' -W khronos-api unicode-data)"
+	dh_gencontrol -- \
+	    -Vbuilt:Using="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), ' -W khronos-api unicode-data)" \
+	    -Vdlopen:Depends="$(NCURSES), $(FREETYPE)" \
 
 override_dh_clean:
-	if [ ! -e configure ]; then \
-	    QUILT_PATCHES=debian/patches quilt push -af || true; \
-	    dh_autoreconf || true; \
-	    make -f debian/rules override_dh_auto_configure; \
-	fi
-	make clean
-	make distclean
-	dh_autoreconf_clean || true
 	dh_clean -- $(INSTALLS)
 	make -f debian/rules debian/control
 
 override_dh_auto_clean:
-	# disabled
+	QUILT_PATCHES=debian/patches quilt push -af || true
+	dh_auto_clean

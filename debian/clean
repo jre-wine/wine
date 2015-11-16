@@ -1,12 +1,7 @@
-wine
-Makefile
 config.*
 configure
-tools/makedep
 tools/config.*
 debian/control
-include/stamp-h
-include/config.h
 include/config.h.in
 programs/cscript/ihost.h
 
