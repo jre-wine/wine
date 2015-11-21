@@ -285,6 +285,8 @@ static void pulse_contextcallback(pa_context *c, void *userdata)
     switch (pa_context_get_state(c)) {
         default:
             FIXME("Unhandled state: %i\n", pa_context_get_state(c));
+            return;
+
         case PA_CONTEXT_CONNECTING:
         case PA_CONTEXT_UNCONNECTED:
         case PA_CONTEXT_AUTHORIZING:
@@ -2239,10 +2241,9 @@ static HRESULT WINAPI AudioClock_GetFrequency(IAudioClock *iface, UINT64 *freq)
     pthread_mutex_lock(&pulse_lock);
     hr = pulse_stream_valid(This);
     if (SUCCEEDED(hr)) {
+        *freq = This->ss.rate;
         if (This->share == AUDCLNT_SHAREMODE_SHARED)
-            *freq = This->ss.rate * pa_frame_size(&This->ss);
-        else
-            *freq = This->ss.rate;
+            *freq *= pa_frame_size(&This->ss);
     }
     pthread_mutex_unlock(&pulse_lock);
     return hr;

@@ -236,13 +236,14 @@ void WCMD_clear_screen (void) {
   if (GetConsoleScreenBufferInfo(hStdOut, &consoleInfo))
   {
       COORD topLeft;
-      DWORD screenSize;
+      DWORD screenSize, written;
 
       screenSize = consoleInfo.dwSize.X * (consoleInfo.dwSize.Y + 1);
 
       topLeft.X = 0;
       topLeft.Y = 0;
-      FillConsoleOutputCharacterW(hStdOut, ' ', screenSize, topLeft, &screenSize);
+      FillConsoleOutputCharacterW(hStdOut, ' ', screenSize, topLeft, &written);
+      FillConsoleOutputAttribute(hStdOut, consoleInfo.wAttributes, screenSize, topLeft, &written);
       SetConsoleCursorPosition(hStdOut, topLeft);
   }
 }
@@ -1409,10 +1410,8 @@ BOOL WCMD_delete (WCHAR *args) {
 
         argsProcessed = TRUE;
         found = WCMD_delete_one(thisArg);
-        if (!found) {
-            errorlevel = 1;
+        if (!found)
             WCMD_output_stderr(WCMD_LoadMessage(WCMD_FILENOTFOUND), thisArg);
-        }
         foundAny |= found;
     }
 

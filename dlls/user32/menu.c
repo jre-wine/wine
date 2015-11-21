@@ -4001,7 +4001,12 @@ BOOL WINAPI ModifyMenuW( HMENU hMenu, UINT pos, UINT flags,
     else
         TRACE("%p %d %04x %04lx %p\n", hMenu, pos, flags, id, str );
 
-    if (!(item = MENU_FindItem( &hMenu, &pos, flags ))) return FALSE;
+    if (!(item = MENU_FindItem( &hMenu, &pos, flags )))
+    {
+        /* workaround for Word 95: pretend that SC_TASKLIST item exists */
+        if (pos == SC_TASKLIST && !(flags & MF_BYPOSITION)) return TRUE;
+        return FALSE;
+    }
     MENU_GetMenu(hMenu)->Height = 0; /* force size recalculate */
     MENU_mnu2mnuii( flags, id, str, &mii);
     return SetMenuItemInfo_common( item, &mii, TRUE);
@@ -4566,7 +4571,7 @@ static BOOL GetMenuItemInfo_common ( HMENU hmenu, UINT item, BOOL bypos,
         SetLastError( ERROR_MENU_ITEM_NOT_FOUND);
         return FALSE;
     }
-    
+
     if( lpmii->fMask & MIIM_TYPE) {
         if( lpmii->fMask & ( MIIM_STRING | MIIM_FTYPE | MIIM_BITMAP)) {
             WARN("invalid combination of fMask bits used\n");
@@ -4575,7 +4580,8 @@ static BOOL GetMenuItemInfo_common ( HMENU hmenu, UINT item, BOOL bypos,
             return FALSE;
         }
 	lpmii->fType = menu->fType & MENUITEMINFO_TYPE_MASK;
-        if( menu->hbmpItem) lpmii->fType |= MFT_BITMAP;
+        if (menu->hbmpItem && !IS_MAGIC_BITMAP(menu->hbmpItem))
+            lpmii->fType |= MFT_BITMAP;
 	lpmii->hbmpItem = menu->hbmpItem; /* not on Win9x/ME */
         if( lpmii->fType & MFT_BITMAP) {
 	    lpmii->dwTypeData = (LPWSTR) menu->hbmpItem;
@@ -4872,14 +4878,20 @@ static BOOL MENU_NormalizeMenuItemInfoStruct( const MENUITEMINFOW *pmii_in,
 BOOL WINAPI SetMenuItemInfoA(HMENU hmenu, UINT item, BOOL bypos,
                                  const MENUITEMINFOA *lpmii)
 {
+    MENUITEM *menuitem;
     MENUITEMINFOW mii;
 
     TRACE("hmenu %p, item %u, by pos %d, info %p\n", hmenu, item, bypos, lpmii);
 
     if (!MENU_NormalizeMenuItemInfoStruct( (const MENUITEMINFOW *)lpmii, &mii )) return FALSE;
 
-    return SetMenuItemInfo_common(MENU_FindItem(&hmenu, &item, bypos? MF_BYPOSITION : 0),
-                                  &mii, FALSE);
+    if (!(menuitem = MENU_FindItem( &hmenu, &item, bypos? MF_BYPOSITION : 0 )))
+    {
+        /* workaround for Word 95: pretend that SC_TASKLIST item exists */
+        if (item == SC_TASKLIST && !bypos) return TRUE;
+        return FALSE;
+    }
+    return SetMenuItemInfo_common( menuitem, &mii, FALSE );
 }
 
 /**********************************************************************
@@ -4888,13 +4900,19 @@ BOOL WINAPI SetMenuItemInfoA(HMENU hmenu, UINT item, BOOL bypos,
 BOOL WINAPI SetMenuItemInfoW(HMENU hmenu, UINT item, BOOL bypos,
                                  const MENUITEMINFOW *lpmii)
 {
+    MENUITEM *menuitem;
     MENUITEMINFOW mii;
 
     TRACE("hmenu %p, item %u, by pos %d, info %p\n", hmenu, item, bypos, lpmii);
 
     if (!MENU_NormalizeMenuItemInfoStruct( lpmii, &mii )) return FALSE;
-    return SetMenuItemInfo_common(MENU_FindItem(&hmenu,
-                &item, bypos? MF_BYPOSITION : 0), &mii, TRUE);
+    if (!(menuitem = MENU_FindItem( &hmenu, &item, bypos? MF_BYPOSITION : 0 )))
+    {
+        /* workaround for Word 95: pretend that SC_TASKLIST item exists */
+        if (item == SC_TASKLIST && !bypos) return TRUE;
+        return FALSE;
+    }
+    return SetMenuItemInfo_common( menuitem, &mii, TRUE );
 }
 
 /**********************************************************************

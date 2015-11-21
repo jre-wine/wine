@@ -76,6 +76,12 @@ static void d2d_rect_set(D2D1_RECT_F *dst, float left, float top, float right, f
     dst->bottom = bottom;
 }
 
+static void d2d_size_set(D2D1_SIZE_U *dst, float width, float height)
+{
+    dst->width = width;
+    dst->height = height;
+}
+
 static BOOL d2d_clip_stack_init(struct d2d_clip_stack *stack)
 {
     if (!(stack->stack = HeapAlloc(GetProcessHeap(), 0, INITIAL_CLIP_STACK_SIZE * sizeof(*stack->stack))))
@@ -127,9 +133,9 @@ static void d2d_clip_stack_pop(struct d2d_clip_stack *stack)
     --stack->count;
 }
 
-static void d2d_draw(struct d2d_d3d_render_target *render_target, enum d2d_shape_type shape_type,
+static void d2d_rt_draw(struct d2d_d3d_render_target *render_target, enum d2d_shape_type shape_type,
         ID3D10Buffer *ib, unsigned int index_count, ID3D10Buffer *vb, unsigned int vb_stride,
-        ID3D10Buffer *vs_cb, ID3D10Buffer *ps_cb, struct d2d_brush *brush)
+        ID3D10Buffer *vs_cb, ID3D10Buffer *ps_cb, struct d2d_brush *brush, struct d2d_brush *opacity_brush)
 {
     struct d2d_shape_resources *shape_resources = &render_target->shape_resources[shape_type];
     ID3D10Device *device = render_target->device;
@@ -183,9 +189,9 @@ static void d2d_draw(struct d2d_d3d_render_target *render_target, enum d2d_shape
     ID3D10Device_RSSetState(device, render_target->rs);
     ID3D10Device_OMSetRenderTargets(device, 1, &render_target->view, NULL);
     if (brush)
-        d2d_brush_bind_resources(brush, render_target, shape_type);
+        d2d_brush_bind_resources(brush, opacity_brush, render_target, shape_type);
     else
-        ID3D10Device_PSSetShader(device, shape_resources->ps[D2D_BRUSH_TYPE_SOLID]);
+        ID3D10Device_PSSetShader(device, shape_resources->ps[D2D_BRUSH_TYPE_SOLID][D2D_BRUSH_TYPE_COUNT]);
 
     if (ib)
         ID3D10Device_DrawIndexed(device, index_count, 0, 0);
@@ -239,9 +245,10 @@ static ULONG STDMETHODCALLTYPE d2d_d3d_render_target_Release(ID2D1RenderTarget *
 
     if (!refcount)
     {
-        unsigned int i, j;
+        unsigned int i, j, k;
 
         d2d_clip_stack_cleanup(&render_target->clip_stack);
+        IDWriteRenderingParams_Release(render_target->default_text_rendering_params);
         if (render_target->text_rendering_params)
             IDWriteRenderingParams_Release(render_target->text_rendering_params);
         ID3D10BlendState_Release(render_target->bs);
@@ -252,8 +259,11 @@ static ULONG STDMETHODCALLTYPE d2d_d3d_render_target_Release(ID2D1RenderTarget *
         {
             for (j = 0; j < D2D_BRUSH_TYPE_COUNT; ++j)
             {
-                if (render_target->shape_resources[i].ps[j])
-                    ID3D10PixelShader_Release(render_target->shape_resources[i].ps[j]);
+                for (k = 0; k < D2D_BRUSH_TYPE_COUNT + 1; ++k)
+                {
+                    if (render_target->shape_resources[i].ps[j][k])
+                        ID3D10PixelShader_Release(render_target->shape_resources[i].ps[j][k]);
+                }
             }
             ID3D10VertexShader_Release(render_target->shape_resources[i].vs);
             ID3D10InputLayout_Release(render_target->shape_resources[i].il);
@@ -662,12 +672,9 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawGeometry(ID2D1RenderTarg
             iface, geometry, brush, stroke_width, stroke_style);
 }
 
-static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarget *iface,
-        ID2D1Geometry *geometry, ID2D1Brush *brush, ID2D1Brush *opacity_brush)
+static void STDMETHODCALLTYPE d2d_rt_fill_geometry(struct d2d_d3d_render_target *render_target,
+        const struct d2d_geometry *geometry, struct d2d_brush *brush, struct d2d_brush *opacity_brush)
 {
-    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
-    struct d2d_brush *brush_impl = unsafe_impl_from_ID2D1Brush(brush);
-    const struct d2d_geometry *geometry_impl;
     ID3D10Buffer *ib, *vb, *vs_cb, *ps_cb;
     D3D10_SUBRESOURCE_DATA buffer_data;
     D3D10_BUFFER_DESC buffer_desc;
@@ -680,13 +687,6 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
         float _12, _22, _32, pad1;
     } transform;
 
-    TRACE("iface %p, geometry %p, brush %p, opacity_brush %p.\n", iface, geometry, brush, opacity_brush);
-
-    if (opacity_brush)
-        FIXME("Ignoring opacity brush %p.\n", opacity_brush);
-
-    geometry_impl = unsafe_impl_from_ID2D1Geometry(geometry);
-
     tmp_x =  (2.0f * render_target->dpi_x) / (96.0f * render_target->pixel_size.width);
     tmp_y = -(2.0f * render_target->dpi_y) / (96.0f * render_target->pixel_size.height);
     w = render_target->drawing_state.transform;
@@ -697,7 +697,7 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
     w._22 *= tmp_y;
     w._32 = w._32 * tmp_y + 1.0f;
 
-    g = geometry_impl->transform;
+    g = geometry->transform;
     d2d_matrix_multiply(&g, &w);
 
     transform._11 = g._11;
@@ -725,18 +725,18 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
         return;
     }
 
-    if (FAILED(hr = d2d_brush_get_ps_cb(brush_impl, render_target, &ps_cb)))
+    if (FAILED(hr = d2d_brush_get_ps_cb(brush, opacity_brush, render_target, &ps_cb)))
     {
         WARN("Failed to get ps constant buffer, hr %#x.\n", hr);
         ID3D10Buffer_Release(vs_cb);
         return;
     }
 
-    if (geometry_impl->face_count)
+    if (geometry->face_count)
     {
-        buffer_desc.ByteWidth = geometry_impl->face_count * sizeof(*geometry_impl->faces);
+        buffer_desc.ByteWidth = geometry->face_count * sizeof(*geometry->faces);
         buffer_desc.BindFlags = D3D10_BIND_INDEX_BUFFER;
-        buffer_data.pSysMem = geometry_impl->faces;
+        buffer_data.pSysMem = geometry->faces;
 
         if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->device, &buffer_desc, &buffer_data, &ib)))
         {
@@ -744,9 +744,9 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
             goto done;
         }
 
-        buffer_desc.ByteWidth = geometry_impl->vertex_count * sizeof(*geometry_impl->vertices);
+        buffer_desc.ByteWidth = geometry->vertex_count * sizeof(*geometry->vertices);
         buffer_desc.BindFlags = D3D10_BIND_VERTEX_BUFFER;
-        buffer_data.pSysMem = geometry_impl->vertices;
+        buffer_data.pSysMem = geometry->vertices;
 
         if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->device, &buffer_desc, &buffer_data, &vb)))
         {
@@ -755,17 +755,17 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
             goto done;
         }
 
-        d2d_draw(render_target, D2D_SHAPE_TYPE_TRIANGLE, ib, 3 * geometry_impl->face_count, vb,
-                sizeof(*geometry_impl->vertices), vs_cb, ps_cb, brush_impl);
+        d2d_rt_draw(render_target, D2D_SHAPE_TYPE_TRIANGLE, ib, 3 * geometry->face_count, vb,
+                sizeof(*geometry->vertices), vs_cb, ps_cb, brush, opacity_brush);
 
         ID3D10Buffer_Release(vb);
         ID3D10Buffer_Release(ib);
     }
 
-    if (geometry_impl->bezier_count)
+    if (geometry->bezier_count)
     {
-        buffer_desc.ByteWidth = geometry_impl->bezier_count * sizeof(*geometry_impl->beziers);
-        buffer_data.pSysMem = geometry_impl->beziers;
+        buffer_desc.ByteWidth = geometry->bezier_count * sizeof(*geometry->beziers);
+        buffer_data.pSysMem = geometry->beziers;
 
         if (FAILED(hr = ID3D10Device_CreateBuffer(render_target->device, &buffer_desc, &buffer_data, &vb)))
         {
@@ -773,8 +773,8 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
             goto done;
         }
 
-        d2d_draw(render_target, D2D_SHAPE_TYPE_BEZIER, NULL, 3 * geometry_impl->bezier_count, vb,
-                sizeof(*geometry_impl->beziers->v), vs_cb, ps_cb, brush_impl);
+        d2d_rt_draw(render_target, D2D_SHAPE_TYPE_BEZIER, NULL, 3 * geometry->bezier_count, vb,
+                sizeof(*geometry->beziers->v), vs_cb, ps_cb, brush, opacity_brush);
 
         ID3D10Buffer_Release(vb);
     }
@@ -782,6 +782,30 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarg
 done:
     ID3D10Buffer_Release(ps_cb);
     ID3D10Buffer_Release(vs_cb);
+}
+
+static void STDMETHODCALLTYPE d2d_d3d_render_target_FillGeometry(ID2D1RenderTarget *iface,
+        ID2D1Geometry *geometry, ID2D1Brush *brush, ID2D1Brush *opacity_brush)
+{
+    const struct d2d_geometry *geometry_impl = unsafe_impl_from_ID2D1Geometry(geometry);
+    struct d2d_brush *opacity_brush_impl = unsafe_impl_from_ID2D1Brush(opacity_brush);
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
+    struct d2d_brush *brush_impl = unsafe_impl_from_ID2D1Brush(brush);
+
+    TRACE("iface %p, geometry %p, brush %p, opacity_brush %p.\n", iface, geometry, brush, opacity_brush);
+
+    if (FAILED(render_target->error.code))
+        return;
+
+    if (opacity_brush && brush_impl->type != D2D_BRUSH_TYPE_BITMAP)
+    {
+        render_target->error.code = D2DERR_INCOMPATIBLE_BRUSH_TYPES;
+        render_target->error.tag1 = render_target->drawing_state.tag1;
+        render_target->error.tag2 = render_target->drawing_state.tag2;
+        return;
+    }
+
+    d2d_rt_fill_geometry(render_target, geometry_impl, brush_impl, opacity_brush_impl);
 }
 
 static void STDMETHODCALLTYPE d2d_d3d_render_target_FillMesh(ID2D1RenderTarget *iface,
@@ -916,25 +940,13 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawTextLayout(ID2D1RenderTa
         FIXME("Failed to draw text layout, hr %#x.\n", hr);
 }
 
-static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawGlyphRun(ID2D1RenderTarget *iface,
-        D2D1_POINT_2F baseline_origin, const DWRITE_GLYPH_RUN *glyph_run, ID2D1Brush *brush,
-        DWRITE_MEASURING_MODE measuring_mode)
+static void d2d_rt_draw_glyph_run_outline(struct d2d_d3d_render_target *render_target,
+        D2D1_POINT_2F baseline_origin, const DWRITE_GLYPH_RUN *glyph_run, ID2D1Brush *brush)
 {
-    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
     D2D1_MATRIX_3X2_F *transform, prev_transform;
     ID2D1PathGeometry *geometry;
     ID2D1GeometrySink *sink;
     HRESULT hr;
-
-    TRACE("iface %p, baseline_origin {%.8e, %.8e}, glyph_run %p, brush %p, measuring_mode %#x.\n",
-            iface, baseline_origin.x, baseline_origin.y, glyph_run, brush, measuring_mode);
-
-    if (measuring_mode)
-        FIXME("Ignoring measuring mode %#x.\n", measuring_mode);
-    if (render_target->text_rendering_params)
-        FIXME("Ignoring text rendering parameters %p.\n", render_target->text_rendering_params);
-    if (render_target->drawing_state.textAntialiasMode != D2D1_TEXT_ANTIALIAS_MODE_ALIASED)
-        FIXME("Ignoring text antialiasing mode %#x.\n", render_target->drawing_state.textAntialiasMode);
 
     if (FAILED(hr = ID2D1Factory_CreatePathGeometry(render_target->factory, &geometry)))
     {
@@ -967,10 +979,164 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawGlyphRun(ID2D1RenderTarg
     prev_transform = *transform;
     transform->_31 += baseline_origin.x * transform->_11 + baseline_origin.y * transform->_21;
     transform->_32 += baseline_origin.x * transform->_12 + baseline_origin.y * transform->_22;
-    ID2D1RenderTarget_FillGeometry(iface, (ID2D1Geometry *)geometry, brush, NULL);
+    d2d_rt_fill_geometry(render_target, unsafe_impl_from_ID2D1Geometry((ID2D1Geometry *)geometry),
+            unsafe_impl_from_ID2D1Brush(brush), NULL);
     *transform = prev_transform;
 
     ID2D1PathGeometry_Release(geometry);
+}
+
+static void d2d_rt_draw_glyph_run_bitmap(struct d2d_d3d_render_target *render_target,
+        D2D1_POINT_2F baseline_origin, const DWRITE_GLYPH_RUN *glyph_run, ID2D1Brush *brush,
+        float ppd, DWRITE_RENDERING_MODE rendering_mode, DWRITE_MEASURING_MODE measuring_mode)
+{
+    ID2D1RectangleGeometry *geometry = NULL;
+    ID2D1BitmapBrush *opacity_brush = NULL;
+    D2D1_BITMAP_PROPERTIES bitmap_desc;
+    ID2D1Bitmap *opacity_bitmap = NULL;
+    IDWriteGlyphRunAnalysis *analysis;
+    DWRITE_TEXTURE_TYPE texture_type;
+    D2D1_BRUSH_PROPERTIES brush_desc;
+    IDWriteFactory *dwrite_factory;
+    void *opacity_values = NULL;
+    size_t opacity_values_size;
+    D2D1_SIZE_U bitmap_size;
+    D2D1_RECT_F run_rect;
+    RECT bounds;
+    HRESULT hr;
+
+    if (FAILED(hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+            &IID_IDWriteFactory, (IUnknown **)&dwrite_factory)))
+    {
+        ERR("Failed to create dwrite factory, hr %#x.\n", hr);
+        return;
+    }
+
+    hr = IDWriteFactory_CreateGlyphRunAnalysis(dwrite_factory, glyph_run, ppd, NULL,
+            rendering_mode, measuring_mode, baseline_origin.x, baseline_origin.y, &analysis);
+    IDWriteFactory_Release(dwrite_factory);
+    if (FAILED(hr))
+    {
+        ERR("Failed to create glyph run analysis, hr %#x.\n", hr);
+        return;
+    }
+
+    if (rendering_mode == DWRITE_RENDERING_MODE_ALIASED)
+        texture_type = DWRITE_TEXTURE_ALIASED_1x1;
+    else
+        texture_type = DWRITE_TEXTURE_CLEARTYPE_3x1;
+
+    if (FAILED(hr = IDWriteGlyphRunAnalysis_GetAlphaTextureBounds(analysis, texture_type, &bounds)))
+    {
+        ERR("Failed to get alpha texture bounds, hr %#x.\n", hr);
+        goto done;
+    }
+
+    d2d_size_set(&bitmap_size, bounds.right - bounds.left, bounds.bottom - bounds.top);
+    if (!bitmap_size.width || !bitmap_size.height)
+    {
+        /* Empty run, nothing to do. */
+        goto done;
+    }
+
+    if (texture_type == DWRITE_TEXTURE_CLEARTYPE_3x1)
+        bitmap_size.width *= 3;
+    opacity_values_size = bitmap_size.width * bitmap_size.height;
+    if (!(opacity_values = HeapAlloc(GetProcessHeap(), 0, opacity_values_size)))
+    {
+        ERR("Failed to allocate opacity values.\n");
+        goto done;
+    }
+
+    if (FAILED(hr = IDWriteGlyphRunAnalysis_CreateAlphaTexture(analysis,
+            texture_type, &bounds, opacity_values, opacity_values_size)))
+    {
+        ERR("Failed to create alpha texture, hr %#x.\n", hr);
+        goto done;
+    }
+
+    bitmap_desc.pixelFormat.format = DXGI_FORMAT_A8_UNORM;
+    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    bitmap_desc.dpiX = render_target->dpi_x;
+    if (texture_type == DWRITE_TEXTURE_CLEARTYPE_3x1)
+        bitmap_desc.dpiX *= 3.0f;
+    bitmap_desc.dpiY = render_target->dpi_y;
+    if (FAILED(hr = d2d_d3d_render_target_CreateBitmap(&render_target->ID2D1RenderTarget_iface,
+            bitmap_size, opacity_values, bitmap_size.width, &bitmap_desc, &opacity_bitmap)))
+    {
+        ERR("Failed to create opacity bitmap, hr %#x.\n", hr);
+        goto done;
+    }
+
+    brush_desc.opacity = 1.0f;
+    brush_desc.transform._11 = 1.0f;
+    brush_desc.transform._12 = 0.0f;
+    brush_desc.transform._21 = 0.0f;
+    brush_desc.transform._22 = 1.0f;
+    brush_desc.transform._31 = bounds.left;
+    brush_desc.transform._32 = bounds.top;
+    if (FAILED(hr = d2d_d3d_render_target_CreateBitmapBrush(&render_target->ID2D1RenderTarget_iface,
+            opacity_bitmap, NULL, &brush_desc, &opacity_brush)))
+    {
+        ERR("Failed to create opacity bitmap brush, hr %#x.\n", hr);
+        goto done;
+    }
+
+    d2d_rect_set(&run_rect, bounds.left, bounds.top, bounds.right, bounds.bottom);
+    if (FAILED(hr = ID2D1Factory_CreateRectangleGeometry(render_target->factory, &run_rect, &geometry)))
+    {
+        ERR("Failed to create geometry, hr %#x.\n", hr);
+        goto done;
+    }
+
+    d2d_rt_fill_geometry(render_target, unsafe_impl_from_ID2D1Geometry((ID2D1Geometry *)geometry),
+            unsafe_impl_from_ID2D1Brush(brush), unsafe_impl_from_ID2D1Brush((ID2D1Brush *)opacity_brush));
+
+done:
+    if (geometry)
+        ID2D1RectangleGeometry_Release(geometry);
+    if (opacity_brush)
+        ID2D1BitmapBrush_Release(opacity_brush);
+    if (opacity_bitmap)
+        ID2D1Bitmap_Release(opacity_bitmap);
+    HeapFree(GetProcessHeap(), 0, opacity_values);
+    IDWriteGlyphRunAnalysis_Release(analysis);
+}
+
+static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawGlyphRun(ID2D1RenderTarget *iface,
+        D2D1_POINT_2F baseline_origin, const DWRITE_GLYPH_RUN *glyph_run, ID2D1Brush *brush,
+        DWRITE_MEASURING_MODE measuring_mode)
+{
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
+    IDWriteRenderingParams *rendering_params;
+    DWRITE_RENDERING_MODE rendering_mode;
+    HRESULT hr;
+    float ppd;
+
+    TRACE("iface %p, baseline_origin {%.8e, %.8e}, glyph_run %p, brush %p, measuring_mode %#x.\n",
+            iface, baseline_origin.x, baseline_origin.y, glyph_run, brush, measuring_mode);
+
+    if (FAILED(render_target->error.code))
+        return;
+
+    if (render_target->drawing_state.textAntialiasMode != D2D1_TEXT_ANTIALIAS_MODE_DEFAULT)
+        FIXME("Ignoring text antialiasing mode %#x.\n", render_target->drawing_state.textAntialiasMode);
+
+    ppd = max(render_target->dpi_x, render_target->dpi_y) / 96.0f;
+    rendering_params = render_target->text_rendering_params ? render_target->text_rendering_params
+            : render_target->default_text_rendering_params;
+    if (FAILED(hr = IDWriteFontFace_GetRecommendedRenderingMode(glyph_run->fontFace, glyph_run->fontEmSize,
+            ppd, measuring_mode, rendering_params, &rendering_mode)))
+    {
+        ERR("Failed to get recommended rendering mode, hr %#x.\n", hr);
+        rendering_mode = DWRITE_RENDERING_MODE_OUTLINE;
+    }
+
+    if (rendering_mode == DWRITE_RENDERING_MODE_OUTLINE)
+        d2d_rt_draw_glyph_run_outline(render_target, baseline_origin, glyph_run, brush);
+    else
+        d2d_rt_draw_glyph_run_bitmap(render_target, baseline_origin, glyph_run, brush,
+                ppd, rendering_mode, measuring_mode);
 }
 
 static void STDMETHODCALLTYPE d2d_d3d_render_target_SetTransform(ID2D1RenderTarget *iface,
@@ -1217,8 +1383,8 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_Clear(ID2D1RenderTarget *ifa
         return;
     }
 
-    d2d_draw(render_target, D2D_SHAPE_TYPE_TRIANGLE, render_target->ib, 6,
-            render_target->vb, render_target->vb_stride, vs_cb, ps_cb, NULL);
+    d2d_rt_draw(render_target, D2D_SHAPE_TYPE_TRIANGLE, render_target->ib, 6,
+            render_target->vb, render_target->vb_stride, vs_cb, ps_cb, NULL, NULL);
 
     ID3D10Buffer_Release(ps_cb);
     ID3D10Buffer_Release(vs_cb);
@@ -1226,20 +1392,26 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_Clear(ID2D1RenderTarget *ifa
 
 static void STDMETHODCALLTYPE d2d_d3d_render_target_BeginDraw(ID2D1RenderTarget *iface)
 {
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
+
     TRACE("iface %p.\n", iface);
+
+    memset(&render_target->error, 0, sizeof(render_target->error));
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_EndDraw(ID2D1RenderTarget *iface,
         D2D1_TAG *tag1, D2D1_TAG *tag2)
 {
+    struct d2d_d3d_render_target *render_target = impl_from_ID2D1RenderTarget(iface);
+
     TRACE("iface %p, tag1 %p, tag2 %p.\n", iface, tag1, tag2);
 
     if (tag1)
-        *tag1 = 0;
+        *tag1 = render_target->error.tag1;
     if (tag2)
-        *tag2 = 0;
+        *tag1 = render_target->error.tag2;
 
-    return S_OK;
+    return render_target->error.code;
 }
 
 static D2D1_PIXEL_FORMAT * STDMETHODCALLTYPE d2d_d3d_render_target_GetPixelFormat(ID2D1RenderTarget *iface,
@@ -1528,11 +1700,12 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
     D3D10_SUBRESOURCE_DATA buffer_data;
     D3D10_STATE_BLOCK_MASK state_mask;
     DXGI_SURFACE_DESC surface_desc;
+    IDWriteFactory *dwrite_factory;
     D3D10_RASTERIZER_DESC rs_desc;
     D3D10_BUFFER_DESC buffer_desc;
     D3D10_BLEND_DESC blend_desc;
     ID3D10Resource *resource;
-    unsigned int i, j;
+    unsigned int i, j, k;
     HRESULT hr;
 
     static const D3D10_INPUT_ELEMENT_DESC il_desc_triangle[] =
@@ -1604,6 +1777,50 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
         0x00000010, 0x04000059, 0x00208e46, 0x00000000, 0x00000001, 0x03000065, 0x001020f2, 0x00000000,
         0x06000036, 0x001020f2, 0x00000000, 0x00208e46, 0x00000000, 0x00000000, 0x0100003e,
     };
+    static const DWORD ps_code_triangle_solid_bitmap[] =
+    {
+#if 0
+        float4 color;
+
+        float3x2 transform;
+        float opacity;
+        bool ignore_alpha;
+
+        SamplerState s;
+        Texture2D t;
+
+        float4 main(float4 position : SV_POSITION) : SV_Target
+        {
+            float2 texcoord;
+            float4 ret;
+
+            texcoord.x = position.x * transform._11 + position.y * transform._21 + transform._31;
+            texcoord.y = position.x * transform._12 + position.y * transform._22 + transform._32;
+            ret = t.Sample(s, texcoord) * opacity;
+            if (ignore_alpha)
+                ret.a = opacity;
+
+            return color * ret.a;
+        }
+#endif
+        0x43425844, 0x2260a2ae, 0x81907b3e, 0xcaf27063, 0xccb83ef2, 0x00000001, 0x00000208, 0x00000003,
+        0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
+        0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x5449534f, 0x004e4f49,
+        0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
+        0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x0000016c, 0x00000040,
+        0x0000005b, 0x04000059, 0x00208e46, 0x00000000, 0x00000004, 0x0300005a, 0x00106000, 0x00000000,
+        0x04001858, 0x00107000, 0x00000000, 0x00005555, 0x04002064, 0x00101032, 0x00000000, 0x00000001,
+        0x03000065, 0x001020f2, 0x00000000, 0x02000068, 0x00000001, 0x0800000f, 0x00100012, 0x00000000,
+        0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000001, 0x08000000, 0x00100012, 0x00000000,
+        0x0010000a, 0x00000000, 0x0020802a, 0x00000000, 0x00000001, 0x0800000f, 0x00100042, 0x00000000,
+        0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000002, 0x08000000, 0x00100022, 0x00000000,
+        0x0010002a, 0x00000000, 0x0020802a, 0x00000000, 0x00000002, 0x09000045, 0x001000f2, 0x00000000,
+        0x00100046, 0x00000000, 0x00107e46, 0x00000000, 0x00106000, 0x00000000, 0x08000038, 0x00100012,
+        0x00000000, 0x0010003a, 0x00000000, 0x0020803a, 0x00000000, 0x00000002, 0x0b000037, 0x00100012,
+        0x00000000, 0x0020800a, 0x00000000, 0x00000003, 0x0020803a, 0x00000000, 0x00000002, 0x0010000a,
+        0x00000000, 0x08000038, 0x001020f2, 0x00000000, 0x00100006, 0x00000000, 0x00208e46, 0x00000000,
+        0x00000000, 0x0100003e,
+    };
     static const DWORD ps_code_triangle_bitmap[] =
     {
 #if 0
@@ -1645,6 +1862,110 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
         0x00000000, 0x0020800a, 0x00000000, 0x00000002, 0x0020803a, 0x00000000, 0x00000001, 0x0010003a,
         0x00000000, 0x05000036, 0x00102072, 0x00000000, 0x00100246, 0x00000000, 0x0100003e,
     };
+    static const DWORD ps_code_triangle_bitmap_solid[] =
+    {
+#if 0
+        float3x2 transform;
+        float opacity;
+        bool ignore_alpha;
+
+        float4 color;
+
+        SamplerState s;
+        Texture2D t;
+
+        float4 main(float4 position : SV_POSITION) : SV_Target
+        {
+            float2 texcoord;
+            float4 ret;
+
+            texcoord.x = position.x * transform._11 + position.y * transform._21 + transform._31;
+            texcoord.y = position.x * transform._12 + position.y * transform._22 + transform._32;
+            ret = t.Sample(s, texcoord) * opacity;
+            if (ignore_alpha)
+                ret.a = opacity;
+
+            return ret * color.a;
+        }
+#endif
+        0x43425844, 0x45447736, 0x63a6dd80, 0x1778fc71, 0x1e6d322e, 0x00000001, 0x00000208, 0x00000003,
+        0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
+        0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x5449534f, 0x004e4f49,
+        0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
+        0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x0000016c, 0x00000040,
+        0x0000005b, 0x04000059, 0x00208e46, 0x00000000, 0x00000004, 0x0300005a, 0x00106000, 0x00000000,
+        0x04001858, 0x00107000, 0x00000000, 0x00005555, 0x04002064, 0x00101032, 0x00000000, 0x00000001,
+        0x03000065, 0x001020f2, 0x00000000, 0x02000068, 0x00000001, 0x0800000f, 0x00100012, 0x00000000,
+        0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000000, 0x08000000, 0x00100012, 0x00000000,
+        0x0010000a, 0x00000000, 0x0020802a, 0x00000000, 0x00000000, 0x0800000f, 0x00100042, 0x00000000,
+        0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000001, 0x08000000, 0x00100022, 0x00000000,
+        0x0010002a, 0x00000000, 0x0020802a, 0x00000000, 0x00000001, 0x09000045, 0x001000f2, 0x00000000,
+        0x00100046, 0x00000000, 0x00107e46, 0x00000000, 0x00106000, 0x00000000, 0x08000038, 0x001000f2,
+        0x00000000, 0x00100e46, 0x00000000, 0x00208ff6, 0x00000000, 0x00000001, 0x0b000037, 0x00100082,
+        0x00000000, 0x0020800a, 0x00000000, 0x00000002, 0x0020803a, 0x00000000, 0x00000001, 0x0010003a,
+        0x00000000, 0x08000038, 0x001020f2, 0x00000000, 0x00100e46, 0x00000000, 0x00208ff6, 0x00000000,
+        0x00000003, 0x0100003e,
+    };
+    static const DWORD ps_code_triangle_bitmap_bitmap[] =
+    {
+#if 0
+        struct brush
+        {
+            float3x2 transform;
+            float opacity;
+            bool ignore_alpha;
+        } brush0, brush1;
+
+        SamplerState s0, s1;
+        Texture2D t0, t1;
+
+        float4 main(float4 position : SV_POSITION) : SV_Target
+        {
+            float2 texcoord;
+            float opacity;
+            float4 ret;
+
+            texcoord.x = position.x * brush0.transform._11 + position.y * brush0.transform._21 + brush0.transform._31;
+            texcoord.y = position.x * brush0.transform._12 + position.y * brush0.transform._22 + brush0.transform._32;
+            ret = t0.Sample(s0, texcoord) * brush0.opacity;
+            if (brush0.ignore_alpha)
+                ret.a = brush0.opacity;
+
+            texcoord.x = position.x * brush1.transform._11 + position.y * brush1.transform._21 + brush1.transform._31;
+            texcoord.y = position.x * brush1.transform._12 + position.y * brush1.transform._22 + brush1.transform._32;
+            opacity = t1.Sample(s1, texcoord).a * brush1.opacity;
+            if (brush1.ignore_alpha)
+                opacity = brush1.opacity;
+
+            return ret * opacity;
+        }
+#endif
+        0x43425844, 0x8eee6bfc, 0x57b72708, 0xa0f7c086, 0x867c11ec, 0x00000001, 0x00000310, 0x00000003,
+        0x0000002c, 0x00000060, 0x00000094, 0x4e475349, 0x0000002c, 0x00000001, 0x00000008, 0x00000020,
+        0x00000000, 0x00000001, 0x00000003, 0x00000000, 0x0000030f, 0x505f5653, 0x5449534f, 0x004e4f49,
+        0x4e47534f, 0x0000002c, 0x00000001, 0x00000008, 0x00000020, 0x00000000, 0x00000000, 0x00000003,
+        0x00000000, 0x0000000f, 0x545f5653, 0x65677261, 0xabab0074, 0x52444853, 0x00000274, 0x00000040,
+        0x0000009d, 0x04000059, 0x00208e46, 0x00000000, 0x00000006, 0x0300005a, 0x00106000, 0x00000000,
+        0x0300005a, 0x00106000, 0x00000001, 0x04001858, 0x00107000, 0x00000000, 0x00005555, 0x04001858,
+        0x00107000, 0x00000001, 0x00005555, 0x04002064, 0x00101032, 0x00000000, 0x00000001, 0x03000065,
+        0x001020f2, 0x00000000, 0x02000068, 0x00000002, 0x0800000f, 0x00100012, 0x00000000, 0x00101046,
+        0x00000000, 0x00208046, 0x00000000, 0x00000003, 0x08000000, 0x00100012, 0x00000000, 0x0010000a,
+        0x00000000, 0x0020802a, 0x00000000, 0x00000003, 0x0800000f, 0x00100042, 0x00000000, 0x00101046,
+        0x00000000, 0x00208046, 0x00000000, 0x00000004, 0x08000000, 0x00100022, 0x00000000, 0x0010002a,
+        0x00000000, 0x0020802a, 0x00000000, 0x00000004, 0x09000045, 0x001000f2, 0x00000000, 0x00100046,
+        0x00000000, 0x00107e46, 0x00000001, 0x00106000, 0x00000001, 0x08000038, 0x00100012, 0x00000000,
+        0x0010003a, 0x00000000, 0x0020803a, 0x00000000, 0x00000004, 0x0b000037, 0x00100012, 0x00000000,
+        0x0020800a, 0x00000000, 0x00000005, 0x0020803a, 0x00000000, 0x00000004, 0x0010000a, 0x00000000,
+        0x0800000f, 0x00100022, 0x00000000, 0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000000,
+        0x08000000, 0x00100012, 0x00000001, 0x0010001a, 0x00000000, 0x0020802a, 0x00000000, 0x00000000,
+        0x0800000f, 0x00100022, 0x00000000, 0x00101046, 0x00000000, 0x00208046, 0x00000000, 0x00000001,
+        0x08000000, 0x00100022, 0x00000001, 0x0010001a, 0x00000000, 0x0020802a, 0x00000000, 0x00000001,
+        0x09000045, 0x001000f2, 0x00000001, 0x00100046, 0x00000001, 0x00107e46, 0x00000000, 0x00106000,
+        0x00000000, 0x08000038, 0x001000f2, 0x00000001, 0x00100e46, 0x00000001, 0x00208ff6, 0x00000000,
+        0x00000001, 0x0b000037, 0x00100082, 0x00000001, 0x0020800a, 0x00000000, 0x00000002, 0x0020803a,
+        0x00000000, 0x00000001, 0x0010003a, 0x00000001, 0x07000038, 0x001020f2, 0x00000000, 0x00100006,
+        0x00000000, 0x00100e46, 0x00000001, 0x0100003e,
+    };
     /* The basic idea here is to evaluate the implicit form of the curve in
      * texture space. "t.z" determines which side of the curve is shaded. */
     static const DWORD ps_code_bezier_solid[] =
@@ -1670,6 +1991,29 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
         0x07000038, 0x00100012, 0x00000000, 0x0010000a, 0x00000000, 0x0010102a, 0x00000001, 0x07000031,
         0x00100012, 0x00000000, 0x0010000a, 0x00000000, 0x00004001, 0x00000000, 0x0304000d, 0x0010000a,
         0x00000000, 0x06000036, 0x001020f2, 0x00000000, 0x00208e46, 0x00000000, 0x00000000, 0x0100003e,
+    };
+    static const struct brush_shader
+    {
+        const void *byte_code;
+        size_t byte_code_size;
+        enum d2d_shape_type shape_type;
+        enum d2d_brush_type brush_type;
+        enum d2d_brush_type opacity_brush_type;
+    }
+    brush_shaders[] =
+    {
+        {ps_code_triangle_solid, sizeof(ps_code_triangle_solid),
+                D2D_SHAPE_TYPE_TRIANGLE, D2D_BRUSH_TYPE_SOLID, D2D_BRUSH_TYPE_COUNT},
+        {ps_code_triangle_solid_bitmap, sizeof(ps_code_triangle_solid_bitmap),
+            D2D_SHAPE_TYPE_TRIANGLE, D2D_BRUSH_TYPE_SOLID, D2D_BRUSH_TYPE_BITMAP},
+        {ps_code_triangle_bitmap, sizeof(ps_code_triangle_bitmap),
+                D2D_SHAPE_TYPE_TRIANGLE, D2D_BRUSH_TYPE_BITMAP, D2D_BRUSH_TYPE_COUNT},
+        {ps_code_triangle_bitmap_solid, sizeof(ps_code_triangle_bitmap_solid),
+                D2D_SHAPE_TYPE_TRIANGLE, D2D_BRUSH_TYPE_BITMAP, D2D_BRUSH_TYPE_SOLID},
+        {ps_code_triangle_bitmap_bitmap, sizeof(ps_code_triangle_bitmap_bitmap),
+                D2D_SHAPE_TYPE_TRIANGLE, D2D_BRUSH_TYPE_BITMAP, D2D_BRUSH_TYPE_BITMAP},
+        {ps_code_bezier_solid, sizeof(ps_code_bezier_solid),
+                D2D_SHAPE_TYPE_BEZIER, D2D_BRUSH_TYPE_SOLID, D2D_BRUSH_TYPE_COUNT},
     };
     static const struct
     {
@@ -1766,28 +2110,16 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
         goto err;
     }
 
-    if (FAILED(hr = ID3D10Device_CreatePixelShader(render_target->device,
-            ps_code_triangle_solid, sizeof(ps_code_triangle_solid),
-            &render_target->shape_resources[D2D_SHAPE_TYPE_TRIANGLE].ps[D2D_BRUSH_TYPE_SOLID])))
+    for (i = 0; i < sizeof(brush_shaders) / sizeof(*brush_shaders); ++i)
     {
-        WARN("Failed to create triangle/solid pixel shader, hr %#x.\n", hr);
-        goto err;
-    }
-
-    if (FAILED(hr = ID3D10Device_CreatePixelShader(render_target->device,
-            ps_code_triangle_bitmap, sizeof(ps_code_triangle_bitmap),
-            &render_target->shape_resources[D2D_SHAPE_TYPE_TRIANGLE].ps[D2D_BRUSH_TYPE_BITMAP])))
-    {
-        WARN("Failed to create triangle/bitmap pixel shader, hr %#x.\n", hr);
-        goto err;
-    }
-
-    if (FAILED(hr = ID3D10Device_CreatePixelShader(render_target->device,
-            ps_code_bezier_solid, sizeof(ps_code_bezier_solid),
-            &render_target->shape_resources[D2D_SHAPE_TYPE_BEZIER].ps[D2D_BRUSH_TYPE_SOLID])))
-    {
-        WARN("Failed to create bezier/solid pixel shader, hr %#x.\n", hr);
-        goto err;
+        const struct brush_shader *bs = &brush_shaders[i];
+        if (FAILED(hr = ID3D10Device_CreatePixelShader(render_target->device, bs->byte_code, bs->byte_code_size,
+                &render_target->shape_resources[bs->shape_type].ps[bs->brush_type][bs->opacity_brush_type])))
+        {
+            WARN("Failed to create pixel shader for shape type %#x and brush types %#x/%#x.\n",
+                    bs->shape_type, bs->brush_type, bs->opacity_brush_type);
+            goto err;
+        }
     }
 
     buffer_desc.ByteWidth = sizeof(indices);
@@ -1858,6 +2190,21 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
         goto err;
     }
 
+    if (FAILED(hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+            &IID_IDWriteFactory, (IUnknown **)&dwrite_factory)))
+    {
+        ERR("Failed to create dwrite factory, hr %#x.\n", hr);
+        goto err;
+    }
+
+    hr = IDWriteFactory_CreateRenderingParams(dwrite_factory, &render_target->default_text_rendering_params);
+    IDWriteFactory_Release(dwrite_factory);
+    if (FAILED(hr))
+    {
+        ERR("Failed to create default text rendering parameters, hr %#x.\n", hr);
+        goto err;
+    }
+
     if (FAILED(hr = IDXGISurface_GetDesc(surface, &surface_desc)))
     {
         WARN("Failed to get surface desc, hr %#x.\n", hr);
@@ -1888,6 +2235,8 @@ HRESULT d2d_d3d_render_target_init(struct d2d_d3d_render_target *render_target, 
     return S_OK;
 
 err:
+    if (render_target->default_text_rendering_params)
+        IDWriteRenderingParams_Release(render_target->default_text_rendering_params);
     if (render_target->bs)
         ID3D10BlendState_Release(render_target->bs);
     if (render_target->rs)
@@ -1900,8 +2249,11 @@ err:
     {
         for (j = 0; j < D2D_BRUSH_TYPE_COUNT; ++j)
         {
-            if (render_target->shape_resources[i].ps[j])
-                ID3D10PixelShader_Release(render_target->shape_resources[i].ps[j]);
+            for (k = 0; k < D2D_BRUSH_TYPE_COUNT + 1; ++k)
+            {
+                if (render_target->shape_resources[i].ps[j][k])
+                    ID3D10PixelShader_Release(render_target->shape_resources[i].ps[j][k]);
+            }
         }
         if (render_target->shape_resources[i].vs)
             ID3D10VertexShader_Release(render_target->shape_resources[i].vs);

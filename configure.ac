@@ -203,6 +203,8 @@ then
         AC_MSG_ERROR([--enable-win64 and --with-wine64 are mutually exclusive.
 --enable-win64 should be used in the 64-bit build tree, --with-wine64 in the 32-bit Wow64 build tree.])
     fi
+    test "$srcdir" != . || AC_MSG_ERROR([--with-wine64 cannot be used when building inside the source tree.
+You should create a separate build directory and run configure from there.])
     enable_fonts=${enable_fonts:-no}
     enable_server=${enable_server:-no}
 elif test "x$enable_win64" = "xyes"
@@ -765,6 +767,7 @@ case $host_os in
             dnl CoreServices needed by AudioUnit
             AC_SUBST(COREAUDIO_LIBS,"-framework CoreAudio -framework AudioUnit -framework CoreServices -framework AudioToolbox -framework CoreMIDI")
         fi
+        enable_winecoreaudio_drv=${enable_winecoreaudio_drv:-yes}
         dnl Check for the AUGraphAddNode function
         ac_save_LIBS="$LIBS"
         LIBS="$LIBS $COREAUDIO_LIBS"
@@ -848,7 +851,6 @@ case $host_os in
 
   linux-android*)
     DLLFLAGS="$DLLFLAGS -fPIC"
-    dlldir="\${libdir}"
     WINE_TRY_CFLAGS([-fPIC -Wl,--export-dynamic],
                     [LDEXECFLAGS="-Wl,--export-dynamic"])
     WINE_TRY_CFLAGS([-fPIC -Wl,--rpath,\$ORIGIN/../lib],
@@ -860,13 +862,8 @@ case $host_os in
 
     WINE_TRY_CFLAGS([-Wl,--enable-new-dtags],
                     [LDRPATH_INSTALL="$LDRPATH_INSTALL -Wl,--enable-new-dtags"])
-
-    case $host_cpu in
-      *i[[3456789]]86* | x86_64)
-        WINE_TRY_CFLAGS([-Wl,--section-start,.interp=0x7bf00400],
-                        [LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x7bf00400"])
-        ;;
-    esac
+    WINE_TRY_CFLAGS([-Wl,-pie],
+                    [LDRPATH_INSTALL="$LDRPATH_INSTALL -Wl,-pie"])
 
     AC_SUBST(LIBWINE_SHAREDLIB,"libwine.so")
     AC_SUBST(LIBWINE_INSTALL_LIB,"libwine.so")
@@ -938,8 +935,10 @@ case $host_os in
     ;;
 esac
 
+enable_winecoreaudio_drv=${enable_winecoreaudio_drv:-no}
 enable_wineqtdecoder=${enable_wineqtdecoder:-no}
 enable_winemac_drv=${enable_winemac_drv:-no}
+test "$ac_cv_header_linux_joystick_h" = "yes" -o "$ac_cv_header_IOKit_hid_IOHIDLib_h" = "yes" || enable_winejoystick_drv=${enable_winejoystick_drv:-no}
 
 dnl Check for cross compiler to build test programs
 AC_SUBST(CROSSTARGET,"")
@@ -1454,6 +1453,7 @@ then
 fi
 WINE_NOTICE_WITH(pulse, [test -z "$PULSE_LIBS"],
         [libpulse ${notice_platform}development files not found or too old, Pulse won't be supported.])
+test -n "$PULSE_LIBS" || enable_winepulse_drv=${enable_winepulse_drv:-no}
 
 dnl **** Check for gstreamer ****
 if test "x$with_gstreamer" != "xno"
@@ -1495,6 +1495,7 @@ then
 #endif]], [[snd_pcm_hw_params_get_access_mask(NULL, NULL)]])],
                         [ALSA_LIBS="-lasound"])])
 fi
+test -n "$ALSA_LIBS" || enable_winealsa_drv=${enable_winealsa_drv:-no}
 
 dnl **** Check for OSSv4 ****
 if test "x$with_oss" != xno
@@ -1516,6 +1517,7 @@ then
         WINE_NOTICE([OSS sound system found but too old (OSSv4 needed), OSS won't be supported.])
     fi
 fi
+test "x$ac_cv_member_oss_sysinfo_numaudioengines" = xyes || enable_wineoss_drv=${enable_wineoss_drv:-no}
 
 dnl **** Check for capi4linux ****
 if test "x$with_capi" != "xno"
@@ -1650,7 +1652,9 @@ if test "x$ac_cv_lib_openal" = xyes
 then
     AC_CACHE_CHECK([for openal-soft], ac_cv_have_openalsoft,
         AC_COMPILE_IFELSE([AC_LANG_PROGRAM(
-            [[#include <AL/alext.h>
+            [[#include <AL/al.h>
+#include <AL/alc.h>
+#include <AL/alext.h>
 LPALCRENDERSAMPLESSOFT x;]])],[ac_cv_have_openalsoft=yes],[ac_cv_have_openalsoft=no]))
 fi
 if test "x$ac_cv_have_openalsoft" != xyes
@@ -1684,16 +1688,8 @@ then
     WINE_CHECK_SONAME(netapi,libnetapi_init,,[AC_DEFINE_UNQUOTED(SONAME_LIBNETAPI,["libnetapi.$LIBEXT"])])
 fi
 
-dnl **** Disable unsupported winmm drivers ****
-test -n "$ALSA_LIBS" || enable_winealsa_drv=${enable_winealsa_drv:-no}
-test -n "$COREAUDIO_LIBS" || enable_winecoreaudio_drv=${enable_winecoreaudio_drv:-no}
-test -n "$PULSE_LIBS" || enable_winepulse_drv=${enable_winepulse_drv:-no}
-test "x$ac_cv_member_oss_sysinfo_numaudioengines" = xyes || enable_wineoss_drv=${enable_wineoss_drv:-no}
-test "$ac_cv_header_linux_joystick_h" = "yes" -o "$ac_cv_header_IOKit_hid_IOHIDLib_h" = "yes" || enable_winejoystick_drv=${enable_winejoystick_drv:-no}
-
 dnl **** Check for any sound system ****
-if test "x$ALSA_LIBS$COREAUDIO_LIBS$PULSE_LIBS" = "x" -a \
-        "x$ac_cv_member_oss_sysinfo_numaudioengines" != xyes -a \
+if test "x$enable_winealsa_drv$enable_winecoreaudio_drv$enable_winepulse_drv$enable_wineoss_drv" = xnononono -a \
         "x$with_alsa$with_coreaudio$with_oss$with_pulse" != xnononono
 then
     WINE_WARNING([No sound system was found. Windows applications will be silent.])
@@ -1933,6 +1929,7 @@ case $build_os in
 esac
 
 case $host_os in
+  linux-android*) ;;
   linux*)
     case $host_cpu in
       *i[[3456789]]86*|x86_64*)
@@ -3299,7 +3296,7 @@ WINE_CONFIG_LIB(winecrt0)
 WINE_CONFIG_DLL(wined3d,,[implib])
 WINE_CONFIG_DLL(winegstreamer)
 WINE_CONFIG_DLL(winejoystick.drv)
-WINE_CONFIG_DLL(winemac.drv)
+WINE_CONFIG_DLL(winemac.drv,,[po])
 WINE_CONFIG_DLL(winemapi)
 WINE_CONFIG_DLL(winemp3.acm)
 WINE_CONFIG_DLL(wineoss.drv)
