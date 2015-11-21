@@ -740,16 +740,15 @@ failed:
     return FALSE;
 }
 
-static int describeContext( struct wgl_context *ctx ) {
-    int tmp;
-    int ctx_vis_id;
-    TRACE(" Context %p have (vis:%p):\n", ctx, ctx->vis);
-    pglXGetFBConfigAttrib(gdi_display, ctx->fmt->fbconfig, GLX_FBCONFIG_ID, &tmp);
-    TRACE(" - FBCONFIG_ID 0x%x\n", tmp);
-    pglXGetFBConfigAttrib(gdi_display, ctx->fmt->fbconfig, GLX_VISUAL_ID, &tmp);
-    TRACE(" - VISUAL_ID 0x%x\n", tmp);
-    ctx_vis_id = tmp;
-    return ctx_vis_id;
+static const char *debugstr_fbconfig( GLXFBConfig fbconfig )
+{
+    int id, visual, drawable;
+
+    if (pglXGetFBConfigAttrib( gdi_display, fbconfig, GLX_FBCONFIG_ID, &id ))
+        return "*** invalid fbconfig";
+    pglXGetFBConfigAttrib( gdi_display, fbconfig, GLX_VISUAL_ID, &visual );
+    pglXGetFBConfigAttrib( gdi_display, fbconfig, GLX_DRAWABLE_TYPE, &drawable );
+    return wine_dbg_sprintf( "fbconfig %#x visual id %#x drawable type %#x", id, visual, drawable );
 }
 
 static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, struct wgl_pbuffer* pbuf) {
@@ -1264,18 +1263,15 @@ static GLXContext create_glxcontext(Display *display, struct wgl_context *contex
 {
     GLXContext ctx;
 
-    /* We use indirect rendering for rendering to bitmaps. See get_formats for a comment about this. */
-    BOOL indirect = !(context->fmt->dwFlags & PFD_DRAW_TO_BITMAP);
-
     if(context->gl3_context)
     {
         if(context->numAttribs)
-            ctx = pglXCreateContextAttribsARB(gdi_display, context->fmt->fbconfig, shareList, indirect, context->attribList);
+            ctx = pglXCreateContextAttribsARB(gdi_display, context->fmt->fbconfig, shareList, GL_TRUE, context->attribList);
         else
-            ctx = pglXCreateContextAttribsARB(gdi_display, context->fmt->fbconfig, shareList, indirect, NULL);
+            ctx = pglXCreateContextAttribsARB(gdi_display, context->fmt->fbconfig, shareList, GL_TRUE, NULL);
     }
     else if(context->vis)
-        ctx = pglXCreateContext(gdi_display, context->vis, shareList, indirect);
+        ctx = pglXCreateContext(gdi_display, context->vis, shareList, GL_TRUE);
     else /* Create a GLX Context for a pbuffer */
         ctx = pglXCreateNewContext(gdi_display, context->fmt->fbconfig, context->fmt->render_type, shareList, TRUE);
 
@@ -1411,7 +1407,8 @@ static BOOL set_win_format( HWND hwnd, const struct wgl_pixel_format *format )
         return FALSE;
     }
 
-    TRACE("created GL drawable %lx for win %p format %x\n", gl->drawable, hwnd, format->fmt_id );
+    TRACE( "created GL drawable %lx for win %p %s\n",
+           gl->drawable, hwnd, debugstr_fbconfig( format->fbconfig ));
 
     XFlush( gdi_display );
 
@@ -1465,22 +1462,6 @@ static BOOL set_pixel_format(HDC hdc, int format, BOOL allow_change)
             int prev = pixel_format_index( gl->format );
             release_gl_drawable( gl );
             return prev == format;  /* cannot change it if already set */
-        }
-    }
-
-    if (TRACE_ON(wgl)) {
-        int gl_test = 0;
-
-        gl_test = pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_FBCONFIG_ID, &value);
-        if (gl_test) {
-           ERR("Failed to retrieve FBCONFIG_ID from GLXFBConfig, expect problems.\n");
-        } else {
-            TRACE(" FBConfig have :\n");
-            TRACE(" - FBCONFIG_ID   0x%x\n", value);
-            pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_VISUAL_ID, &value);
-            TRACE(" - VISUAL_ID     0x%x\n", value);
-            pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DRAWABLE_TYPE, &value);
-            TRACE(" - DRAWABLE_TYPE 0x%x\n", value);
         }
     }
 
@@ -1861,10 +1842,8 @@ static BOOL glxdrv_wglMakeCurrent(HDC hdc, struct wgl_context *ctx)
             goto done;
         }
 
-        if (TRACE_ON(wgl)) {
-            describeContext(ctx);
-            TRACE("hdc %p drawable %lx fmt %p ctx %p\n", hdc, gl->drawable, gl->format, ctx->ctx );
-        }
+        TRACE("hdc %p drawable %lx fmt %p ctx %p %s\n", hdc, gl->drawable, gl->format, ctx->ctx,
+              debugstr_fbconfig( gl->format->fbconfig ));
 
         ret = pglXMakeCurrent(gdi_display, gl->drawable, ctx->ctx);
         if (ret)
@@ -1960,13 +1939,12 @@ static BOOL glxdrv_wglShareLists(struct wgl_context *org, struct wgl_context *de
     }
     else
     {
-        describeContext(org);
-        describeContext(dest);
-
         /* Re-create the GLX context and share display lists */
         pglXDestroyContext(gdi_display, dest->ctx);
         dest->ctx = create_glxcontext(gdi_display, dest, org->ctx);
-        TRACE(" re-created an OpenGL context (%p) for Wine context %p sharing lists with OpenGL ctx %p\n", dest->ctx, dest, org->ctx);
+        TRACE(" re-created context (%p) for Wine context %p (%s) sharing lists with ctx %p (%s)\n",
+              dest->ctx, dest, debugstr_fbconfig(dest->fmt->fbconfig),
+              org->ctx, debugstr_fbconfig( org->fmt->fbconfig));
 
         org->sharing = TRUE;
         dest->sharing = TRUE;

@@ -36,6 +36,7 @@
 #include "ddk/csq.h"
 #include "ddk/ntddk.h"
 #include "ddk/ntifs.h"
+#include "ddk/wdm.h"
 #include "wine/unicode.h"
 #include "wine/server.h"
 #include "wine/list.h"
@@ -2066,6 +2067,16 @@ NTSTATUS WINAPI PsSetCreateThreadNotifyRoutine( PCREATE_THREAD_NOTIFY_ROUTINE No
 
 
 /***********************************************************************
+ *           PsRemoveCreateThreadNotifyRoutine  (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI PsRemoveCreateThreadNotifyRoutine( PCREATE_THREAD_NOTIFY_ROUTINE NotifyRoutine )
+{
+    FIXME( "stub: %p\n", NotifyRoutine );
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
  *           PsTerminateSystemThread   (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI PsTerminateSystemThread(NTSTATUS ExitStatus)
@@ -2377,4 +2388,22 @@ void WINAPI ProbeForRead(void *address, SIZE_T length, ULONG alignment)
 void WINAPI ProbeForWrite(void *address, SIZE_T length, ULONG alignment)
 {
     FIXME("(%p %lu %u) stub\n", address, length, alignment);
+}
+
+/***********************************************************************
+ *           CmRegisterCallback  (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI CmRegisterCallback(EX_CALLBACK_FUNCTION *function, void *context, LARGE_INTEGER *cookie)
+{
+    FIXME("(%p %p %p): stub\n", function, context, cookie);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/***********************************************************************
+ *           CmUnRegisterCallback  (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI CmUnRegisterCallback(LARGE_INTEGER cookie)
+{
+    FIXME("(%s): stub\n", wine_dbgstr_longlong(cookie.QuadPart));
+    return STATUS_NOT_IMPLEMENTED;
 }

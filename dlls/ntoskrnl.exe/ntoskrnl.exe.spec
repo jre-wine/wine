@@ -100,8 +100,8 @@
 @ stub CcUnpinRepinnedBcb
 @ stub CcWaitForCurrentLazyWriterActivity
 @ stub CcZeroData
-@ stub CmRegisterCallback
-@ stub CmUnRegisterCallback
+@ stdcall CmRegisterCallback(ptr ptr ptr)
+@ stdcall CmUnRegisterCallback(int64)
 @ stdcall DbgBreakPoint() ntdll.DbgBreakPoint
 @ stub DbgBreakPointWithStatus
 @ stub DbgLoadImageSymbols
@@ -898,7 +898,7 @@
 @ stub PsProcessType
 @ stub PsReferenceImpersonationToken
 @ stub PsReferencePrimaryToken
-@ stub PsRemoveCreateThreadNotifyRoutine
+@ stdcall PsRemoveCreateThreadNotifyRoutine(ptr)
 @ stub PsRemoveLoadImageNotifyRoutine
 @ stub PsRestoreImpersonation
 @ stub PsReturnPoolQuota

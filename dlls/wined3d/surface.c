@@ -1920,7 +1920,7 @@ HRESULT CDECL wined3d_surface_is_lost(const struct wined3d_surface *surface)
 {
     TRACE("surface %p.\n", surface);
 
-    /* D3D8 and 9 loose full devices, ddraw only surfaces. */
+    /* D3D8 and 9 lose full devices, ddraw only surfaces. */
     return surface->flags & SFLAG_LOST ? WINED3DERR_DEVICELOST : WINED3D_OK;
 }
 
@@ -2885,7 +2885,7 @@ void surface_load_fb_texture(struct wined3d_surface *surface, BOOL srgb, struct 
         context_restore(context, restore_rt);
 }
 
-void surface_prepare_rb(struct wined3d_surface *surface, const struct wined3d_gl_info *gl_info, BOOL multisample)
+static void surface_prepare_rb(struct wined3d_surface *surface, const struct wined3d_gl_info *gl_info, BOOL multisample)
 {
     if (multisample)
     {

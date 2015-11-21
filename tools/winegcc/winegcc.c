@@ -171,6 +171,7 @@ static const struct
 {
     { "macos",   PLATFORM_APPLE },
     { "darwin",  PLATFORM_APPLE },
+    { "android", PLATFORM_ANDROID },
     { "solaris", PLATFORM_SOLARIS },
     { "cygwin",  PLATFORM_CYGWIN },
     { "mingw32", PLATFORM_WINDOWS },
@@ -229,6 +230,8 @@ static const enum target_cpu build_cpu = CPU_ARM64;
 
 #ifdef __APPLE__
 static enum target_platform build_platform = PLATFORM_APPLE;
+#elif defined(__ANDROID__)
+static enum target_platform build_platform = PLATFORM_ANDROID;
 #elif defined(__sun)
 static enum target_platform build_platform = PLATFORM_SOLARIS;
 #elif defined(__CYGWIN__)
@@ -384,6 +387,7 @@ static const strarray* get_lddllflags( const struct options *opts, const strarra
         }
         break;
 
+    case PLATFORM_ANDROID:
     case PLATFORM_SOLARIS:
     case PLATFORM_UNSPECIFIED:
         strarray_add( flags, "-shared" );
@@ -548,47 +552,34 @@ static void compile(struct options* opts, const char* lang)
 
     if (gcc_defs)
     {
-        int fastcall_done = 0;
-        if (opts->target_cpu == CPU_x86_64)
+        switch (opts->target_cpu)
         {
+        case CPU_x86_64:
             strarray_add(comp_args, "-D__stdcall=__attribute__((ms_abi))");
             strarray_add(comp_args, "-D__cdecl=__attribute__((ms_abi))");
             strarray_add(comp_args, "-D_stdcall=__attribute__((ms_abi))");
             strarray_add(comp_args, "-D_cdecl=__attribute__((ms_abi))");
             strarray_add(comp_args, "-D__fastcall=__attribute__((ms_abi))");
             strarray_add(comp_args, "-D_fastcall=__attribute__((ms_abi))");
-            fastcall_done = 1;
-        }
-        else if (opts->target_platform == PLATFORM_APPLE)
-        {
-            /* Mac OS X uses a 16-byte aligned stack and not a 4-byte one */
+            break;
+        case CPU_x86:
             strarray_add(comp_args, "-D__stdcall=__attribute__((__stdcall__)) __attribute__((__force_align_arg_pointer__))");
             strarray_add(comp_args, "-D__cdecl=__attribute__((__cdecl__)) __attribute__((__force_align_arg_pointer__))");
             strarray_add(comp_args, "-D_stdcall=__attribute__((__stdcall__)) __attribute__((__force_align_arg_pointer__))");
             strarray_add(comp_args, "-D_cdecl=__attribute__((__cdecl__)) __attribute__((__force_align_arg_pointer__))");
-        }
-        else if (opts->target_cpu == CPU_ARM || opts->target_cpu == CPU_ARM64)
-        {
+            strarray_add(comp_args, "-D__fastcall=__attribute__((__fastcall__))");
+            strarray_add(comp_args, "-D_fastcall=__attribute__((__fastcall__))");
+            break;
+        case CPU_ARM:
+        case CPU_ARM64:
+        case CPU_POWERPC:
             strarray_add(comp_args, "-D__stdcall=");
             strarray_add(comp_args, "-D__cdecl=");
             strarray_add(comp_args, "-D_stdcall=");
             strarray_add(comp_args, "-D_cdecl=");
             strarray_add(comp_args, "-D__fastcall=");
             strarray_add(comp_args, "-D_fastcall=");
-            fastcall_done = 1;
-        }
-        else
-        {
-            strarray_add(comp_args, "-D__stdcall=__attribute__((__stdcall__))");
-            strarray_add(comp_args, "-D__cdecl=__attribute__((__cdecl__))");
-            strarray_add(comp_args, "-D_stdcall=__attribute__((__stdcall__))");
-            strarray_add(comp_args, "-D_cdecl=__attribute__((__cdecl__))");
-        }
-
-	if (!fastcall_done)
-        {
-            strarray_add(comp_args, "-D__fastcall=__attribute__((__fastcall__))");
-            strarray_add(comp_args, "-D_fastcall=__attribute__((__fastcall__))");
+            break;
         }
 	strarray_add(comp_args, "-D__declspec(x)=__declspec_##x");
 	strarray_add(comp_args, "-D__declspec_align(x)=__attribute__((aligned(x)))");
@@ -1133,6 +1124,9 @@ static void build(struct options* opts)
             strarray_add(link_args, strmake("-Wl,-M,%s", mapfile));
             strarray_add(tmp_files, mapfile);
         }
+        break;
+    case PLATFORM_ANDROID:
+        /* not supported on Android */
         break;
     default:
         if (opts->image_base)

@@ -5,7 +5,7 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2015-09-09 22:11+0300\n"
+"PO-Revision-Date: 2015-11-20 09:57+0300\n"
 "Last-Translator: Aurimas Fišeras <aurimas@members.fsf.org>\n"
 "Language-Team: Lithuanian <komp_lt@konf.lt>\n"
 "Language: lt\n"
@@ -3187,7 +3187,7 @@ msgstr "Rodyti &korteles"
 msgid "Show"
 msgstr "Rodyti"
 
-#: hhctrl.rc:43
+#: hhctrl.rc:43 winemac.rc:34
 msgid "Hide"
 msgstr "Slėpti"
 
@@ -8572,6 +8572,50 @@ msgstr "Išrinkti langą"
 msgid "&More Windows..."
 msgstr "&Daugiau langų..."
 
+#: winemac.rc:32 wineboot.rc:42
+msgid "Wine"
+msgstr "Wine"
+
+#: winemac.rc:33
+msgid "Hide %@"
+msgstr "Slėpti %@"
+
+#: winemac.rc:35
+msgid "Hide Others"
+msgstr "Slėpti kitas"
+
+#: winemac.rc:36
+msgid "Show All"
+msgstr "Rodyti visas"
+
+#: winemac.rc:37
+msgid "Quit %@"
+msgstr "Baigti %@"
+
+#: winemac.rc:38
+msgid "Quit"
+msgstr "Baigti"
+
+#: winemac.rc:40
+msgid "Window"
+msgstr "Langas"
+
+#: winemac.rc:41
+msgid "Minimize"
+msgstr "Suskleisti"
+
+#: winemac.rc:42
+msgid "Zoom"
+msgstr "Didinti"
+
+#: winemac.rc:43
+msgid "Enter Full Screen"
+msgstr "Visame ekrane"
+
+#: winemac.rc:44
+msgid "Bring All to Front"
+msgstr "Perkelti visas į priekį"
+
 #: wineps.rc:31
 msgid "Paper Si&ze:"
 msgstr "Popieriaus &dydis:"
@@ -12957,10 +13001,6 @@ msgstr ""
 "Vyksta simuliuotas atsijungimas ar stabdymas, bet ši programa neatsako.\n"
 "\n"
 "Jei nutrauksite procesą, tai galite prarasti visus neišsaugotus duomenis."
-
-#: wineboot.rc:42
-msgid "Wine"
-msgstr "Wine"
 
 #: wineboot.rc:46
 msgid "The Wine configuration in %s is being updated, please wait..."

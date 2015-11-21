@@ -1493,6 +1493,28 @@ for /f "tokens=3,2,3*" %%i in ("a b c d e f g") do echo h=%%h i=%%i j=%%j k=%%k 
 cd ..
 rd /s/q foobar
 
+echo ------------ Testing del ------------
+echo abc > file
+echo deleting 'file'
+del file
+if errorlevel 0 (
+    echo errorlevel is 0, good
+) else (
+    echo unexpected errorlevel, got %errorlevel%
+)
+if not exist file (
+    echo successfully deleted 'file'
+) else (
+    echo error deleting 'file'
+)
+echo attempting to delete 'file', even though it is not present
+del file
+if errorlevel 0 (
+    echo errorlevel is 0, good
+) else (
+    echo unexpected errorlevel, got %errorlevel%
+)
+
 echo ------------ Testing del /a ------------
 del /f/q *.test > nul
 echo r > r.test
@@ -1928,6 +1950,10 @@ if exist baz\lala (echo file created in read-only dir) else echo file not create
 cd .. & rd /s/q foobar
 
 echo ------------ Testing assoc ------------
+rem Modifying associations requires some privileges...
+net session >nul 2>&1
+if errorlevel 1 goto :SkipAssoc
+
 rem FIXME Can't test error messages in the current test system, so we have to use some kludges
 rem FIXME Revise once || conditional execution is fixed
 mkdir foobar & cd foobar
@@ -1956,8 +1982,25 @@ cmd /c tmp.cmd > baz
 type baz
 echo ---
 cd .. & rd /s/q foobar
+goto ContinueFType
+:SkipAssoc
+echo --- setting association
+echo ---
+echo .foo=bar
+echo .foo=bar
+echo +++
+echo .foo=bar
+echo --- resetting association
+echo ---
+echo +++
+echo ---
 
+
+:ContinueFType
 echo ------------ Testing ftype ------------
+rem Modifying associations requires some privileges...
+net session >nul 2>&1
+if errorlevel 1 goto :SkipFType
 rem FIXME Can't test error messages in the current test system, so we have to use some kludges
 rem FIXME Revise once || conditional execution is fixed
 mkdir foobar & cd foobar
@@ -1998,7 +2041,19 @@ regedit /s regCleanup.reg
 set WINE_FOO=
 endlocal
 cd .. & rd /s/q foobar
+goto ContinueCall
+:SkipFType
+echo --- setting association
+echo ---
+echo footype=foo_opencmd
+echo .foo=footype
+echo footype=foo_opencmd
+echo +++
+echo footype=foo_opencmd
+echo --- resetting association
+echo original value
 
+:ContinueCall
 echo ------------ Testing CALL ------------
 mkdir foobar & cd foobar
 echo --- external script
