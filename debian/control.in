@@ -41,6 +41,7 @@ Build-Depends:
  libjpeg-dev,
  libtiff-dev,
  libpcap-dev,
+ libpulse-dev,
  liblcms2-dev,
  libldap2-dev,
  libxslt1-dev,

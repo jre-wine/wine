@@ -1,0 +1,24 @@
+description: support winepulse on hurd
+author: Svante Signell <svante.signell@gmail.com>
+bug-debian: http://bugs.debian.org/805655
+
+--- a/dlls/winepulse.drv/mmdevdrv.c
++++ b/dlls/winepulse.drv/mmdevdrv.c
+@@ -440,7 +440,7 @@ static void pulse_probe_settings(int ren
+ static HRESULT pulse_connect(void)
+ {
+     int len;
+-    WCHAR path[PATH_MAX], *name;
++    WCHAR path[MAX_PATH], *name;
+     char *str;
+ 
+     if (!pulse_thread)
+@@ -519,7 +519,7 @@ static void pulse_phys_speakers_cb(pa_co
+ static HRESULT pulse_test_connect(void)
+ {
+     int len, ret;
+-    WCHAR path[PATH_MAX], *name;
++    WCHAR path[MAX_PATH], *name;
+     char *str;
+     pa_operation *o;
+ 

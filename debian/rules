@@ -22,11 +22,6 @@ export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie,-fortify
 # linker options
 export DEB_LDFLAGS_MAINT_APPEND+=-Wl,-rpath,/$(LIBDIR)
 
-# use freebsd-glue on kfreebsd architectures
-ifeq ($(DEB_BUILD_ARCH_OS), kfreebsd)
-export DEB_LDFLAGS_MAINT_APPEND+=-lfreebsd-glue
-endif
-
 # configure options
 CONFLAGS=--with-gnutls \
          --without-hal \
@@ -42,6 +37,12 @@ CONFLAGS=--with-gnutls \
          --includedir=/$(INCDIR) \
          --datarootdir=/$(DATDIR) \
          $(shell dpkg-buildflags --export=configure) \
+
+# flags specific to kfreebsd
+ifeq ($(DEB_BUILD_ARCH_OS), kfreebsd)
+CONFFLAGS+=--without-pulse
+export DEB_LDFLAGS_MAINT_APPEND+=-lfreebsd-glue
+endif
 
 # enable wine64 on 64-bit architectures
 ifeq ($(DEB_BUILD_ARCH_BITS), 64)

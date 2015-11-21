@@ -1,3 +1,16 @@
+wine-development (1.7.55-4) unstable; urgency=medium
+
+  * Disable pulseaudio on kfreebsd.
+  * Support pulseaudio on hurd (closes: #805655).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 21 Nov 2015 02:39:21 +0000
+
+wine-development (1.7.55-3) unstable; urgency=medium
+
+  * Add libpulse-dev build dependency (closes: #805326).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Tue, 17 Nov 2015 04:16:03 +0000
+
 wine-development (1.7.55-2) unstable; urgency=medium
 
   * Simplify the clean rule.
