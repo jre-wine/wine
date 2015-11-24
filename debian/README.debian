@@ -81,3 +81,20 @@ If the right libwine-gecko-*.deb package is not currently available, you can
 manually extract an associated upstream WineGecko tarball to
 /usr/share/wine-development/gecko. Or preferably, please provide help building
 the new Debian libwine-gecko-* package that is needed.
+
+Automatically Launching Windows Executables
+===========================================
+
+You can configure wine to automatically launch Windows executables from
+the command line, for example:
+
+$ notepad.exe
+
+To configure backend support for that, you'll need to install the
+wine-binfmt package first and then execute:
+
+$ sudo update-binfmts --import wine
+
+This change increases the risk of inadvertently launching Windows
+malware, so please make sure that you understand the security risks
+before blindly setting this up.

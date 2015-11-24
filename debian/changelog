@@ -1,3 +1,21 @@
+wine (1.8~rc1-1) unstable; urgency=medium
+
+  * Upstream release candidate, released Nov 20, 2015.
+    - Debug output reduced (closes: #691110).
+    - JAMMER Pro crash fixed (closes: #677977).
+    - String conversion error fixed (closes: #741592).
+    - Always uninitialize the terminal (closes: #679850).
+    - Architecture-dependent header fixed (closes: #732968).
+  * Drop transitional packages.
+  * Use new upstream signing key.
+  * Suggest dosbox (closes: #792125).
+  * Merge the packaging (closes: #761574).
+  * Add wineconsole symlink (closes: #792695).
+  * Make winecfg more robust (closes: 784280).
+  * Compute ncurses and freetype dependencies at build time (closes: #804598).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 21 Nov 2015 17:44:04 +0000
+
 wine-development (1.7.55-4) unstable; urgency=medium
 
   * Disable pulseaudio on kfreebsd.

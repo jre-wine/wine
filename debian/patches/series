@@ -9,8 +9,8 @@ unicode.patch
 disable/shlib-exit-calls.patch
 disable/external-installers.patch
 
-development/winegcc.patch
-development/winemenubuilder.patch
+# development/winegcc.patch
+# development/winemenubuilder.patch
 
 addons.patch
 apploader.patch
