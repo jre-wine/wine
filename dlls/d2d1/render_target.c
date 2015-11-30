@@ -672,7 +672,7 @@ static void STDMETHODCALLTYPE d2d_d3d_render_target_DrawGeometry(ID2D1RenderTarg
             iface, geometry, brush, stroke_width, stroke_style);
 }
 
-static void STDMETHODCALLTYPE d2d_rt_fill_geometry(struct d2d_d3d_render_target *render_target,
+static void d2d_rt_fill_geometry(struct d2d_d3d_render_target *render_target,
         const struct d2d_geometry *geometry, struct d2d_brush *brush, struct d2d_brush *opacity_brush)
 {
     ID3D10Buffer *ib, *vb, *vs_cb, *ps_cb;
@@ -1409,7 +1409,7 @@ static HRESULT STDMETHODCALLTYPE d2d_d3d_render_target_EndDraw(ID2D1RenderTarget
     if (tag1)
         *tag1 = render_target->error.tag1;
     if (tag2)
-        *tag1 = render_target->error.tag2;
+        *tag2 = render_target->error.tag2;
 
     return render_target->error.code;
 }

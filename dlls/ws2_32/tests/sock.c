@@ -30,6 +30,7 @@
 #include <wsnwlink.h>
 #include <mswsock.h>
 #include <mstcpip.h>
+#include <iphlpapi.h>
 #include <stdio.h>
 #include "wine/test.h"
 
@@ -75,6 +76,10 @@ static int   (WINAPI *pWSALookupServiceNextW)(HANDLE,DWORD,LPDWORD,LPWSAQUERYSET
 static int   (WINAPI *pWSAEnumNameSpaceProvidersA)(LPDWORD,LPWSANAMESPACE_INFOA);
 static int   (WINAPI *pWSAEnumNameSpaceProvidersW)(LPDWORD,LPWSANAMESPACE_INFOW);
 static int   (WINAPI *pWSAPoll)(WSAPOLLFD *,ULONG,INT);
+
+/* Function pointers from iphlpapi */
+static DWORD (WINAPI *pGetAdaptersInfo)(PIP_ADAPTER_INFO,PULONG);
+static DWORD (WINAPI *pGetIpForwardTable)(PMIB_IPFORWARDTABLE,PULONG,BOOL);
 
 /**************** Structs and typedefs ***************/
 
@@ -213,11 +218,11 @@ static int tcp_socketpair(SOCKET *src, SOCKET *dst)
     *src = INVALID_SOCKET;
     *dst = INVALID_SOCKET;
 
-    *src = socket(AF_INET, SOCK_STREAM, 0);
+    *src = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (*src == INVALID_SOCKET)
         goto end;
 
-    server = socket(AF_INET, SOCK_STREAM, 0);
+    server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (server == INVALID_SOCKET)
         goto end;
 
@@ -1101,9 +1106,13 @@ static void test_WithWSAStartup(void)
 {
     WSADATA data;
     WORD version = MAKEWORD( 2, 2 );
-    INT res;
+    INT res, socks, i, j;
+    SOCKET sock;
     LPVOID ptr;
-    SOCKET src, dst;
+    struct
+    {
+        SOCKET src, dst, dup_src, dup_dst;
+    } pairs[128];
     DWORD error;
 
     res = WSAStartup( version, &data );
@@ -1112,9 +1121,26 @@ static void test_WithWSAStartup(void)
     ptr = gethostbyname("localhost");
     ok(ptr != NULL, "gethostbyname() failed unexpectedly: %d\n", WSAGetLastError());
 
-    ok(!tcp_socketpair(&src, &dst), "creating socket pair failed\n");
+    /* Alloc some sockets to check if they are destroyed on WSACleanup */
+    for (socks = 0; socks < sizeof(pairs) / sizeof(pairs[0]); socks++)
+    {
+        WSAPROTOCOL_INFOA info;
+        if (tcp_socketpair(&pairs[socks].src, &pairs[socks].dst)) break;
 
-    res = send(src, "TEST", 4, 0);
+        memset(&info, 0, sizeof(info));
+        ok(!WSADuplicateSocketA(pairs[socks].src, GetCurrentProcessId(), &info),
+           "WSADuplicateSocketA should have worked\n");
+        pairs[socks].dup_src = WSASocketA(0, 0, 0, &info, 0, 0);
+        ok(pairs[socks].dup_src != SOCKET_ERROR, "expected != -1\n");
+
+        memset(&info, 0, sizeof(info));
+        ok(!WSADuplicateSocketA(pairs[socks].dst, GetCurrentProcessId(), &info),
+           "WSADuplicateSocketA should have worked\n");
+        pairs[socks].dup_dst = WSASocketA(0, 0, 0, &info, 0, 0);
+        ok(pairs[socks].dup_dst != SOCKET_ERROR, "expected != -1\n");
+    }
+
+    res = send(pairs[0].src, "TEST", 4, 0);
     ok(res == 4, "send failed with error %d\n", WSAGetLastError());
 
     WSACleanup();
@@ -1125,20 +1151,50 @@ static void test_WithWSAStartup(void)
     /* show that sockets are destroyed automatically after WSACleanup */
     todo_wine {
     SetLastError(0xdeadbeef);
-    res = send(src, "TEST", 4, 0);
+    res = send(pairs[0].src, "TEST", 4, 0);
     error = WSAGetLastError();
     ok(res == SOCKET_ERROR, "send should have failed\n");
     ok(error == WSAENOTSOCK, "expected 10038, got %d\n", error);
 
     SetLastError(0xdeadbeef);
-    res = closesocket(dst);
+    res = send(pairs[0].dst, "TEST", 4, 0);
     error = WSAGetLastError();
-    ok(res == SOCKET_ERROR, "closesocket should have failed\n");
+    ok(res == SOCKET_ERROR, "send should have failed\n");
     ok(error == WSAENOTSOCK, "expected 10038, got %d\n", error);
+
+    /* Check that all sockets were destroyed */
+    for (i = 0; i < socks; i++)
+    {
+        for (j = 0; j < 4; j++)
+        {
+            struct sockaddr_in saddr;
+            int size = sizeof(saddr);
+            switch(j)
+            {
+                case 0: sock = pairs[i].src; break;
+                case 1: sock = pairs[i].dup_src; break;
+                case 2: sock = pairs[i].dst; break;
+                case 3: sock = pairs[i].dup_dst; break;
+            }
+
+            SetLastError(0xdeadbeef);
+            res = getsockname(sock, (struct sockaddr *)&saddr, &size);
+            error = WSAGetLastError();
+            ok(res == SOCKET_ERROR, "Test[%d]: getsockname should have failed\n", i);
+            ok(error == WSAENOTSOCK, "Test[%d]: expected 10038, got %d\n", i, error);
+        }
     }
 
-    closesocket(src);
-    closesocket(dst);
+    }
+
+    /* While wine is not fixed, close all sockets manually */
+    for (i = 0; i < socks; i++)
+    {
+        closesocket(pairs[i].src);
+        closesocket(pairs[i].dst);
+        closesocket(pairs[i].dup_src);
+        closesocket(pairs[i].dup_dst);
+    }
 
     res = WSACleanup();
     ok(res == 0, "expected 0, got %d\n", res);
@@ -1156,7 +1212,7 @@ static void Init (void)
 {
     WORD ver = MAKEWORD (2, 2);
     WSADATA data;
-    HMODULE hws2_32 = GetModuleHandleA("ws2_32.dll");
+    HMODULE hws2_32 = GetModuleHandleA("ws2_32.dll"), hiphlpapi;
 
     pfreeaddrinfo = (void *)GetProcAddress(hws2_32, "freeaddrinfo");
     pgetaddrinfo = (void *)GetProcAddress(hws2_32, "getaddrinfo");
@@ -1171,6 +1227,13 @@ static void Init (void)
     pWSAEnumNameSpaceProvidersA = (void *)GetProcAddress(hws2_32, "WSAEnumNameSpaceProvidersA");
     pWSAEnumNameSpaceProvidersW = (void *)GetProcAddress(hws2_32, "WSAEnumNameSpaceProvidersW");
     pWSAPoll = (void *)GetProcAddress(hws2_32, "WSAPoll");
+
+    hiphlpapi = LoadLibraryA("iphlpapi.dll");
+    if (hiphlpapi)
+    {
+        pGetIpForwardTable = (void *)GetProcAddress(hiphlpapi, "GetIpForwardTable");
+        pGetAdaptersInfo = (void *)GetProcAddress(hiphlpapi, "GetAdaptersInfo");
+    }
 
     ok ( WSAStartup ( ver, &data ) == 0, "WSAStartup failed\n" );
     tls = TlsAlloc();
@@ -4400,6 +4463,96 @@ static void test_dns(void)
 
 int WINAPI gethostname(char *name, int namelen);
 
+static void test_gethostbyname(void)
+{
+    struct hostent *he;
+    struct in_addr **addr_list;
+    char name[256], first_ip[16];
+    int ret, i, count;
+    PMIB_IPFORWARDTABLE routes = NULL;
+    PIP_ADAPTER_INFO adapters = NULL, k;
+    DWORD adap_size = 0, route_size = 0;
+    BOOL found_default = FALSE;
+    BOOL local_ip = FALSE;
+
+    ret = gethostname(name, sizeof(name));
+    ok(ret == 0, "gethostname() call failed: %d\n", WSAGetLastError());
+
+    he = gethostbyname(name);
+    ok(he != NULL, "gethostbyname(\"%s\") failed: %d\n", name, WSAGetLastError());
+    addr_list = (struct in_addr **)he->h_addr_list;
+    strcpy(first_ip, inet_ntoa(*addr_list[0]));
+
+    trace("List of local IPs:\n");
+    for(count = 0; addr_list[count] != NULL; count++)
+    {
+        char *ip = inet_ntoa(*addr_list[count]);
+        if (!strcmp(ip, "127.0.0.1"))
+            local_ip = TRUE;
+        trace("%s\n", ip);
+    }
+
+    if (local_ip)
+    {
+        ok (count == 1, "expected 127.0.0.1 to be the only IP returned\n");
+        skip("Only the loopback address is present, skipping tests\n");
+        return;
+    }
+
+    if (!pGetAdaptersInfo || !pGetIpForwardTable)
+    {
+        win_skip("GetAdaptersInfo and/or GetIpForwardTable not found, skipping tests\n");
+        return;
+    }
+
+    ret = pGetAdaptersInfo(NULL, &adap_size);
+    ok (ret  == ERROR_BUFFER_OVERFLOW, "GetAdaptersInfo failed with a different error: %d\n", ret);
+    ret = pGetIpForwardTable(NULL, &route_size, FALSE);
+    ok (ret == ERROR_INSUFFICIENT_BUFFER, "GetIpForwardTable failed with a different error: %d\n", ret);
+
+    adapters = HeapAlloc(GetProcessHeap(), 0, adap_size);
+    routes = HeapAlloc(GetProcessHeap(), 0, route_size);
+
+    ret = pGetAdaptersInfo(adapters, &adap_size);
+    ok (ret  == NO_ERROR, "GetAdaptersInfo failed, error: %d\n", ret);
+    ret = pGetIpForwardTable(routes, &route_size, FALSE);
+    ok (ret == NO_ERROR, "GetIpForwardTable failed, error: %d\n", ret);
+
+    /* This test only has meaning if there is more than one IP configured */
+    if (adapters->Next == NULL && count == 1)
+    {
+        skip("Only one IP is present, skipping tests\n");
+        goto cleanup;
+    }
+
+    for (i = 0; !found_default && i < routes->dwNumEntries; i++)
+    {
+        /* default route (ip 0.0.0.0) ? */
+        if (routes->table[i].dwForwardDest) continue;
+
+        for (k = adapters; k != NULL; k = k->Next)
+        {
+            char *ip;
+
+            if (k->Index != routes->table[i].dwForwardIfIndex) continue;
+
+            /* the first IP returned from gethostbyname must be a default route */
+            ip = k->IpAddressList.IpAddress.String;
+            if (!strcmp(first_ip, ip))
+            {
+                found_default = TRUE;
+                break;
+            }
+        }
+    }
+todo_wine
+    ok (found_default, "failed to find the first IP from gethostbyname!\n");
+
+cleanup:
+    HeapFree(GetProcessHeap(), 0, adapters);
+    HeapFree(GetProcessHeap(), 0, routes);
+}
+
 static void test_gethostbyname_hack(void)
 {
     struct hostent *he;
@@ -6422,8 +6575,8 @@ static void test_WSAPoll(void)
     ok(POLL_ISSET(fdRead, POLLWRNORM), "fdRead socket events incorrect\n");
     len = sizeof(id);
     id = 0xdeadbeef;
-    ok(!getsockopt(fdWrite, SOL_SOCKET, SO_ERROR, (char*)&id, &len),
-       "getsockopt failed with %d\n",WSAGetLastError());
+    err = getsockopt(fdWrite, SOL_SOCKET, SO_ERROR, (char*)&id, &len);
+    ok(!err, "getsockopt failed with %d\n", WSAGetLastError());
     ok(id == 0, "expected 0, got %d\n", id);
 
     /* Test data receiving notifications */
@@ -6502,8 +6655,8 @@ static void test_WSAPoll(void)
     ok(ret == 0, "expected 0, got %d\n", ret);
     len = sizeof(id);
     id = 0xdeadbeef;
-    ok(!getsockopt(fdWrite, SOL_SOCKET, SO_ERROR, (char*)&id, &len),
-       "getsockopt failed with %d\n", WSAGetLastError());
+    err = getsockopt(fdWrite, SOL_SOCKET, SO_ERROR, (char*)&id, &len);
+    ok(!err, "getsockopt failed with %d\n", WSAGetLastError());
     ok(id == WSAECONNREFUSED, "expected 10061, got %d\n", id);
     closesocket(fdWrite);
 
@@ -9410,6 +9563,7 @@ START_TEST( sock )
     test_addr_to_print();
     test_ioctlsocket();
     test_dns();
+    test_gethostbyname();
     test_gethostbyname_hack();
     test_gethostname();
 
