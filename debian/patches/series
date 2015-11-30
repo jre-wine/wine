@@ -1,7 +1,5 @@
 makefile.patch
 manpages.patch
-
-hurd.patch
 kfreebsd.patch
 
 unicode.patch

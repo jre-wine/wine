@@ -1,8 +1,18 @@
+wine (1.8~rc2-1) unstable; urgency=medium
+
+  * Upstream release candidate, released Nov 27, 2015.
+    - Patch supporting winepulse on hurd applied.
+  * Add wineconsole manpage.
+  * Better fix for the freebsd build.
+  * Only match even versions in debian/watch.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 30 Nov 2015 01:13:45 +0000
+
 wine (1.8~rc1-1) unstable; urgency=medium
 
   * Upstream release candidate, released Nov 20, 2015.
     - Debug output reduced (closes: #691110).
-    - JAMMER Pro crash fixed (closes: #677977).
+    - JAMMER Pro crash fixed (closes: #677997).
     - String conversion error fixed (closes: #741592).
     - Always uninitialize the terminal (closes: #679850).
     - Architecture-dependent header fixed (closes: #732968).
