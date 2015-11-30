@@ -1149,10 +1149,18 @@ static void surface_unload(struct wined3d_resource *resource)
          * but we can't set the sysmem INDRAWABLE because when we're rendering the swapchain
          * or the depth stencil into an FBO the texture or render buffer will be removed
          * and all flags get lost */
-        surface_prepare_system_memory(surface);
-        memset(surface->resource.heap_memory, 0, surface->resource.size);
-        surface_validate_location(surface, WINED3D_LOCATION_SYSMEM);
-        surface_invalidate_location(surface, ~WINED3D_LOCATION_SYSMEM);
+        if (resource->usage & WINED3DUSAGE_DEPTHSTENCIL)
+        {
+            surface_validate_location(surface, WINED3D_LOCATION_DISCARDED);
+            surface_invalidate_location(surface, ~WINED3D_LOCATION_DISCARDED);
+        }
+        else
+        {
+            surface_prepare_system_memory(surface);
+            memset(surface->resource.heap_memory, 0, surface->resource.size);
+            surface_validate_location(surface, WINED3D_LOCATION_SYSMEM);
+            surface_invalidate_location(surface, ~WINED3D_LOCATION_SYSMEM);
+        }
 
         /* We also get here when the ddraw swapchain is destroyed, for example
          * for a mode switch. In this case this surface won't necessarily be
@@ -4084,16 +4092,23 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
 }
 
 /* Context activation is done by the caller. */
-static void surface_multisample_resolve(struct wined3d_surface *surface, struct wined3d_context *context)
+static void surface_load_renderbuffer(struct wined3d_surface *surface, struct wined3d_context *context,
+        DWORD dst_location)
 {
-    RECT rect = {0, 0, surface->resource.width, surface->resource.height};
+    const RECT rect = {0, 0, surface->resource.width, surface->resource.height};
+    DWORD src_location;
 
-    if (!(surface->locations & WINED3D_LOCATION_RB_MULTISAMPLE))
-        ERR("Trying to resolve multisampled surface %p, but location WINED3D_LOCATION_RB_MULTISAMPLE not current.\n",
-                surface);
+    if (surface->locations & WINED3D_LOCATION_RB_MULTISAMPLE)
+        src_location = WINED3D_LOCATION_RB_MULTISAMPLE;
+    else if (surface->locations & WINED3D_LOCATION_RB_RESOLVED)
+        src_location = WINED3D_LOCATION_RB_RESOLVED;
+    else if (surface->locations & WINED3D_LOCATION_TEXTURE_SRGB)
+        src_location = WINED3D_LOCATION_TEXTURE_SRGB;
+    else /* surface_blt_fbo will load the source location if necessary. */
+        src_location = WINED3D_LOCATION_TEXTURE_RGB;
 
     surface_blt_fbo(surface->resource.device, context, WINED3D_TEXF_POINT,
-            surface, WINED3D_LOCATION_RB_MULTISAMPLE, &rect, surface, WINED3D_LOCATION_RB_RESOLVED, &rect);
+            surface, src_location, &rect, surface, dst_location, &rect);
 }
 
 /* Context activation is done by the caller. Context may be NULL in ddraw-only mode. */
@@ -4161,7 +4176,8 @@ HRESULT surface_load_location(struct wined3d_surface *surface, struct wined3d_co
             break;
 
         case WINED3D_LOCATION_RB_RESOLVED:
-            surface_multisample_resolve(surface, context);
+        case WINED3D_LOCATION_RB_MULTISAMPLE:
+            surface_load_renderbuffer(surface, context, location);
             break;
 
         case WINED3D_LOCATION_TEXTURE_RGB:

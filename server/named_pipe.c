@@ -1013,11 +1013,14 @@ DECL_HANDLER(get_named_pipe_info)
     }
 
     reply->flags        = client ? client->pipe_flags : server->pipe_flags;
-    reply->sharing      = server->pipe->sharing;
-    reply->maxinstances = server->pipe->maxinstances;
-    reply->instances    = server->pipe->instances;
-    reply->insize       = server->pipe->insize;
-    reply->outsize      = server->pipe->outsize;
+    if (server)
+    {
+        reply->sharing      = server->pipe->sharing;
+        reply->maxinstances = server->pipe->maxinstances;
+        reply->instances    = server->pipe->instances;
+        reply->insize       = server->pipe->insize;
+        reply->outsize      = server->pipe->outsize;
+    }
 
     if (client)
         release_object(client);
@@ -1043,7 +1046,11 @@ DECL_HANDLER(set_named_pipe_info)
         client = (struct pipe_client *)get_handle_obj( current->process, req->handle,
                                                        0, &pipe_client_ops );
         if (!client) return;
-        server = client->server;
+        if (!(server = client->server))
+        {
+            release_object( client );
+            return;
+        }
     }
 
     if ((req->flags & ~(NAMED_PIPE_MESSAGE_STREAM_READ | NAMED_PIPE_NONBLOCKING_MODE)) ||

@@ -787,9 +787,9 @@ static void WCEL_ToggleInsert(WCEL_Context* ctx)
 #define CTRL(x)	((x) - '@')
 static const KeyEntry StdKeyMap[] =
 {
-    {/*BACK*/0x08,	WCEL_DeletePrevChar 	},
-    {/*RETURN*/0x0d,	WCEL_Done		},
-    {/*DEL*/127,	WCEL_DeleteCurrChar 	},
+    {/*VK_BACK*/  0x08, WCEL_DeletePrevChar     },
+    {/*VK_RETURN*/0x0d, WCEL_Done               },
+    {/*VK_DELETE*/0x2e, WCEL_DeleteCurrChar     },
     {	0,		NULL			}
 };
 
@@ -850,14 +850,13 @@ static const KeyEntry EmacsStdKeyMap[] =
     {/*VK_HOME*/ 0x24,	WCEL_MoveToBeg		},
     {/*VK_RIGHT*/0x27,	WCEL_MoveRight 		},
     {/*VK_LEFT*/ 0x25,	WCEL_MoveLeft 		},
-    {/*VK_DEL*/  0x2e,  WCEL_DeleteCurrChar     },
     {/*VK_INSERT*/0x2d, WCEL_ToggleInsert 	},
     {	0,		NULL 			}
 };
 
 static const KeyMap EmacsKeyMap[] =
 {
-    {0,                  1, StdKeyMap},
+    {0,                  0, StdKeyMap},
     {0,                  0, EmacsStdKeyMap},
     {RIGHT_ALT_PRESSED,  1, EmacsKeyMapAlt},	/* right alt  */
     {LEFT_ALT_PRESSED,   1, EmacsKeyMapAlt},	/* left  alt  */
@@ -874,7 +873,6 @@ static const KeyEntry Win32StdKeyMap[] =
     {/*VK_END*/  0x23,	WCEL_MoveToEnd 		},
     {/*VK_UP*/   0x26, 	WCEL_MoveToPrevHist 	},
     {/*VK_DOWN*/ 0x28,	WCEL_MoveToNextHist	},
-    {/*VK_DEL*/  0x2e,	WCEL_DeleteCurrChar	},
     {/*VK_INSERT*/0x2d, WCEL_ToggleInsert 	},
     {/*VK_F8*/   0x77,	WCEL_FindPrevInHist	},
     {	0,		NULL 			}
@@ -891,7 +889,8 @@ static const KeyEntry Win32KeyMapCtrl[] =
 
 static const KeyMap Win32KeyMap[] =
 {
-    {0,                  1, StdKeyMap},
+    {0,                  0, StdKeyMap},
+    {SHIFT_PRESSED,      0, StdKeyMap},
     {0,                  0, Win32StdKeyMap},
     {RIGHT_CTRL_PRESSED, 0, Win32KeyMapCtrl},
     {LEFT_CTRL_PRESSED,  0, Win32KeyMapCtrl},

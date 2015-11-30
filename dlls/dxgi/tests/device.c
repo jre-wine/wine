@@ -1051,7 +1051,7 @@ static void test_swapchain_parameters(void)
     HRESULT hr;
     unsigned int i, j;
     ULONG refcount;
-    DXGI_USAGE usage, expected_usage;
+    DXGI_USAGE usage, expected_usage, broken_usage;
     HWND window;
     static const struct
     {
@@ -1077,15 +1077,20 @@ static void test_swapchain_parameters(void)
         {TRUE,   1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,   2, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  1},
         {TRUE,   3, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  2},
-        {TRUE,   0, 4 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {TRUE,   1, 4 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {TRUE,   2, 4 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,   0, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,   1, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,   2, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,   0, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,   1, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,   2, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,  16, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {TRUE,  16, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                    15},
         {TRUE,  16, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL, 15},
+        {TRUE,  16, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,  17, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {TRUE,  17, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {TRUE,  17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
 
         {FALSE,  0, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  1, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
@@ -1101,15 +1106,23 @@ static void test_swapchain_parameters(void)
         {FALSE,  1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE,  2, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  1},
         {FALSE,  3, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL,  2},
-        {FALSE,  0, 4 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {FALSE,  1, 4 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
-        {FALSE,  2, 4 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  0, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  1, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  2, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  0, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  1, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE,  2, 5 /* undefined */,                DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE, 16, DXGI_SWAP_EFFECT_DISCARD,         S_OK,                    S_OK,                     0},
         {FALSE, 16, DXGI_SWAP_EFFECT_SEQUENTIAL,      S_OK,                    S_OK,                    15},
         {FALSE, 16, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, S_OK,                    DXGI_ERROR_INVALID_CALL, 15},
+        /* The following test fails on Nvidia with E_OUTOFMEMORY and leaks device references in the
+         * process. Disable it for now.
+        {FALSE, 16, DXGI_SWAP_EFFECT_FLIP_DISCARD,    S_OK,                    DXGI_ERROR_INVALID_CALL,  0},
+         */
         {FALSE, 17, DXGI_SWAP_EFFECT_DISCARD,         DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE, 17, DXGI_SWAP_EFFECT_SEQUENTIAL,      DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
         {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
+        {FALSE, 17, DXGI_SWAP_EFFECT_FLIP_DISCARD,    DXGI_ERROR_INVALID_CALL, DXGI_ERROR_INVALID_CALL,  0},
     };
 
     if (!(device = create_device()))
@@ -1178,13 +1191,14 @@ static void test_swapchain_parameters(void)
             hr = IDXGISwapChain_GetBuffer(swapchain, j, &IID_IDXGIResource, (void **)&resource);
             ok(SUCCEEDED(hr), "GetBuffer(%u) failed, hr %#x, test %u.\n", hr, i, j);
 
-            expected_usage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_BACK_BUFFER;
-
             /* Buffers > 0 are supposed to be read only. This is the case except that in
-             * fullscreen mode the last backbuffer (BufferCount - 1) is writeable. This
-             * is not the case if an unsupported refresh rate is passed for some reason,
-             * probably because the invalid refresh rate triggers a kinda-sorta windowed
-             * mode.
+             * fullscreen mode on Windows <= 8 the last backbuffer (BufferCount - 1) is
+             * writeable. This is not the case if an unsupported refresh rate is passed
+             * for some reason, probably because the invalid refresh rate triggers a
+             * kinda-sorta windowed mode.
+             *
+             * On Windows 10 all buffers > 0 are read-only. Mark the earlier behavior
+             * broken.
              *
              * This last buffer acts as a shadow frontbuffer. Writing to it doesn't show
              * the draw on the screen right away (Aero on or off doesn't matter), but
@@ -1193,12 +1207,15 @@ static void test_swapchain_parameters(void)
              * Note that if the application doesn't have focused creating a fullscreen
              * swapchain returns DXGI_STATUS_OCCLUDED and we get a windowed swapchain,
              * so use the Windowed property of the swapchain that was actually created. */
+            expected_usage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_BACK_BUFFER | DXGI_USAGE_READ_ONLY;
+            broken_usage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_BACK_BUFFER;
+
             if (desc.Windowed || j < tests[i].highest_accessible_buffer)
-                expected_usage |= DXGI_USAGE_READ_ONLY;
+                broken_usage |= DXGI_USAGE_READ_ONLY;
 
             hr = IDXGIResource_GetUsage(resource, &usage);
             ok(SUCCEEDED(hr), "Failed to get resource usage, hr %#x, test %u, buffer %u.\n", hr, i, j);
-            ok(usage == expected_usage, "Got usage %x, expected %x, test %u, buffer %u.\n",
+            ok(usage == expected_usage || broken(usage == broken_usage), "Got usage %x, expected %x, test %u, buffer %u.\n",
                     usage, expected_usage, i, j);
 
             IDXGIResource_Release(resource);
@@ -1271,6 +1288,61 @@ static void test_maximum_frame_latency(void)
     ok(!refcount, "Device has %u references left.\n", refcount);
 }
 
+static void test_output_desc(void)
+{
+    DXGI_OUTPUT_DESC desc;
+    IDXGIFactory *factory;
+    IDXGIAdapter *adapter;
+    IDXGIOutput *output;
+    unsigned int i, j;
+    HRESULT hr;
+
+    hr = CreateDXGIFactory(&IID_IDXGIFactory, (void **)&factory);
+    ok(SUCCEEDED(hr), "Failed to create DXGI factory, hr %#x.\n", hr);
+
+    for (i = 0; ; ++i)
+    {
+        hr = IDXGIFactory_EnumAdapters(factory, i, &adapter);
+        if (hr == DXGI_ERROR_NOT_FOUND)
+            break;
+        ok(SUCCEEDED(hr), "Failed to enumerate adapter %u, hr %#x.\n", i, hr);
+
+        for (j = 0; ; ++j)
+        {
+            MONITORINFOEXW monitor_info;
+            BOOL ret;
+
+            hr = IDXGIAdapter_EnumOutputs(adapter, j, &output);
+            if (hr == DXGI_ERROR_NOT_FOUND)
+                break;
+            ok(SUCCEEDED(hr), "Failed to enumerate output %u on adapter %u, hr %#x.\n", j, i, hr);
+
+            hr = IDXGIOutput_GetDesc(output, NULL);
+            ok(hr == E_INVALIDARG, "Got unexpected hr %#x for output %u on adapter %u.\n", hr, j, i);
+            hr = IDXGIOutput_GetDesc(output, &desc);
+            ok(SUCCEEDED(hr), "Failed to get desc for output %u on adapter %u, hr %#x.\n", j, i, hr);
+
+            monitor_info.cbSize = sizeof(monitor_info);
+            ret = GetMonitorInfoW(desc.Monitor, (MONITORINFO *)&monitor_info);
+            ok(ret, "Failed to get monitor info.\n");
+            ok(!lstrcmpW(desc.DeviceName, monitor_info.szDevice), "Got unexpected device name %s, expected %s.\n",
+                    wine_dbgstr_w(desc.DeviceName), wine_dbgstr_w(monitor_info.szDevice));
+            ok(!memcmp(&desc.DesktopCoordinates, &monitor_info.rcMonitor, sizeof(desc.DesktopCoordinates)),
+                    "Got unexpected desktop coordinates {%d, %d, %d, %d}, expected {%d, %d, %d, %d}.\n",
+                    desc.DesktopCoordinates.left, desc.DesktopCoordinates.top,
+                    desc.DesktopCoordinates.right, desc.DesktopCoordinates.bottom,
+                    monitor_info.rcMonitor.left, monitor_info.rcMonitor.top,
+                    monitor_info.rcMonitor.right, monitor_info.rcMonitor.bottom);
+
+            IDXGIOutput_Release(output);
+        }
+
+        IDXGIAdapter_Release(adapter);
+    }
+
+    IDXGIFactory_Release(factory);
+}
+
 START_TEST(device)
 {
     pCreateDXGIFactory1 = (void *)GetProcAddress(GetModuleHandleA("dxgi.dll"), "CreateDXGIFactory1");
@@ -1289,4 +1361,5 @@ START_TEST(device)
     test_swapchain_resize();
     test_swapchain_parameters();
     test_maximum_frame_latency();
+    test_output_desc();
 }
