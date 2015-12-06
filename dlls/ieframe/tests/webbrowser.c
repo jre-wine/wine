@@ -114,7 +114,7 @@ DEFINE_EXPECT(Invoke_NAVIGATECOMPLETE2);
 DEFINE_EXPECT(Invoke_PROGRESSCHANGE);
 DEFINE_EXPECT(Invoke_DOCUMENTCOMPLETE);
 DEFINE_EXPECT(Invoke_WINDOWCLOSING);
-DEFINE_EXPECT(Invoke_282);
+DEFINE_EXPECT(Invoke_SETPHISHINGFILTERSTATUS);
 DEFINE_EXPECT(EnableModeless_TRUE);
 DEFINE_EXPECT(EnableModeless_FALSE);
 DEFINE_EXPECT(GetHostInfo);
@@ -1017,11 +1017,14 @@ static HRESULT WINAPI WebBrowserEvents2_Invoke(IDispatch *iface, DISPID dispIdMe
         return S_OK;
     }
 
-    case 282: /* FIXME */
-        CHECK_EXPECT2(Invoke_282);
+    case DISPID_SETPHISHINGFILTERSTATUS: /* FIXME */
+        CHECK_EXPECT2(Invoke_SETPHISHINGFILTERSTATUS);
         break;
 
-    case 290: /* FIXME: IE10 */
+    case DISPID_BEFORESCRIPTEXECUTE: /* FIXME: IE10 */
+        break;
+
+    case DISPID_PRIVACYIMPACTEDSTATECHANGE:
         break;
 
     default:
@@ -2874,7 +2877,7 @@ static void test_download(DWORD flags)
     test_ready_state((flags & (DWL_FROM_PUT_HREF|DWL_FROM_GOBACK|DWL_FROM_GOFORWARD|DWL_REFRESH))
                      ? READYSTATE_COMPLETE : READYSTATE_LOADING);
 
-    if(flags & (DWL_EXPECT_BEFORE_NAVIGATE|(is_http ? DWL_FROM_PUT_HREF : 0)|DWL_FROM_GOFORWARD))
+    if(flags & (DWL_EXPECT_BEFORE_NAVIGATE|(is_http ? DWL_FROM_PUT_HREF : 0)|DWL_FROM_GOFORWARD|DWL_REFRESH))
         SET_EXPECT(Invoke_PROPERTYCHANGE);
 
     if(flags & DWL_EXPECT_BEFORE_NAVIGATE) {
@@ -2891,7 +2894,7 @@ static void test_download(DWORD flags)
     SET_EXPECT(DocHost_EnableModeless_FALSE);
     SET_EXPECT(DocHost_EnableModeless_TRUE);
     SET_EXPECT(Invoke_SETSECURELOCKICON);
-    SET_EXPECT(Invoke_282);
+    SET_EXPECT(Invoke_SETPHISHINGFILTERSTATUS);
     SET_EXPECT(EnableModeless_FALSE);
 
     if(!(flags & DWL_REFRESH)) {
@@ -2943,7 +2946,7 @@ static void test_download(DWORD flags)
 
     if(flags & (DWL_EXPECT_BEFORE_NAVIGATE|(is_http ? DWL_FROM_PUT_HREF : 0)))
         todo_wine CHECK_CALLED(Invoke_PROPERTYCHANGE);
-    else if(flags & DWL_FROM_GOFORWARD)
+    else if(flags & (DWL_FROM_GOFORWARD|DWL_REFRESH))
         CLEAR_CALLED(Invoke_PROPERTYCHANGE); /* called by IE11 */
 
     if(flags & DWL_EXPECT_BEFORE_NAVIGATE) {
@@ -2960,7 +2963,7 @@ static void test_download(DWORD flags)
     CLEAR_CALLED(DocHost_EnableModeless_FALSE); /* IE 7 */
     CLEAR_CALLED(DocHost_EnableModeless_TRUE); /* IE 7 */
     todo_wine CHECK_CALLED(Invoke_SETSECURELOCKICON);
-    CLEAR_CALLED(Invoke_282); /* IE 7 */
+    CLEAR_CALLED(Invoke_SETPHISHINGFILTERSTATUS); /* IE 7 */
     if(is_first_load)
         todo_wine CHECK_CALLED(EnableModeless_FALSE);
     else
@@ -4003,6 +4006,7 @@ static void test_SetAdvise(void)
     IWebBrowser2 *browser;
     IViewObject2 *view;
     IAdviseSink *sink;
+    IOleObject *oleobj;
     DWORD aspects, flags;
 
     if (!(browser = create_webbrowser())) return;
@@ -4031,9 +4035,38 @@ static void test_SetAdvise(void)
     ok(!flags, "got %08x\n", aspects);
     ok(sink == &test_sink, "got %p\n", sink);
 
+    hr = IWebBrowser2_QueryInterface(browser, &IID_IOleObject, (void **)&oleobj);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    SET_EXPECT(GetContainer);
+    SET_EXPECT(Site_GetWindow);
+    SET_EXPECT(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
+    SET_EXPECT(Invoke_AMBIENT_SILENT);
+    hr = IOleObject_SetClientSite(oleobj, &ClientSite);
+    ok(hr == S_OK, "got %08x\n", hr);
+    CHECK_CALLED(GetContainer);
+    CHECK_CALLED(Site_GetWindow);
+    CHECK_CALLED(Invoke_AMBIENT_OFFLINEIFNOTCONNECTED);
+    CHECK_CALLED(Invoke_AMBIENT_SILENT);
+
+    sink = (IAdviseSink *)0xdeadbeef;
+    hr = IViewObject2_GetAdvise(view, &aspects, &flags, &sink);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(sink == &test_sink, "got %p\n", sink);
+
+    hr = IOleObject_SetClientSite(oleobj, NULL);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    aspects = flags = 0xdeadbeef;
+    sink = (IAdviseSink *)0xdeadbeef;
+    hr = IViewObject2_GetAdvise(view, &aspects, &flags, &sink);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(sink == &test_sink, "got %p\n", sink);
+
     hr = IViewObject2_SetAdvise(view, 0, 0, NULL);
     ok(hr == S_OK, "got %08x\n", hr);
 
+    IOleObject_Release(oleobj);
     IViewObject2_Release(view);
     IWebBrowser2_Release(browser);
 }
