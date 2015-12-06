@@ -33,7 +33,7 @@ Build-Depends:
  sharutils,
  dctrl-tools,
  khronos-api,
- unicode-data,
+ unicode-data (>= 8.0-1~),
  libpng-dev,
  libssl-dev,
  libxml2-dev,
