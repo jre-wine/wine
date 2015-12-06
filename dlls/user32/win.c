@@ -25,6 +25,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "windef.h"
 #include "winbase.h"
 #include "winver.h"
@@ -2033,45 +2034,57 @@ HWND WINAPI GetDesktopWindow(void)
 
     if (!thread_info->top_window)
     {
-        USEROBJECTFLAGS flags;
-        if (!GetUserObjectInformationW( GetProcessWindowStation(), UOI_FLAGS, &flags,
-                                        sizeof(flags), NULL ) || (flags.dwFlags & WSF_VISIBLE))
+        static const WCHAR explorer[] = {'\\','e','x','p','l','o','r','e','r','.','e','x','e',0};
+        static const WCHAR args[] = {' ','/','d','e','s','k','t','o','p',0};
+        STARTUPINFOW si;
+        PROCESS_INFORMATION pi;
+        WCHAR windir[MAX_PATH];
+        WCHAR app[MAX_PATH + sizeof(explorer)/sizeof(WCHAR)];
+        WCHAR cmdline[MAX_PATH + (sizeof(explorer) + sizeof(args))/sizeof(WCHAR)];
+        WCHAR desktop[MAX_PATH];
+        void *redir;
+
+        SERVER_START_REQ( set_user_object_info )
         {
-            static const WCHAR explorer[] = {'\\','e','x','p','l','o','r','e','r','.','e','x','e',0};
-            static const WCHAR args[] = {' ','/','d','e','s','k','t','o','p',0};
-            STARTUPINFOW si;
-            PROCESS_INFORMATION pi;
-            WCHAR windir[MAX_PATH];
-            WCHAR app[MAX_PATH + sizeof(explorer)/sizeof(WCHAR)];
-            WCHAR cmdline[MAX_PATH + (sizeof(explorer) + sizeof(args))/sizeof(WCHAR)];
-            void *redir;
-
-            memset( &si, 0, sizeof(si) );
-            si.cb = sizeof(si);
-            si.dwFlags = STARTF_USESTDHANDLES;
-            si.hStdInput  = 0;
-            si.hStdOutput = 0;
-            si.hStdError  = GetStdHandle( STD_ERROR_HANDLE );
-
-            GetSystemDirectoryW( windir, MAX_PATH );
-            strcpyW( app, windir );
-            strcatW( app, explorer );
-            strcpyW( cmdline, app );
-            strcatW( cmdline, args );
-
-            Wow64DisableWow64FsRedirection( &redir );
-            if (CreateProcessW( app, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS,
-                                NULL, windir, &si, &pi ))
+            req->handle = wine_server_obj_handle( GetThreadDesktop(GetCurrentThreadId()) );
+            req->flags  = SET_USER_OBJECT_GET_FULL_NAME;
+            wine_server_set_reply( req, desktop, sizeof(desktop) - sizeof(WCHAR) );
+            if (!wine_server_call( req ))
             {
-                TRACE( "started explorer pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
-                WaitForInputIdle( pi.hProcess, 10000 );
-                CloseHandle( pi.hThread );
-                CloseHandle( pi.hProcess );
+                size_t size = wine_server_reply_size( reply );
+                desktop[size / sizeof(WCHAR)] = 0;
+                TRACE( "starting explorer for desktop %s\n", debugstr_w(desktop) );
             }
-            else WARN( "failed to start explorer, err %d\n", GetLastError() );
-            Wow64RevertWow64FsRedirection( redir );
+            else
+                desktop[0] = 0;
         }
-        else TRACE( "not starting explorer since winstation is not visible\n" );
+        SERVER_END_REQ;
+
+        memset( &si, 0, sizeof(si) );
+        si.cb = sizeof(si);
+        si.lpDesktop = *desktop ? desktop : NULL;
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput  = 0;
+        si.hStdOutput = 0;
+        si.hStdError  = GetStdHandle( STD_ERROR_HANDLE );
+
+        GetSystemDirectoryW( windir, MAX_PATH );
+        strcpyW( app, windir );
+        strcatW( app, explorer );
+        strcpyW( cmdline, app );
+        strcatW( cmdline, args );
+
+        Wow64DisableWow64FsRedirection( &redir );
+        if (CreateProcessW( app, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS,
+                            NULL, windir, &si, &pi ))
+        {
+            TRACE( "started explorer pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
+            WaitForInputIdle( pi.hProcess, 10000 );
+            CloseHandle( pi.hThread );
+            CloseHandle( pi.hProcess );
+        }
+        else WARN( "failed to start explorer, err %d\n", GetLastError() );
+        Wow64RevertWow64FsRedirection( redir );
 
         SERVER_START_REQ( get_desktop_window )
         {

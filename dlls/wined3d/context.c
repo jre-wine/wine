@@ -1129,6 +1129,11 @@ BOOL context_set_current(struct wined3d_context *ctx)
         }
         else
         {
+            if (wglGetCurrentContext())
+            {
+                TRACE("Flushing context %p before switching to %p.\n", old, ctx);
+                glFlush();
+            }
             old->current = 0;
         }
     }
@@ -2462,7 +2467,15 @@ BOOL context_apply_clear_state(struct wined3d_context *context, const struct win
      * performance incredibly. */
     gl_info->gl_ops.gl.p_glDisable(GL_BLEND);
     gl_info->gl_ops.gl.p_glEnable(GL_SCISSOR_TEST);
-    checkGLcall("glEnable GL_SCISSOR_TEST");
+    if (gl_info->supported[ARB_FRAMEBUFFER_SRGB])
+    {
+        if (device->state.render_states[WINED3D_RS_SRGBWRITEENABLE])
+            gl_info->gl_ops.gl.p_glEnable(GL_FRAMEBUFFER_SRGB);
+        else
+            gl_info->gl_ops.gl.p_glDisable(GL_FRAMEBUFFER_SRGB);
+        context_invalidate_state(context, STATE_RENDER(WINED3D_RS_SRGBWRITEENABLE));
+    }
+    checkGLcall("setting up state for clear");
 
     context_invalidate_state(context, STATE_RENDER(WINED3D_RS_ALPHABLENDENABLE));
     context_invalidate_state(context, STATE_RENDER(WINED3D_RS_SCISSORTESTENABLE));
