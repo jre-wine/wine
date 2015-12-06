@@ -11,7 +11,8 @@ disable/external-installers.patch
 # development/winemenubuilder.patch
 
 addons.patch
-apploader.patch
+
+# apploader.patch
 
 glu32.patch
 opengl.patch

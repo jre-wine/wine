@@ -40,7 +40,6 @@ CONFLAGS=--with-gnutls \
 
 # flags specific to kfreebsd
 ifeq ($(DEB_BUILD_ARCH_OS), kfreebsd)
-CONFFLAGS+=--without-pulse
 export DEB_LDFLAGS_MAINT_APPEND+=-lfreebsd-glue
 endif
 
@@ -88,8 +87,11 @@ override_dh_auto_configure:
 	ln -s /usr/share/misc/config.guess tools || true
 	./configure $(CONFLAGS)
 
-override_dh_bugfiles:
-	dh_bugfiles -A
+override_dh_auto_build-indep:
+ifneq ($(DEB_BUILD_ARCH_BITS), 32)
+	@echo "error: wine's arch:all packages do not build on $(DEB_BUILD_ARCH_BITS)-bit architectures"
+	@exit 1
+endif
 
 override_dh_install: $(INSTALLS)
 	mkdir -p debian/tmp
@@ -118,6 +120,9 @@ override_dh_gencontrol:
 	dh_gencontrol -- \
 	    -Vbuilt:Using="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), ' -W khronos-api unicode-data)" \
 	    -Vdlopen:Depends="$(NCURSES), $(FREETYPE)" \
+
+override_dh_bugfiles:
+	dh_bugfiles -A
 
 override_dh_clean:
 	dh_clean -- $(INSTALLS)

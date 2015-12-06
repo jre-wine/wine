@@ -1,3 +1,11 @@
+wine (1.8~rc3-1) unstable; urgency=medium
+
+  * Upstream release candidate, released Dec 4, 2015.
+  * Provide a useful error message when building the arch:all packages on an
+    unsupported architecture (closes: #807206).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 06 Dec 2015 17:15:00 +0000
+
 wine (1.8~rc2-1) unstable; urgency=medium
 
   * Upstream release candidate, released Nov 27, 2015.
