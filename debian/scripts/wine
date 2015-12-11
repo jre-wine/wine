@@ -10,7 +10,7 @@ if test -x $wine32 -a "$WINEARCH" != "win64"; then
     wine=$wine32
 elif test -x $wine64; then
     wine=$wine64
-    if [ "$(dpkg --print-architecture)" = "amd64" -a "$(dpkg --print-foreign-architectures)" != "i386" ]; then
+    if [ "$(dpkg --print-architecture)" = "amd64" -a "$(dpkg --print-foreign-architectures | grep -cx "i386")" -ne 1 ]; then
         echo "it looks like multiarch needs to be enabled.  as root, please"
         echo "execute \"dpkg --add-architecture i386 && apt-get update &&"
         echo "apt-get install $(echo $name | sed s/wine/wine32/)\""
