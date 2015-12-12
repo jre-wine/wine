@@ -1362,6 +1362,7 @@ HRESULT compile_state_table(struct StateEntry *StateTable, APPLYSTATEFUNC **dev_
 enum wined3d_blit_op
 {
     WINED3D_BLIT_OP_COLOR_BLIT,
+    WINED3D_BLIT_OP_COLOR_BLIT_ALPHATEST,
     WINED3D_BLIT_OP_COLOR_BLIT_CKEY,
     WINED3D_BLIT_OP_COLOR_FILL,
     WINED3D_BLIT_OP_DEPTH_FILL,
@@ -1385,7 +1386,7 @@ struct blit_shader
             const RECT *dst_rect, const struct wined3d_color *color);
     HRESULT (*depth_fill)(struct wined3d_device *device,
             struct wined3d_surface *surface, const RECT *rect, float depth);
-    void (*blit_surface)(struct wined3d_device *device, DWORD filter,
+    void (*blit_surface)(struct wined3d_device *device, enum wined3d_blit_op op, DWORD filter,
             struct wined3d_surface *src_surface, const RECT *src_rect,
             struct wined3d_surface *dst_surface, const RECT *dst_rect,
             const struct wined3d_color_key *color_key);
@@ -1395,6 +1396,7 @@ extern const struct blit_shader ffp_blit DECLSPEC_HIDDEN;
 extern const struct blit_shader arbfp_blit DECLSPEC_HIDDEN;
 extern const struct blit_shader cpu_blit DECLSPEC_HIDDEN;
 
+BOOL wined3d_clip_blit(const RECT *clip_rect, RECT *clipped, RECT *other) DECLSPEC_HIDDEN;
 const struct blit_shader *wined3d_select_blitter(const struct wined3d_gl_info *gl_info,
         const struct wined3d_d3d_info *d3d_info, enum wined3d_blit_op blit_op,
         const RECT *src_rect, DWORD src_usage, enum wined3d_pool src_pool, const struct wined3d_format *src_format,
