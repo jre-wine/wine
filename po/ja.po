@@ -11949,7 +11949,7 @@ msgstr ""
 "  [/s]  サイレント モード (一切のメッセージが表示されません)。\n"
 "  [/i]  DllInstallを呼び出し、 追加の[cmdline]を渡します。\n"
 "\t[/u]と同時に使った場合、DllInstallはアンインストール モードで呼び出\n"
-"\tされます。 \n"
+"\tされます。\n"
 "  [/n]  DllRegisterServerを呼び出しません。[/i]と一緒に使用してください。\n"
 "\n"
 
@@ -13583,7 +13583,7 @@ msgstr "コマンド履歴"
 
 #: wineconsole.rc:69
 msgid "&Buffer size:"
-msgstr "バッファ サイズ(&B)"
+msgstr "バッファ サイズ(&B):"
 
 #: wineconsole.rc:72
 msgid "&Remove duplicates"

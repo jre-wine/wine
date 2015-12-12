@@ -1726,6 +1726,20 @@ static nsresult NSAPI nsHttpChannelInternal_SetupFallbackChannel(nsIHttpChannelI
     return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+static nsresult NSAPI nsHttpChannelInternal_GetThirdPartyFlags(nsIHttpChannelInternal *iface, UINT32 *aThirdPartyFlags)
+{
+    nsChannel *This = impl_from_nsIHttpChannelInternal(iface);
+    FIXME("(%p)->(%p)\n", This, aThirdPartyFlags);
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+static nsresult NSAPI nsHttpChannelInternal_SetThirdPartyFlags(nsIHttpChannelInternal *iface, UINT32 aThirdPartyFlags)
+{
+    nsChannel *This = impl_from_nsIHttpChannelInternal(iface);
+    FIXME("(%p)->(%x)\n", This, aThirdPartyFlags);
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 static nsresult NSAPI nsHttpChannelInternal_GetForceAllowThirdPartyCookie(nsIHttpChannelInternal *iface, cpp_bool *aForceThirdPartyCookie)
 {
     nsChannel *This = impl_from_nsIHttpChannelInternal(iface);
@@ -1908,8 +1922,8 @@ static nsresult NSAPI nsHttpChannelInternal_SetCorsIncludeCredentials(nsIHttpCha
         cpp_bool aCorsIncludeCredentials)
 {
     nsChannel *This = impl_from_nsIHttpChannelInternal(iface);
-    FIXME("(%p)->(%x)\n", This, aCorsIncludeCredentials);
-    return NS_ERROR_NOT_IMPLEMENTED;
+    TRACE("(%p)->(%x)\n", This, aCorsIncludeCredentials);
+    return NS_OK;
 }
 
 static nsresult NSAPI nsHttpChannelInternal_GetCorsMode(nsIHttpChannelInternal *iface, UINT32 *aCorsMode)
@@ -1922,8 +1936,8 @@ static nsresult NSAPI nsHttpChannelInternal_GetCorsMode(nsIHttpChannelInternal *
 static nsresult NSAPI nsHttpChannelInternal_SetCorsMode(nsIHttpChannelInternal *iface, UINT32 aCorsMode)
 {
     nsChannel *This = impl_from_nsIHttpChannelInternal(iface);
-    FIXME("(%p)->(%d)\n", This, aCorsMode);
-    return NS_ERROR_NOT_IMPLEMENTED;
+    TRACE("(%p)->(%d)\n", This, aCorsMode);
+    return NS_OK;
 }
 
 static nsresult NSAPI nsHttpChannelInternal_GetTopWindowURI(nsIHttpChannelInternal *iface, nsIURI **aTopWindowURI)
@@ -1974,6 +1988,8 @@ static const nsIHttpChannelInternalVtbl nsHttpChannelInternalVtbl = {
     nsHttpChannelInternal_TakeAllSecurityMessages,
     nsHttpChannelInternal_SetCookie,
     nsHttpChannelInternal_SetupFallbackChannel,
+    nsHttpChannelInternal_GetThirdPartyFlags,
+    nsHttpChannelInternal_SetThirdPartyFlags,
     nsHttpChannelInternal_GetForceAllowThirdPartyCookie,
     nsHttpChannelInternal_SetForceAllowThirdPartyCookie,
     nsHttpChannelInternal_GetCanceled,
