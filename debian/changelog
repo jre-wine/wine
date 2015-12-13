@@ -1,8 +1,22 @@
+wine (1.8~rc4-1) unstable; urgency=medium
+
+  [ Michael Gilbert ]
+  * Upstream release candidate, released Dec 12, 2015.
+  * Fix typo in the previous changelog entry (closes: #807026).
+  * Add upstream version mangling for release candidates to debian/watch.
+
+  [ Jens Reyer ]
+  * Version the unicode-data build dependency.
+  * Support more than one foreign multiarch (closes: #779012).
+  * Remove legacy pulseaudio/alsa latency workaround (closes: #807403).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 12 Dec 2015 21:02:49 +0000
+
 wine (1.8~rc3-1) unstable; urgency=medium
 
   * Upstream release candidate, released Dec 4, 2015.
   * Provide a useful error message when building the arch:all packages on an
-    unsupported architecture (closes: #807206).
+    unsupported architecture (closes: #807026).
 
  -- Michael Gilbert <mgilbert@debian.org>  Sun, 06 Dec 2015 17:15:00 +0000
 
