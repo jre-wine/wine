@@ -18,6 +18,5 @@ glu32.patch
 opengl.patch
 openal.patch
 
-file-handling.patch
 font-divbyzero.patch
 printer-resolution.patch
