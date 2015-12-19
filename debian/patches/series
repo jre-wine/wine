@@ -2,21 +2,20 @@ makefile.patch
 manpages.patch
 kfreebsd.patch
 
-unicode.patch
-
 disable/shlib-exit-calls.patch
 disable/external-installers.patch
 
+generate/opengl.patch
+generate/unicode.patch
+generate/request.patch
+
+# development/apploader.patch
 # development/winegcc.patch
 # development/winemenubuilder.patch
 
-addons.patch
-
-# apploader.patch
-
 glu32.patch
-opengl.patch
 openal.patch
+addons.patch
 
 font-divbyzero.patch
 printer-resolution.patch

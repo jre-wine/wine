@@ -84,10 +84,11 @@ debian/bug-control: debian/bug-control.in
 	dh $@ --parallel --with autoreconf
 
 override_dh_auto_configure:
+	./debian/scripts/generate libs/wine/cptable.generated cpmap
+	./debian/scripts/generate server/trace.generated make_requests
+	./debian/scripts/generate server/request.generated make_requests
 	./tools/make_fir
-	cp debian/unicode/cptable.c libs/wine
 	./tools/make_unicode
-	cp debian/requests/* server
 	./tools/make_requests
 	cd dlls/opengl32 && ./make_opengl
 	ln -s /usr/share/misc/config.sub tools || true

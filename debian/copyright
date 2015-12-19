@@ -6,13 +6,10 @@ Files-Excluded:
  include/config.h.in
  include/wine/wgl*
  include/wine/server_protocol.h
- server/trace.c
- server/request.h
  loader/l_intl.nls
  libs/wine/wctype.c
  libs/wine/casemap.c
  libs/wine/compose.c
- libs/wine/cptable.c
  dlls/dsound/fir.h
  dlls/*/tests/generated.c
  dlls/dwrite/bracket.c
@@ -40,6 +37,11 @@ Copyright:
  Copyright (c) 2014-2015 Stephen Kitt <skitt@debian.org>
  Copyright (c) 2012-2015 Michael Gilbert <mgilbert@debian.org>
 License: LGPL-2.1+
+
+Files: debian/rfc3454.txt
+Copyright:
+ Non-copyrightable data
+License: Public-Domain
 
 Files: debian/scripts/import*
 Copyright:

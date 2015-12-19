@@ -1,9 +1,19 @@
-wine (1.8~rc4-2) UNRELEASED; urgency=medium
+wine (1.8-1) unstable; urgency=medium
 
+  [ Michael Gilbert ]
+  * New upstream stable release, released Dec 19, 2015.
+  * Add symlink to msiexec and drop symlink to winepath.
+  * Avoid possible mismatch in automatically generated source files.
+  * Remove Multi-Arch fields from the tools packages (closes: #807926).
+
+  [ Jens Reyer ]
+  * Drop file-handling.patch.
+
+  [ Stephen Kitt ]
   * On armel, build for armv5t (the minimum ARM architecture required
     for Wine).
 
- -- Stephen Kitt <skitt@debian.org>  Sat, 19 Dec 2015 16:22:20 +0100
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 19 Dec 2015 17:48:16 +0000
 
 wine (1.8~rc4-1) unstable; urgency=medium
 

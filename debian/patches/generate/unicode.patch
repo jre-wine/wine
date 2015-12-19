@@ -14,7 +14,7 @@ author: Michael Gilbert <mgilbert@debian.org>
 +my $UNIDATA = "/usr/share/unicode";
  my $REPORTS = "http://www.unicode.org/reports";
 -my $RFCS = "http://www.rfc-editor.org/rfc";
-+my $RFCS = "debian/unicode";
++my $RFCS = "debian";
  my $VERTICALDATA = "http://www.unicode.org/Public/vertical/revision-11";
  
  # Sort keys file
@@ -47,7 +47,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  DUMP_COMPOSE_TABLES( "libs/wine/compose.c" );
  DUMP_CTYPE_TABLES( "libs/wine/wctype.c" );
  dump_mirroring( "dlls/usp10/mirror.c" );
-@@ -2396,11 +2392,15 @@ dump_linebreak( "dlls/dwrite/linebreak.c
+@@ -2396,13 +2392,17 @@ dump_linebreak( "dlls/dwrite/linebreak.c
  dump_scripts( "dlls/dwrite/scripts" );
  dump_indic( "dlls/usp10/indicsyllable.c" );
  dump_intl_nls("loader/l_intl.nls");
@@ -64,5 +64,32 @@ author: Michael Gilbert <mgilbert@debian.org>
 +# Skipping: unicode-data currently has no MAPPING files
 +# foreach my $file (@allfiles) { HANDLE_FILE( @{$file} ); }
  
- output_cptable("libs/wine/cptable.c");
+-output_cptable("libs/wine/cptable.c");
++output_cptable("libs/wine/cptable.generated");
+ 
+ exit 0;
+ 
+--- a/libs/wine/cptable.c
++++ b/libs/wine/cptable.c
+@@ -22,8 +22,9 @@
+ 
+ #include "wine/unicode.h"
+ 
+-/* Everything below this line is generated automatically by cpmap.pl */
+-/* ### cpmap begin ### */
++#include "cptable.generated"
++
++/*
+ extern union cptable cptable_037;
+ extern union cptable cptable_424;
+ extern union cptable cptable_437;
+@@ -172,8 +173,7 @@ static const union cptable * const cptab
+     &cptable_28605,
+     &cptable_28606,
+ };
+-/* ### cpmap end ### */
+-/* Everything above this line is generated automatically by cpmap.pl */
++*/
+ 
+ #define NB_CODEPAGES  (sizeof(cptables)/sizeof(cptables[0]))
  
