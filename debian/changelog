@@ -1,3 +1,10 @@
+wine (1.8~rc4-2) UNRELEASED; urgency=medium
+
+  * On armel, build for armv5t (the minimum ARM architecture required
+    for Wine).
+
+ -- Stephen Kitt <skitt@debian.org>  Sat, 19 Dec 2015 16:22:20 +0100
+
 wine (1.8~rc4-1) unstable; urgency=medium
 
   [ Michael Gilbert ]

@@ -2,6 +2,7 @@
 
 DEB_BUILD_ARCH_OS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_OS)
 DEB_BUILD_ARCH_BITS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS)
+DEB_HOST_ARCH=$(shell dpkg-architecture -qDEB_HOST_ARCH)
 
 VERSION=$(shell dpkg-parsechangelog -S Source | sed s/wine//g)
 
@@ -46,6 +47,12 @@ endif
 # enable wine64 on 64-bit architectures
 ifeq ($(DEB_BUILD_ARCH_BITS), 64)
 CONFLAGS+=--enable-win64
+endif
+
+# On armel, build for armv5t
+ifeq ($(DEB_HOST_ARCH), armel)
+export DEB_CFLAGS_MAINT_APPEND+=-march=armv5t
+export DEB_LDFLAGS_MAINT_APPEND+=-march=armv5t
 endif
 
 # additional files to generate
