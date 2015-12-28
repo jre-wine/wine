@@ -1,3 +1,18 @@
+wine (1.8-2) unstable; urgency=medium
+
+  [ Michael Gilbert ]
+  * Migrate to dbgsym debug packages.
+  * Remove no longer needed prelink build dependency.
+  * Only match stable upstream version numbers in debian/watch.
+
+  [ Jens Reyer ]
+  * Add NEWS entry.
+  * Add wine64 manpage.
+  * Drop manpages.patch.
+  * Enable WoW64 behavior in wine script.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 19 Dec 2015 23:41:23 +0000
+
 wine (1.8-1) unstable; urgency=medium
 
   [ Michael Gilbert ]

@@ -119,7 +119,7 @@ override_dh_install: $(INSTALLS)
 	dh_install
 
 override_dh_strip:
-	dh_strip -Xwine-pthread -Xwine-kthread --dbg-package=libwine$(VERSION)-dbg
+	dh_strip -Xwine-pthread -Xwine-kthread --ddeb-migration='libwine$(VERSION)-dbg (<< 1.8-2~)'
 
 override_dh_gencontrol:
 	dh_gencontrol -- \

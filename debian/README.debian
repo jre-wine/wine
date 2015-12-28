@@ -29,11 +29,11 @@ Debugging information is no longer output by default.  If you are interested in
 more verbose debugging output, you can set the WINEDEBUG environment variable.
 
 Examples:
-$ WINEDEBUG=all wine
-$ WINEDEBUG=all wine-development
+$ WINEDEBUG=err+all wine
+$ WINEDEBUG=err+all wine-development
 
 If you always want verbose information, you can include an
-"export WINEDEBUG=all" line in your ~/.bashrc file.
+"export WINEDEBUG=err+all" line in your ~/.bashrc file.
 
 Old Versions
 ============
