@@ -1,2 +1,2 @@
 #!/bin/sh
-/LIBDIR/wineserver -p0 "$@"
+/LIBDIR/wineserver.real -p0 "$@"
