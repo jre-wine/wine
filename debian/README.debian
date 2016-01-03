@@ -23,17 +23,17 @@ $ git clone git://anonscm.debian.org/pkg-wine/wine.git
 Or viewed online at:
 http://anonscm.debian.org/gitweb/?p=pkg-wine/wine.git
 
-Environment
-===========
-If you e.g. aren't interested in debugging output, you can set the WINEDEBUG
-environment variable to an empty value.
+Debugging
+=========
+Debugging information is no longer output by default.  If you are interested in
+more verbose debugging output, you can set the WINEDEBUG environment variable.
 
 Examples:
-$ WINEDEBUG= wine
-$ WINEDEBUG= wine-development
+$ WINEDEBUG=all wine
+$ WINEDEBUG=all wine-development
 
-If you never want debug information, you can include an "export WINEDEBUG="
-line in your ~/.bashrc file.
+If you always want verbose information, you can include an
+"export WINEDEBUG=all" line in your ~/.bashrc file.
 
 Old Versions
 ============
@@ -80,8 +80,8 @@ If this causes problems for an application you may create a 32-bit wineprefix
 by running e.g.:
 $ WINEARCH=win32 WINEPREFIX="$HOME/.wine32" wineboot
 
-If you don't want 64-bit at all, you may remove wine64 and install wine from a
-32-bit architecture (e.g. wine:i386).
+If you don't want 64-bit at all, you may remove wine64 and install wineserver
+from the 32-bit architecture (e.g. wineserver:i386).
 
 Wine Gecko
 ==========
