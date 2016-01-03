@@ -181,9 +181,8 @@ Description: Windows API implementation - prelinked 64-bit binary loader
  .
  This package provides the prelinked loader for 64-bit Windows applications.
 
-Package: wineVERSION-tools
-Architecture: amd64 any-i386 any-powerpc armel armhf arm64
-Multi-Arch: no
+Package: wine32VERSION-tools
+Architecture: any-i386 any-powerpc armel armhf
 Section: libdevel
 Built-Using: ${built:Using}
 Depends:
@@ -192,20 +191,27 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libwineVERSION-dev (= ${binary:Version}),
-Provides:
- wine32VERSION-tools,
- wine64VERSION-tools,
-Breaks:
- wine32VERSION-tools (<< 1.8-2~),
- wine64VERSION-tools (<< 1.8-2~),
-Replaces:
- wine32VERSION-tools (<< 1.8-2~),
- wine64VERSION-tools (<< 1.8-2~),
 Description: Windows API implementation - 32-bit developer tools
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package provides wine's developer tools.
+ This package provides wine's 32-bit developer tools.
+
+Package: wine64VERSION-tools
+Architecture: amd64 arm64
+Section: libdevel
+Built-Using: ${built:Using}
+Depends:
+ gcc,
+ ${perl:Depends},
+ ${misc:Depends},
+ ${shlibs:Depends},
+ libwineVERSION-dev (= ${binary:Version}),
+Description: Windows API implementation - 64-bit developer tools
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This package provides wine's 64-bit developer tools.
 
 Package: fonts-wineVERSION
 Section: fonts
@@ -257,7 +263,7 @@ Depends:
  libwineVERSION (= ${binary:Version}),
  libc6-dev,
 Recommends:
- wineVERSION-tools (= ${binary:Version}),
+ wine32VERSION-tools (= ${binary:Version}) | wine64VERSION-tools (= ${binary:Version}),
 Description: Windows API implementation - development files
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
