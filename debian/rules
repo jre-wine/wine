@@ -98,6 +98,12 @@ override_dh_auto_configure:
 	ln -s /usr/share/misc/config.guess tools || true
 	./configure $(CONFLAGS)
 
+override_dh_auto_build-indep:
+ifneq ($(DEB_BUILD_ARCH_BITS), 32)
+	@echo "error: wine's arch:all packages do not build on $(DEB_BUILD_ARCH_BITS)-bit architectures"
+	@exit 1
+endif
+
 override_dh_install: $(INSTALLS)
 	mkdir -p debian/tmp
 	cp ANNOUNCE debian/tmp/changelog
