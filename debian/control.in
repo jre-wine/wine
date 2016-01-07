@@ -91,10 +91,6 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libwineVERSION (= ${binary:Version}),
-Breaks:
- libwineVERSION (<< 1.8-2~),
-Replaces:
- libwineVERSION (<< 1.8-2~),
 Description: Windows API implementation - server
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
