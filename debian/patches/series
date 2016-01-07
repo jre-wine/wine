@@ -1,5 +1,4 @@
 makefile.patch
-manpages.patch
 kfreebsd.patch
 wine64-manpage.patch
 
