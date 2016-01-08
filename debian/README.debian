@@ -69,9 +69,9 @@ please back it up first. You can then start fresh.
 Most Windows binaries are 32-bit applications. You need to install wine32 or
 wine32-development to run them. wine64 alone cannot do this.
 
-On 64-bit systems you need to enable multiarch to install wine32.
-As root, execute e.g.:
-  dpkg --add-architecture i386 && apt update && apt install wine32
+On 64-bit systems you need to enable multiarch to install wine32 or
+wine32-development. As root, execute e.g.:
+# dpkg --add-architecture i386 && apt update && apt install wine32
 
 If you have wine32 and wine64 installed Wine will default to a shared 64-bit
 wineprefix that runs (most) 32-bit Windows applications.
@@ -80,8 +80,7 @@ If this causes problems for an application you may create a 32-bit wineprefix
 by running e.g.:
 $ WINEARCH=win32 WINEPREFIX="$HOME/.wine32" wineboot
 
-If you don't want 64-bit at all, you may remove wine64 and install wineserver
-from the 32-bit architecture (e.g. wineserver:i386).
+If you don't want 64-bit at all, just uninstall wine64.
 
 Wine Gecko
 ==========
