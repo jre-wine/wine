@@ -96,12 +96,6 @@ override_dh_auto_configure:
 	cp loader/wine.man.in loader/wine64.man.in
 	./configure $(CONFLAGS)
 
-override_dh_auto_build-indep:
-ifneq ($(DEB_BUILD_ARCH_BITS), 32)
-	@echo "error: wine's arch:all packages do not build on $(DEB_BUILD_ARCH_BITS)-bit architectures"
-	@exit 1
-endif
-
 override_dh_install: $(INSTALLS)
 	mkdir -p debian/tmp
 	cp ANNOUNCE debian/tmp/changelog
@@ -114,6 +108,8 @@ override_dh_install: $(INSTALLS)
 	cp debian/scripts/wineserver debian/tmp/wineserver$(VERSION)
 	test -f debian/tmp/$(LIBDIR)/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)
+	test -f debian/tmp/$(MANDIR)/man1/wine.1 || \
+	    cp debian/tmp/$(MANDIR)/man1/wine64.1 debian/tmp/$(MANDIR)/man1/wine.1
 	for file in $$(find debian/tmp/$(MANDIR) -type f); do \
 	    rename=$$(echo $$file | sed s/\\.1/$(VERSION)\\.1/); \
 	    cp $$file $$rename || true; \
