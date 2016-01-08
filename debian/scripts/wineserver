@@ -1,2 +1,18 @@
-#!/bin/sh
-/LIBDIR/wineserver.real -p0 "$@"
+#!/bin/sh -e
+
+name="$(basename $0|sed s/server//)"
+bindir=/usr/lib/$name
+
+wineserver32=$bindir/wineserver32
+wineserver64=$bindir/wineserver64
+
+if test -x "$wineserver64"; then
+    wineserver=$wineserver64
+elif test -x "$wineserver32"; then
+    wineserver=$wineserver32
+else
+    echo "error: unable to find wineserver executable.  this shouldn't happen."
+    exit 1
+fi
+
+$wineserver -p0 "$@"

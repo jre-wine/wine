@@ -1,6 +1,5 @@
 debian/tmp/usr/lib/*/*/*.*.so
 debian/tmp/usr/lib/*/*/fakedlls
-debian/tmp/usr/lib/*/*/wineserver.real
 debian/tmp/usr/lib/*/*/libwine.so.*
 
 debian/tmp/usr/share/*/wine/*.*

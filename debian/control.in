@@ -81,24 +81,8 @@ Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package provides convenience tools for the standard Wine components.
-
-Package: wineserverVERSION
-Architecture: amd64 any-i386 any-powerpc armel armhf arm64
-Multi-Arch: allowed
-Built-Using: ${built:Using}
-Depends:
- ${misc:Depends},
- ${shlibs:Depends},
- libwineVERSION (= ${binary:Version}),
-Description: Windows API implementation - server
- Wine is a free MS-Windows API implementation.
- This is still a work in progress and many applications may still not work.
- .
- This package provides the wineserver (a daemon process that provides to
- Wine roughly the same services that the Windows kernel provides on
- Windows). The 64-bit version may be used by 32-bit and 64-bit binary
- loaders.
+ This package provides essential wrappers and convenience tools for the
+ standard Wine components.
 
 Package: wineVERSION-binfmt
 Architecture: all
@@ -122,7 +106,6 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
  libwineVERSION (= ${binary:Version}),
- wineserverVERSION:any (= ${binary:Version}),
 Recommends:
  wineVERSION (= ${source:Version}),
  libgl1-mesa-dri,
@@ -148,7 +131,6 @@ Depends:
  ${shlibs:Depends},
  x11-utils,
  libwineVERSION (= ${binary:Version}),
- wineserverVERSION (= ${binary:Version}),
 Recommends:
  wineVERSION (= ${source:Version}),
  wine32VERSION (>= ${source:Version}),
