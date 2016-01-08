@@ -93,6 +93,7 @@ override_dh_auto_configure:
 	cd dlls/opengl32 && ./make_opengl
 	ln -s /usr/share/misc/config.sub tools || true
 	ln -s /usr/share/misc/config.guess tools || true
+	cp loader/wine.man.in loader/wine64.man.in
 	./configure $(CONFLAGS)
 
 override_dh_auto_build-indep:

@@ -1,6 +1,7 @@
 makefile.patch
 manpages.patch
 kfreebsd.patch
+wine64-manpage.patch
 
 disable/shlib-exit-calls.patch
 disable/external-installers.patch
