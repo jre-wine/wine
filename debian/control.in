@@ -231,6 +231,7 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
 Recommends:
+ libfontconfig1,
  libxcursor1,
  fonts-liberation,
  fonts-wineVERSION,
