@@ -1,1 +1,1 @@
-debian/tmp/usr/share/*/wine/fonts
+fonts/*.fon usr/share/wineVERSION/wine/fonts

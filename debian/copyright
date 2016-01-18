@@ -3,6 +3,7 @@ Source: http://www.winehq.org
 Files-Excluded:
  configure
  tools/config.*
+ tools/make_makefiles
  include/config.h.in
  include/wine/wgl*
  include/wine/server_protocol.h

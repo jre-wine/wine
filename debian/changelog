@@ -1,9 +1,14 @@
-wine (1.8-3) UNRELEASED; urgency=medium
+wine (1.8-3) unstable; urgency=medium
 
+  [ Stephen Kitt ]
   * Make libwine recommend libfontconfig1; the latter allows system-
     installed fonts to be used in Windows applications.
 
- -- Stephen Kitt <skitt@debian.org>  Tue, 12 Jan 2016 23:03:18 +0100
+  [ Michael Gilbert ]
+  * Simplify the arch:all build.
+  * Build fonts only during the arch:all build.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 17 Jan 2016 21:51:02 +0000
 
 wine (1.8-2) unstable; urgency=medium
 
