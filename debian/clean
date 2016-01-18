@@ -8,7 +8,6 @@ tools/make_makefiles
 include/config.h.in
 programs/cscript/ihost.h
 
-loader/wine64.man.in
 tools/winemaker/*.man
 
 # automatically generated files

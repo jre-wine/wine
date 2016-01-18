@@ -1,3 +1,10 @@
+wine (1.8-4) unstable; urgency=medium
+
+  * Remove wine64 manpage.
+  * Use exec in launcher scripts.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 18 Jan 2016 06:18:57 +0000
+
 wine (1.8-3) unstable; urgency=medium
 
   [ Stephen Kitt ]

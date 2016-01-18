@@ -22,9 +22,7 @@ else
 fi
 
 if test -z "$WINEDEBUG"; then
-    winedebug=-all
-else
-    winedebug=$WINEDEBUG
+    export WINEDEBUG=-all
 fi
 
-WINEDEBUG=$winedebug $wine "$@"
+exec $wine "$@"
