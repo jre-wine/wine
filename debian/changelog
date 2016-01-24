@@ -1,3 +1,9 @@
+wine (1.8-5) unstable; urgency=medium
+
+  * Re-add /usr/bin wine32 and wine64 symlinks (closes: #811427).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 18 Jan 2016 21:12:25 +0000
+
 wine (1.8-4) unstable; urgency=medium
 
   * Remove wine64 manpage.
