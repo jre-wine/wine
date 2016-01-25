@@ -1,3 +1,9 @@
+wine (1.8-6) unstable; urgency=medium
+
+  * Fix installation of the wine64 loader (closes: #812319).
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 24 Jan 2016 17:25:33 +0000
+
 wine (1.8-5) unstable; urgency=medium
 
   * Re-add /usr/bin wine32 and wine64 symlinks (closes: #811427).

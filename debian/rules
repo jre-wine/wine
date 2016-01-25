@@ -125,14 +125,16 @@ override_dh_auto_install-indep: $(INSTALLS)
 override_dh_auto_install-arch: $(INSTALLS)
 	mkdir -p debian/tmp
 	cp ANNOUNCE debian/tmp/changelog
+	cp loader/wine debian/tmp/wine32 || true
+	cp loader/wine64 debian/tmp/wine64 || true
 	cp tools/winedump/README debian/tmp/README.winedump
-	cp loader/wine debian/tmp/wine$(DEB_BUILD_ARCH_BITS)
 	cp server/wineserver debian/tmp/wineserver$(DEB_BUILD_ARCH_BITS)
 	sed 's|LIBDIR|$(LIBDIR)|g' < debian/scripts/winegcc > \
 	    debian/tmp/winegcc$(DEB_BUILD_ARCH_BITS)$(VERSION)
 	dh_auto_install
+	cp loader/wine.man debian/tmp/usr/share/man/man1/wine32.1
+	cp loader/wine.man debian/tmp/usr/share/man/man1/wine64.1
 	cd debian/tmp/usr/share/man/man1 && \
-	    cp wine.1 wine$(DEB_BUILD_ARCH_BITS).1 && \
 	    cp winegcc.1 winegcc$(DEB_BUILD_ARCH_BITS)$(VERSION).1
 	test -f debian/tmp/$(LIBDIR)/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)
