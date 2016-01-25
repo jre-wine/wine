@@ -165,12 +165,16 @@ static const WCHAR prop_currentverticalresW[] =
     {'C','u','r','r','e','n','t','V','e','r','t','i','c','a','l','R','e','s','o','l','u','t','i','o','n',0};
 static const WCHAR prop_datawidthW[] =
     {'D','a','t','a','W','i','d','t','h',0};
+static const WCHAR prop_defaultipgatewayW[] =
+    {'D','e','f','a','u','l','t','I','P','G','a','t','e','w','a','y',0};
 static const WCHAR prop_defaultvalueW[] =
     {'D','e','f','a','u','l','t','V','a','l','u','e',0};
 static const WCHAR prop_descriptionW[] =
     {'D','e','s','c','r','i','p','t','i','o','n',0};
 static const WCHAR prop_deviceidW[] =
     {'D','e','v','i','c','e','I','d',0};
+static const WCHAR prop_dhcpenabledW[] =
+    {'D','H','C','P','E','n','a','b','l','e','d',0};
 static const WCHAR prop_directionW[] =
     {'D','i','r','e','c','t','i','o','n',0};
 static const WCHAR prop_displaynameW[] =
@@ -179,6 +183,8 @@ static const WCHAR prop_diskindexW[] =
     {'D','i','s','k','I','n','d','e','x',0};
 static const WCHAR prop_dnshostnameW[] =
     {'D','N','S','H','o','s','t','N','a','m','e',0};
+static const WCHAR prop_dnsserversearchorderW[] =
+    {'D','N','S','S','e','r','v','e','r','S','e','a','r','c','h','O','r','d','e','r',0};
 static const WCHAR prop_domainW[] =
     {'D','o','m','a','i','n',0};
 static const WCHAR prop_domainroleW[] =
@@ -299,6 +305,8 @@ static const WCHAR prop_servicepackminorW[] =
     {'S','e','r','v','i','c','e','P','a','c','k','M','i','n','o','r','V','e','r','s','i','o','n',0};
 static const WCHAR prop_servicetypeW[] =
     {'S','e','r','v','i','c','e','T','y','p','e',0};
+static const WCHAR prop_settingidW[] =
+    {'S','e','t','t','i','n','g','I','D',0};
 static const WCHAR prop_smbiosbiosversionW[] =
     {'S','M','B','I','O','S','B','I','O','S','V','e','r','s','i','o','n',0};
 static const WCHAR prop_startmodeW[] =
@@ -471,11 +479,16 @@ static const struct column col_networkadapter[] =
 };
 static const struct column col_networkadapterconfig[] =
 {
-    { prop_dnshostnameW,        CIM_STRING|COL_FLAG_DYNAMIC },
-    { prop_indexW,              CIM_UINT32|COL_FLAG_KEY, VT_I4 },
-    { prop_ipconnectionmetricW, CIM_UINT32, VT_I4 },
-    { prop_ipenabledW,          CIM_BOOLEAN },
-    { prop_macaddressW,         CIM_STRING|COL_FLAG_DYNAMIC }
+    { prop_defaultipgatewayW,     CIM_STRING|CIM_FLAG_ARRAY|COL_FLAG_DYNAMIC },
+    { prop_descriptionW,          CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_dhcpenabledW,          CIM_BOOLEAN },
+    { prop_dnshostnameW,          CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_dnsserversearchorderW, CIM_STRING|CIM_FLAG_ARRAY|COL_FLAG_DYNAMIC },
+    { prop_indexW,                CIM_UINT32|COL_FLAG_KEY, VT_I4 },
+    { prop_ipconnectionmetricW,   CIM_UINT32, VT_I4 },
+    { prop_ipenabledW,            CIM_BOOLEAN },
+    { prop_macaddressW,           CIM_STRING|COL_FLAG_DYNAMIC },
+    { prop_settingidW,            CIM_STRING|COL_FLAG_DYNAMIC }
 };
 static const struct column col_os[] =
 {
@@ -861,11 +874,16 @@ struct record_networkadapter
 };
 struct record_networkadapterconfig
 {
-    const WCHAR *dnshostname;
-    UINT32       index;
-    UINT32       ipconnectionmetric;
-    int          ipenabled;
-    const WCHAR *mac_address;
+    const struct array *defaultipgateway;
+    const WCHAR        *description;
+    int                 dhcpenabled;
+    const WCHAR        *dnshostname;
+    const struct array *dnsserversearchorder;
+    UINT32              index;
+    UINT32              ipconnectionmetric;
+    int                 ipenabled;
+    const WCHAR        *mac_address;
+    const WCHAR        *settingid;
 };
 struct record_operatingsystem
 {
@@ -1176,7 +1194,7 @@ static enum fill_status fill_cdromdrive( struct table *table, const struct expr 
 
     if (!resize_table( table, 1, sizeof(*rec) )) return FILL_STATUS_FAILED;
 
-    for (i = 0; i < sizeof(drives); i++)
+    for (i = 0; i < 26; i++)
     {
         if (drives & (1 << i))
         {
@@ -1598,7 +1616,7 @@ static enum fill_status fill_datafile( struct table *table, const struct expr *c
 
     dirstack = alloc_dirstack(2);
 
-    for (i = 0; i < sizeof(drives); i++)
+    for (i = 0; i < 26; i++)
     {
         if (!(drives & (1 << i))) continue;
 
@@ -1719,7 +1737,7 @@ static enum fill_status fill_directory( struct table *table, const struct expr *
 
     dirstack = alloc_dirstack(2);
 
-    for (i = 0; i < sizeof(drives); i++)
+    for (i = 0; i < 26; i++)
     {
         if (!(drives & (1 << i))) continue;
 
@@ -1831,7 +1849,7 @@ static enum fill_status fill_diskdrive( struct table *table, const struct expr *
 
     if (!resize_table( table, 2, sizeof(*rec) )) return FILL_STATUS_FAILED;
 
-    for (i = 0; i < sizeof(drives); i++)
+    for (i = 0; i < 26; i++)
     {
         if (drives & (1 << i))
         {
@@ -1895,7 +1913,7 @@ static enum fill_status fill_diskpartition( struct table *table, const struct ex
 
     if (!resize_table( table, 4, sizeof(*rec) )) return FILL_STATUS_FAILED;
 
-    for (i = 0; i < sizeof(drives); i++)
+    for (i = 0; i < 26; i++)
     {
         if (drives & (1 << i))
         {
@@ -1962,7 +1980,7 @@ static enum fill_status fill_logicaldisk( struct table *table, const struct expr
 
     if (!resize_table( table, 4, sizeof(*rec) )) return FILL_STATUS_FAILED;
 
-    for (i = 0; i < sizeof(drives); i++)
+    for (i = 0; i < 26; i++)
     {
         if (drives & (1 << i))
         {
@@ -2110,6 +2128,82 @@ static WCHAR *get_dnshostname( IP_ADAPTER_UNICAST_ADDRESS *addr )
                       0, NI_NAMEREQD )) return NULL;
     return heap_strdupW( buf );
 }
+static struct array *get_defaultipgateway( IP_ADAPTER_GATEWAY_ADDRESS *list )
+{
+    IP_ADAPTER_GATEWAY_ADDRESS *gateway;
+    struct array *ret;
+    ULONG buflen, i = 0, count = 0;
+    WCHAR **ptr, buf[54]; /* max IPv6 address length */
+
+    if (!list) return NULL;
+    for (gateway = list; gateway; gateway = gateway->Next) count++;
+
+    if (!(ret = heap_alloc( sizeof(*ret) ))) return NULL;
+    if (!(ptr = heap_alloc( sizeof(*ptr) * count )))
+    {
+        heap_free( ret );
+        return NULL;
+    }
+    for (gateway = list; gateway; gateway = gateway->Next)
+    {
+        buflen = sizeof(buf)/sizeof(buf[0]);
+        if (WSAAddressToStringW( gateway->Address.lpSockaddr, gateway->Address.iSockaddrLength,
+                                 NULL, buf, &buflen) || !(ptr[i++] = heap_strdupW( buf )))
+        {
+            for (; i > 0; i--) heap_free( ptr[i - 1] );
+            heap_free( ptr );
+            heap_free( ret );
+            return NULL;
+        }
+    }
+    ret->count = count;
+    ret->ptr   = ptr;
+    return ret;
+}
+static struct array *get_dnsserversearchorder( IP_ADAPTER_DNS_SERVER_ADDRESS *list )
+{
+    IP_ADAPTER_DNS_SERVER_ADDRESS *server;
+    struct array *ret;
+    ULONG buflen, i = 0, count = 0;
+    WCHAR **ptr, *p, buf[54]; /* max IPv6 address length */
+
+    if (!list) return NULL;
+    for (server = list; server; server = server->Next) count++;
+
+    if (!(ret = heap_alloc( sizeof(*ret) ))) return NULL;
+    if (!(ptr = heap_alloc( sizeof(*ptr) * count )))
+    {
+        heap_free( ret );
+        return NULL;
+    }
+    for (server = list; server; server = server->Next)
+    {
+        buflen = sizeof(buf)/sizeof(buf[0]);
+        if (WSAAddressToStringW( server->Address.lpSockaddr, server->Address.iSockaddrLength,
+                                 NULL, buf, &buflen) || !(ptr[i++] = heap_strdupW( buf )))
+        {
+            for (; i > 0; i--) heap_free( ptr[i - 1] );
+            heap_free( ptr );
+            heap_free( ret );
+            return NULL;
+        }
+        if ((p = strrchrW( ptr[i - 1], ':' ))) *p = 0;
+    }
+    ret->count = count;
+    ret->ptr   = ptr;
+    return ret;
+}
+static WCHAR *get_settingid( UINT32 index )
+{
+    GUID guid;
+    WCHAR *ret, *str;
+    memset( &guid, 0, sizeof(guid) );
+    guid.Data1 = index;
+    UuidToStringW( &guid, &str );
+    ret = heap_strdupW( str );
+    RpcStringFreeW( &str );
+    return ret;
+}
 
 static enum fill_status fill_networkadapterconfig( struct table *table, const struct expr *cond )
 {
@@ -2119,11 +2213,11 @@ static enum fill_status fill_networkadapterconfig( struct table *table, const st
     DWORD size = 0, ret;
     enum fill_status status = FILL_STATUS_UNFILTERED;
 
-    ret = GetAdaptersAddresses( AF_UNSPEC, 0, NULL, NULL, &size );
+    ret = GetAdaptersAddresses( AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_GATEWAYS, NULL, NULL, &size );
     if (ret != ERROR_BUFFER_OVERFLOW) return FILL_STATUS_FAILED;
 
     if (!(buffer = heap_alloc( size ))) return FILL_STATUS_FAILED;
-    if (GetAdaptersAddresses( AF_UNSPEC, 0, NULL, buffer, &size ))
+    if (GetAdaptersAddresses( AF_UNSPEC, GAA_FLAG_INCLUDE_ALL_GATEWAYS, NULL, buffer, &size ))
     {
         heap_free( buffer );
         return FILL_STATUS_FAILED;
@@ -2142,11 +2236,16 @@ static enum fill_status fill_networkadapterconfig( struct table *table, const st
         if (aa->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
 
         rec = (struct record_networkadapterconfig *)(table->data + offset);
-        rec->dnshostname        = get_dnshostname( aa->FirstUnicastAddress );
-        rec->index              = aa->u.s.IfIndex;
-        rec->ipconnectionmetric = 20;
-        rec->ipenabled          = -1;
-        rec->mac_address        = get_mac_address( aa->PhysicalAddress, aa->PhysicalAddressLength );
+        rec->defaultipgateway     = get_defaultipgateway( aa->FirstGatewayAddress );
+        rec->description          = heap_strdupW( aa->Description );
+        rec->dhcpenabled          = -1;
+        rec->dnshostname          = get_dnshostname( aa->FirstUnicastAddress );
+        rec->dnsserversearchorder = get_dnsserversearchorder( aa->FirstDnsServerAddress );
+        rec->index                = aa->u.s.IfIndex;
+        rec->ipconnectionmetric   = 20;
+        rec->ipenabled            = -1;
+        rec->mac_address          = get_mac_address( aa->PhysicalAddress, aa->PhysicalAddressLength );
+        rec->settingid            = get_settingid( rec->index );
         if (!match_row( table, row, cond, &status ))
         {
             free_row_values( table, row );

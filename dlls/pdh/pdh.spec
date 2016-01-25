@@ -62,8 +62,8 @@
 @ stub PdhGetFormattedCounterArrayW
 @ stdcall PdhGetFormattedCounterValue(ptr long ptr ptr)
 @ stub PdhGetLogFileSize
-@ stub PdhGetLogFileTypeA
-@ stub PdhGetLogFileTypeW
+@ stdcall PdhGetLogFileTypeA(str ptr)
+@ stdcall PdhGetLogFileTypeW(wstr ptr)
 @ stub PdhGetLogSetGUID
 @ stub PdhGetRawCounterArrayA
 @ stub PdhGetRawCounterArrayW

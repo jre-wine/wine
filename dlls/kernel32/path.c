@@ -292,6 +292,7 @@ DWORD WINAPI GetLongPathNameW( LPCWSTR shortpath, LPWSTR longpath, DWORD longlen
     BOOL                unixabsolute;
     WIN32_FIND_DATAW    wfd;
     HANDLE              goit;
+    BOOL                is_legal_8dot3;
 
     if (!shortpath)
     {
@@ -334,10 +335,10 @@ DWORD WINAPI GetLongPathNameW( LPCWSTR shortpath, LPWSTR longpath, DWORD longlen
         /* check for path delimiters and reproduce them */
         if (shortpath[sp] == '\\' || shortpath[sp] == '/')
         {
-            if (!lp || tmplongpath[lp-1] != '\\')
+            if (!lp || (tmplongpath[lp-1] != '\\' && tmplongpath[lp-1] != '/'))
             {
-                /* strip double "\\" */
-                tmplongpath[lp++] = '\\';
+                /* strip double delimiters */
+                tmplongpath[lp++] = shortpath[sp];
             }
             tmplongpath[lp] = 0; /* terminate string */
             sp++;
@@ -349,6 +350,7 @@ DWORD WINAPI GetLongPathNameW( LPCWSTR shortpath, LPWSTR longpath, DWORD longlen
         {
             tmplongpath[lp++] = *p++;
             tmplongpath[lp++] = *p++;
+            sp += 2;
         }
         for (; *p && *p != '/' && *p != '\\'; p++);
         tmplen = p - (shortpath + sp);
@@ -364,7 +366,7 @@ DWORD WINAPI GetLongPathNameW( LPCWSTR shortpath, LPWSTR longpath, DWORD longlen
             }
         }
 
-        /* Check if the file exists and use the existing file name */
+        /* Check if the file exists */
         goit = FindFirstFileW(tmplongpath, &wfd);
         if (goit == INVALID_HANDLE_VALUE)
         {
@@ -373,7 +375,12 @@ DWORD WINAPI GetLongPathNameW( LPCWSTR shortpath, LPWSTR longpath, DWORD longlen
             return 0;
         }
         FindClose(goit);
-        strcpyW(tmplongpath + lp, wfd.cFileName);
+
+        is_legal_8dot3 = FALSE;
+        CheckNameLegalDOS8Dot3W(tmplongpath + lp, NULL, 0, NULL, &is_legal_8dot3);
+        /* Use the existing file name if it's a short name */
+        if (is_legal_8dot3)
+            strcpyW(tmplongpath + lp, wfd.cFileName);
         lp += strlenW(tmplongpath + lp);
         sp += tmplen;
     }
@@ -491,10 +498,10 @@ DWORD WINAPI GetShortPathNameW( LPCWSTR longpath, LPWSTR shortpath, DWORD shortl
         /* check for path delimiters and reproduce them */
         if (longpath[lp] == '\\' || longpath[lp] == '/')
         {
-            if (!sp || tmpshortpath[sp-1] != '\\')
+            if (!sp || (tmpshortpath[sp-1] != '\\' && tmpshortpath[sp-1] != '/'))
             {
-                /* strip double "\\" */
-                tmpshortpath[sp] = '\\';
+                /* strip double delimiters */
+                tmpshortpath[sp] = longpath[lp];
                 sp++;
             }
             tmpshortpath[sp] = 0; /* terminate string */

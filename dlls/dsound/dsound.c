@@ -469,8 +469,6 @@ static HRESULT DirectSoundDevice_CreateSoundBuffer(
                 WARN("primarybuffer_create() failed\n");
         }
     } else {
-        IDirectSoundBufferImpl * dsb;
-
         if (dsbd->lpwfxFormat == NULL) {
             WARN("invalid parameter: dsbd->lpwfxFormat can't be NULL for "
                  "secondary buffer\n");
@@ -542,9 +540,13 @@ static HRESULT DirectSoundDevice_CreateSoundBuffer(
             return DSERR_INVALIDPARAM;
         }
 
-        hres = IDirectSoundBufferImpl_Create(device, &dsb, dsbd);
-        if (dsb) {
-            *ppdsb = (IDirectSoundBuffer*)&dsb->IDirectSoundBuffer8_iface;
+        if (from8 && (dsbd->dwFlags & DSBCAPS_CTRL3D) && (dsbd->dwFlags & DSBCAPS_CTRLPAN)) {
+            WARN("invalid parameter: DSBCAPS_CTRL3D and DSBCAPS_CTRLPAN cannot be used together\n");
+            return DSERR_INVALIDPARAM;
+        }
+
+        hres = secondarybuffer_create(device, dsbd, ppdsb);
+        if (SUCCEEDED(hres)) {
             if (dsbd->dwFlags & DSBCAPS_LOCHARDWARE)
                 device->drvcaps.dwFreeHwMixingAllBuffers--;
         } else

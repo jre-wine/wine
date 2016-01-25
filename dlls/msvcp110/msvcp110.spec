@@ -1161,8 +1161,8 @@
 @ cdecl -arch=win64 ?_Callfns@ios_base@std@@AEAAXW4event@12@@Z(ptr long) ios_base_Callfns
 @ extern -arch=win32 ?_Clocptr@_Locimp@locale@std@@0PAV123@A locale__Locimp__Clocptr
 @ extern -arch=win64 ?_Clocptr@_Locimp@locale@std@@0PEAV123@EA locale__Locimp__Clocptr
-@ stub -arch=win32 ?_Close_dir@sys@tr2@std@@YAXPAX@Z
-@ stub -arch=win64 ?_Close_dir@sys@tr2@std@@YAXPEAX@Z
+@ cdecl -arch=win32 ?_Close_dir@sys@tr2@std@@YAXPAX@Z(ptr) tr2_sys__Close_dir
+@ cdecl -arch=win64 ?_Close_dir@sys@tr2@std@@YAXPEAX@Z(ptr) tr2_sys__Close_dir
 @ cdecl -arch=win32 ?_Copy_file@sys@tr2@std@@YAHPBD0_N@Z(str str long) tr2_sys__Copy_file
 @ cdecl -arch=win64 ?_Copy_file@sys@tr2@std@@YAHPEBD0_N@Z(str str long) tr2_sys__Copy_file
 @ cdecl -arch=win32 ?_Copy_file@sys@tr2@std@@YAHPB_W0_N@Z(wstr wstr long) tr2_sys__Copy_file_wchar
@@ -1711,8 +1711,8 @@
 @ stub -arch=win32 ?_Raise_handler@std@@3P6AXABVexception@stdext@@@ZA
 @ stub -arch=win64 ?_Raise_handler@std@@3P6AXAEBVexception@stdext@@@ZEA
 @ cdecl ?_Random_device@std@@YAIXZ() _Random_device
-@ stub -arch=win32 ?_Read_dir@sys@tr2@std@@YAPADPADPAXAAW4file_type@123@@Z
-@ stub -arch=win64 ?_Read_dir@sys@tr2@std@@YAPEADPEADPEAXAEAW4file_type@123@@Z
+@ cdecl -arch=win32 ?_Read_dir@sys@tr2@std@@YAPADPADPAXAAW4file_type@123@@Z(ptr ptr ptr) tr2_sys__Read_dir
+@ cdecl -arch=win64 ?_Read_dir@sys@tr2@std@@YAPEADPEADPEAXAEAW4file_type@123@@Z(ptr ptr ptr) tr2_sys__Read_dir
 @ stub -arch=win32 ?_Read_dir@sys@tr2@std@@YAPA_WPA_WPAXAAW4file_type@123@@Z
 @ stub -arch=win64 ?_Read_dir@sys@tr2@std@@YAPEA_WPEA_WPEAXAEAW4file_type@123@@Z
 @ stub -arch=arm ?_Release@_Pad@std@@QAAXXZ

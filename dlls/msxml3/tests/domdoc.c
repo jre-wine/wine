@@ -3138,8 +3138,7 @@ static void test_get_text(void)
     {
         r = IXMLDOMNode_get_text( nodeRoot, &str );
         ok( r == S_OK, "ret %08x\n", r );
-        ok( compareIgnoreReturns(str, _bstr_("fn1.txt\n\n fn2.txt \n\nf1\n")), "wrong get_text: %s\n", wine_dbgstr_w(str));
-        SysFreeString(str);
+        expect_bstr_eq_and_free(str, "fn1.txt\n \nfn2.txt\n \nf1");
 
         IXMLDOMNode_Release(nodeRoot);
     }
@@ -4174,11 +4173,11 @@ static inline void _check_ws_ignored(int line, const char *ver, IXMLDOMDocument2
     helper_ole_check_ver(IXMLDOMNode_get_text(node1, &bstr));
     if (str)
     {
-        todo_wine helper_expect_bstr_and_release(bstr, str);
+        helper_expect_bstr_and_release(bstr, str);
     }
     else
     {
-        todo_wine helper_expect_bstr_and_release(bstr, " This is a description.");
+        helper_expect_bstr_and_release(bstr, " This is a description.");
     }
     IXMLDOMNode_Release(node1);
 
@@ -4213,11 +4212,11 @@ static inline void _check_ws_preserved(int line, const char *ver, IXMLDOMDocumen
     helper_ole_check_ver(IXMLDOMNode_get_text(node1, &bstr));
     if (str)
     {
-        todo_wine helper_expect_bstr_and_release(bstr, str);
+        helper_expect_bstr_and_release(bstr, str);
     }
     else
     {
-        todo_wine helper_expect_bstr_and_release(bstr, "\n                 This is a  description. \n            ");
+        helper_expect_bstr_and_release(bstr, "\n                 This is a  description. \n            ");
     }
     IXMLDOMNode_Release(node1);
 
