@@ -1126,8 +1126,8 @@
 @ cdecl -arch=win64 ?_Callfns@ios_base@std@@AEAAXW4event@12@@Z(ptr long) msvcp120.?_Callfns@ios_base@std@@AEAAXW4event@12@@Z
 @ extern -arch=win32 ?_Clocptr@_Locimp@locale@std@@0PAV123@A msvcp120.?_Clocptr@_Locimp@locale@std@@0PAV123@A
 @ extern -arch=win64 ?_Clocptr@_Locimp@locale@std@@0PEAV123@EA msvcp120.?_Clocptr@_Locimp@locale@std@@0PEAV123@EA
-@ stub -arch=win32 ?_Close_dir@sys@tr2@std@@YAXPAX@Z
-@ stub -arch=win64 ?_Close_dir@sys@tr2@std@@YAXPEAX@Z
+@ cdecl -arch=win32 ?_Close_dir@sys@tr2@std@@YAXPAX@Z(ptr) msvcp120.?_Close_dir@sys@tr2@std@@YAXPAX@Z
+@ cdecl -arch=win64 ?_Close_dir@sys@tr2@std@@YAXPEAX@Z(ptr) msvcp120.?_Close_dir@sys@tr2@std@@YAXPEAX@Z
 @ cdecl -arch=win32 ?_Copy_file@sys@tr2@std@@YAHPBD0_N@Z(str str long) msvcp120.?_Copy_file@sys@tr2@std@@YAHPBD0_N@Z
 @ cdecl -arch=win64 ?_Copy_file@sys@tr2@std@@YAHPEBD0_N@Z(str str long) msvcp120.?_Copy_file@sys@tr2@std@@YAHPEBD0_N@Z
 @ cdecl -arch=win32 ?_Copy_file@sys@tr2@std@@YAHPB_W0_N@Z(wstr wstr long) msvcp120.?_Copy_file@sys@tr2@std@@YAHPB_W0_N@Z
@@ -1672,8 +1672,8 @@
 @ stub -arch=win32 ?_Raise_handler@std@@3P6AXABVexception@stdext@@@ZA
 @ stub -arch=win64 ?_Raise_handler@std@@3P6AXAEBVexception@stdext@@@ZEA
 @ cdecl ?_Random_device@std@@YAIXZ() msvcp120.?_Random_device@std@@YAIXZ
-@ stub -arch=win32 ?_Read_dir@sys@tr2@std@@YAPADAAY0BAE@DPAXAAW4file_type@123@@Z
-@ stub -arch=win64 ?_Read_dir@sys@tr2@std@@YAPEADAEAY0BAE@DPEAXAEAW4file_type@123@@Z
+@ cdecl -arch=win32 ?_Read_dir@sys@tr2@std@@YAPADAAY0BAE@DPAXAAW4file_type@123@@Z(ptr ptr ptr) msvcp120.?_Read_dir@sys@tr2@std@@YAPADAAY0BAE@DPAXAAW4file_type@123@@Z
+@ cdecl -arch=win64 ?_Read_dir@sys@tr2@std@@YAPEADAEAY0BAE@DPEAXAEAW4file_type@123@@Z(ptr ptr ptr) msvcp120.?_Read_dir@sys@tr2@std@@YAPEADAEAY0BAE@DPEAXAEAW4file_type@123@@Z
 @ stub -arch=win32 ?_Read_dir@sys@tr2@std@@YAPA_WAAY0BAE@_WPAXAAW4file_type@123@@Z
 @ stub -arch=win64 ?_Read_dir@sys@tr2@std@@YAPEA_WAEAY0BAE@_WPEAXAEAW4file_type@123@@Z
 @ stub -arch=arm ?_Release@_Pad@std@@QAAXXZ

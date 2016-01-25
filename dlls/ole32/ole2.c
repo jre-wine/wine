@@ -677,47 +677,29 @@ HRESULT WINAPI OleRegGetUserType(
 	DWORD dwFormOfType,
 	LPOLESTR* pszUserType)
 {
-  WCHAR   keyName[60];
   DWORD   dwKeyType;
   DWORD   cbData;
   HKEY    clsidKey;
-  LONG    hres;
+  HRESULT hres;
+  LONG    ret;
 
-  /*
-   * Initialize the out parameter.
-   */
+  TRACE("(%s, %d, %p)\n", debugstr_guid(clsid), dwFormOfType, pszUserType);
+
+  if (!pszUserType)
+    return E_INVALIDARG;
+
   *pszUserType = NULL;
 
-  /*
-   * Build the key name we're looking for
-   */
-  sprintfW( keyName, clsidfmtW,
-            clsid->Data1, clsid->Data2, clsid->Data3,
-            clsid->Data4[0], clsid->Data4[1], clsid->Data4[2], clsid->Data4[3],
-            clsid->Data4[4], clsid->Data4[5], clsid->Data4[6], clsid->Data4[7] );
-
-  TRACE("(%s, %d, %p)\n", debugstr_w(keyName), dwFormOfType, pszUserType);
-
-  /*
-   * Open the class id Key
-   */
-  hres = open_classes_key(HKEY_CLASSES_ROOT, keyName, MAXIMUM_ALLOWED, &clsidKey);
-  if (hres != ERROR_SUCCESS)
-    return REGDB_E_CLASSNOTREG;
+  hres = COM_OpenKeyForCLSID(clsid, NULL, KEY_READ, &clsidKey);
+  if (FAILED(hres))
+    return hres;
 
   /*
    * Retrieve the size of the name string.
    */
   cbData = 0;
 
-  hres = RegQueryValueExW(clsidKey,
-			  emptyW,
-			  NULL,
-			  &dwKeyType,
-			  NULL,
-			  &cbData);
-
-  if (hres!=ERROR_SUCCESS)
+  if (RegQueryValueExW(clsidKey, emptyW, NULL, &dwKeyType, NULL, &cbData))
   {
     RegCloseKey(clsidKey);
     return REGDB_E_READREGDB;
@@ -734,7 +716,7 @@ HRESULT WINAPI OleRegGetUserType(
     return E_OUTOFMEMORY;
   }
 
-  hres = RegQueryValueExW(clsidKey,
+  ret = RegQueryValueExW(clsidKey,
 			  emptyW,
 			  NULL,
 			  &dwKeyType,
@@ -743,11 +725,10 @@ HRESULT WINAPI OleRegGetUserType(
 
   RegCloseKey(clsidKey);
 
-  if (hres != ERROR_SUCCESS)
+  if (ret != ERROR_SUCCESS)
   {
     CoTaskMemFree(*pszUserType);
     *pszUserType = NULL;
-
     return REGDB_E_READREGDB;
   }
 
@@ -873,21 +854,13 @@ HRESULT WINAPI OleRegGetMiscStatus(
 {
   static const WCHAR miscstatusW[] = {'M','i','s','c','S','t','a','t','u','s',0};
   static const WCHAR dfmtW[] = {'%','d',0};
-  WCHAR   keyName[60];
-  HKEY    clsidKey;
+  WCHAR   keyName[16];
   HKEY    miscStatusKey;
   HKEY    aspectKey;
   LONG    result;
+  HRESULT hr;
 
-  /*
-   * Build the key name we're looking for
-   */
-  sprintfW( keyName, clsidfmtW,
-            clsid->Data1, clsid->Data2, clsid->Data3,
-            clsid->Data4[0], clsid->Data4[1], clsid->Data4[2], clsid->Data4[3],
-            clsid->Data4[4], clsid->Data4[5], clsid->Data4[6], clsid->Data4[7] );
-
-  TRACE("(%s, %d, %p)\n", debugstr_w(keyName), dwAspect, pdwStatus);
+  TRACE("(%s, %d, %p)\n", debugstr_guid(clsid), dwAspect, pdwStatus);
 
   if (!pdwStatus) return E_INVALIDARG;
 
@@ -895,26 +868,11 @@ HRESULT WINAPI OleRegGetMiscStatus(
 
   if (actctx_get_miscstatus(clsid, dwAspect, pdwStatus)) return S_OK;
 
-  /*
-   * Open the class id Key
-   */
-  result = open_classes_key(HKEY_CLASSES_ROOT, keyName, MAXIMUM_ALLOWED, &clsidKey);
-  if (result != ERROR_SUCCESS)
-    return REGDB_E_CLASSNOTREG;
+  hr = COM_OpenKeyForCLSID(clsid, miscstatusW, KEY_READ, &miscStatusKey);
+  if (FAILED(hr))
+    /* missing key is not a failure */
+    return hr == REGDB_E_KEYMISSING ? S_OK : hr;
 
-  /*
-   * Get the MiscStatus
-   */
-  result = open_classes_key(clsidKey, miscstatusW, MAXIMUM_ALLOWED, &miscStatusKey);
-  if (result != ERROR_SUCCESS)
-  {
-    RegCloseKey(clsidKey);
-    return S_OK;
-  }
-
-  /*
-   * Read the default value
-   */
   OLEUTL_ReadRegistryDWORDValue(miscStatusKey, pdwStatus);
 
   /*
@@ -922,19 +880,14 @@ HRESULT WINAPI OleRegGetMiscStatus(
    */
   sprintfW(keyName, dfmtW, dwAspect);
 
-  result = open_classes_key(miscStatusKey, keyName, MAXIMUM_ALLOWED, &aspectKey);
+  result = open_classes_key(miscStatusKey, keyName, KEY_READ, &aspectKey);
   if (result == ERROR_SUCCESS)
   {
     OLEUTL_ReadRegistryDWORDValue(aspectKey, pdwStatus);
     RegCloseKey(aspectKey);
   }
 
-  /*
-   * Cleanup
-   */
   RegCloseKey(miscStatusKey);
-  RegCloseKey(clsidKey);
-
   return S_OK;
 }
 
@@ -2592,7 +2545,7 @@ HRESULT WINAPI OleCreate(
         if (SUCCEEDED(hres))
         {
             DWORD dwStatus;
-            hres = IOleObject_GetMiscStatus(pOleObject, DVASPECT_CONTENT, &dwStatus);
+            IOleObject_GetMiscStatus(pOleObject, DVASPECT_CONTENT, &dwStatus);
         }
     }
 
@@ -2621,21 +2574,12 @@ HRESULT WINAPI OleCreate(
     if (((renderopt == OLERENDER_DRAW) || (renderopt == OLERENDER_FORMAT)) &&
         SUCCEEDED(hres))
     {
-        IRunnableObject *pRunnable;
-        IOleCache *pOleCache;
-        HRESULT hres2;
-
-        hres2 = IUnknown_QueryInterface(pUnk, &IID_IRunnableObject, (void **)&pRunnable);
-        if (SUCCEEDED(hres2))
-        {
-            hres = IRunnableObject_Run(pRunnable, NULL);
-            IRunnableObject_Release(pRunnable);
-        }
-
+        hres = OleRun(pUnk);
         if (SUCCEEDED(hres))
         {
-            hres2 = IUnknown_QueryInterface(pUnk, &IID_IOleCache, (void **)&pOleCache);
-            if (SUCCEEDED(hres2))
+            IOleCache *pOleCache;
+
+            if (SUCCEEDED(IUnknown_QueryInterface(pUnk, &IID_IOleCache, (void **)&pOleCache)))
             {
                 DWORD dwConnection;
                 if (renderopt == OLERENDER_DRAW && !pFormatEtc) {
