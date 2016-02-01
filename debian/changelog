@@ -1,3 +1,9 @@
+wine (1.8-8) UNRELEASED; urgency=medium
+
+  * Output a short blurb about debugging in the launcher script.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 01 Feb 2016 02:41:50 +0000
+
 wine (1.8-7) unstable; urgency=medium
 
   * Install fonts to /usr/share/fonts.
