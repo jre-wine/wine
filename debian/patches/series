@@ -10,9 +10,8 @@ generate/opengl.patch
 generate/unicode.patch
 generate/request.patch
 
-# development/apploader.patch
-# development/winegcc.patch
-# development/winemenubuilder.patch
+development/winegcc.patch
+development/winemenubuilder.patch
 
 glu32.patch
 openal.patch

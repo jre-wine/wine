@@ -12,7 +12,7 @@ author: Michael Gilbert <mgilbert@debian.org>
              wine_get_config_dir(), path, args);
      fprintf(file, "Type=Application\n");
      fprintf(file, "StartupNotify=true\n");
-@@ -2540,7 +2540,7 @@ static BOOL write_freedesktop_associatio
+@@ -2527,7 +2527,7 @@ static BOOL write_freedesktop_associatio
          fprintf(desktop, "Type=Application\n");
          fprintf(desktop, "Name=%s\n", friendlyAppName);
          fprintf(desktop, "MimeType=%s;\n", mimeType);

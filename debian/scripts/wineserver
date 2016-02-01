@@ -15,4 +15,12 @@ else
     exit 1
 fi
 
+dist=$(cat /etc/debian_version)
+arch=$(dpkg --print-architecture)
+version=$($wineserver --version 2>&1 | cut -d- -f2)
+
+echo "Executing $name ($(basename $wineserver)) $version on Debian $dist ($arch)."
+echo "If something goes wrong, please rerun with \"WINEDEBUG=err+all $name\""
+echo "for more detailed debugging output."
+
 exec $wineserver -p0 "$@"

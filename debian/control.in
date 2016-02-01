@@ -74,7 +74,9 @@ Depends:
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
  wine64VERSION (<< ${source:Version}.1~) | wine32VERSION (<< ${source:Version}.1~),
 Suggests:
- wineVERSION-binfmt,
+ winetricks,
+ playonlinux,
+ wine-binfmt,
  dosbox (>= 0.74-4.2~),
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
@@ -82,18 +84,6 @@ Description: Windows API implementation - standard suite
  .
  This package provides essential wrappers and convenience tools for the
  standard Wine components.
-
-Package: wineVERSION-binfmt
-Architecture: all
-Depends:
- ${misc:Depends},
- wineVERSION,
- binfmt-support,
-Description: Windows API implementation - binfmt support
- Wine is a free MS-Windows API implementation.
- This is still a work in progress and many applications may still not work.
- .
- This package provides support for launching windows executables directly.
 
 Package: wine32VERSION
 Architecture: any-i386 any-powerpc armel armhf
@@ -205,23 +195,6 @@ Description: Windows API implementation - 64-bit developer tools
  .
  This package provides wine's 64-bit developer tools.
 
-Package: fonts-wineVERSION
-Section: fonts
-Architecture: all
-Multi-Arch: foreign
-Built-Using: ${built:Using}
-Depends:
- ${misc:Depends},
-Replaces:
- libwineVERSION (<< 1.7.41-2~),
-Breaks:
- libwineVERSION (<< 1.7.41-2~),
-Description: Windows API implementation - fonts
- Wine is a free MS-Windows API implementation.
- This is still a work in progress and many applications may still not work.
- .
- This package provides the fonts used by wine.
-
 Package: libwineVERSION
 Section: libs
 Architecture: amd64 any-i386 any-powerpc armel armhf arm64
@@ -231,10 +204,10 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
 Recommends:
- libfontconfig1,
  libxcursor1,
+ libfontconfig1,
  fonts-liberation,
- fonts-wineVERSION,
+ fonts-wine (>= 1.8-7),
 Suggests:
  cups-bsd,
  ttf-mscorefonts-installer,
@@ -262,3 +235,27 @@ Description: Windows API implementation - development files
  This is still a work in progress and many applications may still not work.
  .
  This package provides wine's C header files and development libraries.
+
+# Package: wine-binfmt
+# Architecture: all
+# Depends:
+#  ${misc:Depends},
+#  binfmt-support,
+# Description: Windows API implementation - binfmt support
+#  Wine is a free MS-Windows API implementation.
+#  This is still a work in progress and many applications may still not work.
+#  .
+#  This package provides support for launching windows executables directly.
+#
+# Package: fonts-wine
+# Section: fonts
+# Architecture: all
+# Multi-Arch: foreign
+# Built-Using: ${built:Using}
+# Depends:
+#  ${misc:Depends},
+# Description: Windows API implementation - fonts
+#  Wine is a free MS-Windows API implementation.
+#  This is still a work in progress and many applications may still not work.
+#  .
+#  This package provides the fonts used by wine.

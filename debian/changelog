@@ -1,8 +1,20 @@
-wine-development (1.9.0-1) UNRELEASED; urgency=medium
+wine-development (1.9.0-1) unstable; urgency=medium
 
+  * New upstream release 1.9.0, released Dec 25, 2015.
+    - A number of fixes that were deferred during code freeze.
+    - WSAPoll implementation.
+    - Standard font dialog fixes.
+    - X11 drag&drop improvements.
+    - Various bug fixes.
   * Switch to the development branch.
+    - WoW64 enabled (closes: #762058).
+    - Arch:all build failure fixed (closes: #809125).
+    - Update debian/watch to match odd version numbers.
+    - Use common fonts-wine and wine-binfmt packages from src:wine.
+  * Output a short blurb about debugging in the launcher script.
+  * Suggest winetricks and playonlinux.
 
- -- Michael Gilbert <mgilbert@debian.org>  Mon, 25 Jan 2016 01:33:38 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 31 Jan 2016 23:09:39 +0000
 
 wine (1.8-6) unstable; urgency=medium
 

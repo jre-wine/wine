@@ -132,15 +132,15 @@ override_dh_auto_install-arch: $(INSTALLS)
 	sed 's|LIBDIR|$(LIBDIR)|g' < debian/scripts/winegcc > \
 	    debian/tmp/winegcc$(DEB_BUILD_ARCH_BITS)$(VERSION)
 	dh_auto_install
-	cp loader/wine.man debian/tmp/usr/share/man/man1/wine32.1
-	cp loader/wine.man debian/tmp/usr/share/man/man1/wine64.1
+	cp loader/wine.man debian/tmp/usr/share/man/man1/wine32$(VERSION).1
+	cp loader/wine.man debian/tmp/usr/share/man/man1/wine64$(VERSION).1
 	cd debian/tmp/usr/share/man/man1 && \
 	    cp winegcc.1 winegcc$(DEB_BUILD_ARCH_BITS)$(VERSION).1
 	test -f debian/tmp/$(LIBDIR)/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)
 
 override_dh_strip:
-	dh_strip -Xwine-pthread -Xwine-kthread --ddeb-migration='libwine$(VERSION)-dbg (<< 1.8-2~)'
+	dh_strip -Xwine-pthread -Xwine-kthread --ddeb-migration='libwine$(VERSION)-dbg (<< 1.9.0-1~)'
 
 override_dh_gencontrol:
 	dh_gencontrol -- \
