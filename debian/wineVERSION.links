@@ -1,8 +1,11 @@
-usr/lib/wineVERSION/wineapploader usr/bin/msiexecVERSION
-usr/lib/wineVERSION/wineapploader usr/bin/regeditVERSION
-usr/lib/wineVERSION/wineapploader usr/bin/winecfgVERSION
-usr/lib/wineVERSION/wineapploader usr/bin/winedbgVERSION
-usr/lib/wineVERSION/wineapploader usr/bin/winebootVERSION
-usr/lib/wineVERSION/wineapploader usr/bin/winefileVERSION
-usr/lib/wineVERSION/wineapploader usr/bin/regsvr32VERSION
-usr/lib/wineVERSION/wineapploader usr/bin/wineconsoleVERSION
+usr/lib/wineVERSION/wine/wine usr/bin/wineVERSION
+usr/lib/wineVERSION/wine/wineserver usr/bin/wineserverVERSION
+
+usr/lib/wineVERSION/wine/wineapploader usr/bin/msiexecVERSION
+usr/lib/wineVERSION/wine/wineapploader usr/bin/regeditVERSION
+usr/lib/wineVERSION/wine/wineapploader usr/bin/winecfgVERSION
+usr/lib/wineVERSION/wine/wineapploader usr/bin/winedbgVERSION
+usr/lib/wineVERSION/wine/wineapploader usr/bin/winebootVERSION
+usr/lib/wineVERSION/wine/wineapploader usr/bin/winefileVERSION
+usr/lib/wineVERSION/wine/wineapploader usr/bin/regsvr32VERSION
+usr/lib/wineVERSION/wine/wineapploader usr/bin/wineconsoleVERSION

@@ -1,4 +1,3 @@
-debian/tmp/wineVERSION usr/bin
-debian/tmp/wineserverVERSION usr/bin
-
-debian/scripts/wineapploader usr/lib/wineVERSION
+debian/scripts/wine usr/lib/wineVERSION/wine
+debian/scripts/wineserver usr/lib/wineVERSION/wine
+debian/scripts/wineapploader usr/lib/wineVERSION/wine

@@ -1,7 +1,7 @@
 #!/bin/sh -e
 
-name="$(basename $0|sed s/server//)"
-bindir=/usr/lib/$name
+script="$(dirname $(readlink -f $0) | cut -d/ -f4)"
+bindir="$(dirname $(readlink -f $0))"
 
 wineserver32=$bindir/wineserver32
 wineserver64=$bindir/wineserver64
@@ -19,8 +19,8 @@ dist=$(cat /etc/debian_version)
 arch=$(dpkg --print-architecture)
 version=$($wineserver --version 2>&1 | cut -d- -f2)
 
-echo "Executing $name ($(basename $wineserver)) $version on Debian $dist ($arch)."
-echo "If something goes wrong, please rerun with \"WINEDEBUG=err+all $name\""
+echo "Executing $script ($(basename $wineserver)) $version on Debian $dist ($arch)."
+echo "If something goes wrong, please rerun with \"WINEDEBUG=err+all $script\""
 echo "for more detailed debugging output."
 
 exec $wineserver -p0 "$@"
