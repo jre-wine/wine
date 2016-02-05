@@ -1,7 +1,7 @@
 #!/bin/sh -e
 
-name=$(basename $0)
-bindir=/usr/lib/$name
+script="$(dirname $(readlink -f $0) | cut -d/ -f4)"
+bindir="$(dirname $(readlink -f $0))"
 
 wine32=$bindir/wine32
 wine64=$bindir/wine64
@@ -14,7 +14,7 @@ elif test -x $wine64; then
        [ "$WINEARCH" = "win32" ]; then
         echo "it looks like multiarch needs to be enabled.  as root, please" >&2
         echo "execute \"dpkg --add-architecture i386 && apt-get update &&" >&2
-        echo "apt-get install $(echo $name | sed s/wine/wine32/)\"" >&2
+        echo "apt-get install $(echo $script | sed s/wine/wine32/)\"" >&2
     fi
 else
     echo "error: unable to find wine executable.  this shouldn't happen." >&2
