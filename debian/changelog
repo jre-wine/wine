@@ -1,8 +1,9 @@
-wine (1.8-8) UNRELEASED; urgency=medium
+wine (1.8.1-1) unstable; urgency=medium
 
+  * New upstream release 1.8.1, released Feb 3, 2016.
   * Output a short blurb about debugging in the launcher script.
 
- -- Michael Gilbert <mgilbert@debian.org>  Mon, 01 Feb 2016 02:41:50 +0000
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 06 Feb 2016 00:55:14 +0000
 
 wine (1.8-7) unstable; urgency=medium
 
