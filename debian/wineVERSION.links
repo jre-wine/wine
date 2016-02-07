@@ -1,4 +1,3 @@
-usr/lib/wineVERSION/wine usr/bin/wineVERSION
 usr/lib/wineVERSION/wineserver usr/bin/wineserverVERSION
 
 usr/lib/wineVERSION/wineapploader usr/bin/msiexecVERSION

@@ -1,15 +1,18 @@
 #!/bin/sh -e
 
-script="$(dirname $(readlink -f $0) | cut -d/ -f4)"
-bindir="$(dirname $(readlink -f $0))"
+script=$(basename $0)
+bindir=/usr/lib/$script
 
-wine32=$bindir/wine32
+wine32=$bindir/wine
 wine64=$bindir/wine64
 
 if test -x $wine32; then
     wine=$wine32
 elif test -x $wine64; then
     wine=$wine64
+    if test -z "$WINELOADER"; then
+        export WINELOADER=$wine64
+    fi
     if [ "$(dpkg --print-architecture)" = "amd64" -a "$(dpkg --print-foreign-architectures | grep -cx "i386")" -ne 1 ] ||
        [ "$WINEARCH" = "win32" ]; then
         echo "it looks like multiarch needs to be enabled.  as root, please"

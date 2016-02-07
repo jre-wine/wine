@@ -109,6 +109,7 @@ override_dh_auto_install-indep: $(INSTALLS)
 	mkdir -p debian/tmp
 	cp ANNOUNCE debian/tmp/changelog
 	cp programs/winedbg/README debian/tmp/README.winedbg
+	cp debian/scripts/wine debian/tmp/wine$(VERSION)
 	for dir in loader server programs/msiexec programs/winedbg \
 	    programs/wineconsole programs/regedit programs/regsvr32 \
 	    programs/wineboot programs/winefile programs/winecfg; do \
@@ -125,8 +126,6 @@ override_dh_auto_install-indep: $(INSTALLS)
 override_dh_auto_install-arch: $(INSTALLS)
 	mkdir -p debian/tmp
 	cp ANNOUNCE debian/tmp/changelog
-	cp loader/wine debian/tmp/wine32 || true
-	cp loader/wine64 debian/tmp/wine64 || true
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp server/wineserver debian/tmp/wineserver$(DEB_BUILD_ARCH_BITS)
 	dh_auto_install
