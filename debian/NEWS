@@ -1,4 +1,4 @@
-wine (1.8-2) unstable; urgency=medium
+wine-development (1.9.0-2) unstable; urgency=medium
 
   Wine now uses a shared 64-bit wineprefix per default if wine32 and
   wine64 are installed. For more information on this please have a look
