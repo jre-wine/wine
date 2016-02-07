@@ -7,6 +7,7 @@ DEB_BUILD_ARCH_BITS=$(shell dpkg-architecture -qDEB_BUILD_ARCH_BITS)
 VERSION=$(shell dpkg-parsechangelog -S Source | sed s/wine//g)
 
 MANDIR=usr/share/man
+BINDIR=usr/lib/wine$(VERSION)
 DATDIR=usr/share/wine$(VERSION)
 INCDIR=usr/include/wine$(VERSION)
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
@@ -33,7 +34,7 @@ CONFLAGS=--with-gnutls \
          --without-gstreamer \
          --disable-tests \
          --libdir=/$(LIBDIR) \
-         --bindir=/$(LIBDIR) \
+         --bindir=/$(BINDIR) \
          --mandir=/$(MANDIR) \
          --includedir=/$(INCDIR) \
          --datarootdir=/$(DATDIR) \
@@ -134,8 +135,8 @@ override_dh_auto_install-arch: $(INSTALLS)
 	cp loader/wine.man debian/tmp/usr/share/man/man1/wine64$(VERSION).1
 	cd debian/tmp/usr/share/man/man1 && \
 	    cp winegcc.1 winegcc$(DEB_BUILD_ARCH_BITS)$(VERSION).1
-	test -f debian/tmp/$(LIBDIR)/wine-preloader || \
-	    cp debian/scripts/wine-preloader debian/tmp/$(LIBDIR)
+	test -f debian/tmp/$(BINDIR)/wine-preloader || \
+	    cp debian/scripts/wine-preloader debian/tmp/$(BINDIR)
 
 override_dh_strip:
 	dh_strip -Xwine-pthread -Xwine-kthread --ddeb-migration='libwine$(VERSION)-dbg (<< 1.8-2~)'
