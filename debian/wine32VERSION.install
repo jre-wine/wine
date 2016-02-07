@@ -1,2 +1,2 @@
-debian/tmp/wine32 usr/lib/wineVERSION/wine
-debian/tmp/wineserver32 usr/lib/wineVERSION/wine
+debian/tmp/wine32 usr/lib/wineVERSION
+debian/tmp/wineserver32 usr/lib/wineVERSION
