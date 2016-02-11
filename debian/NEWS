@@ -1,13 +1,14 @@
 wine-development (1.9.0-2) unstable; urgency=medium
 
-  Wine now uses a shared 64-bit wineprefix per default if wine32 and
-  wine64 are installed. For more information on this please have a look
-  at README.debian.
+  Wine now uses a shared 64-bit wineprefix per default if wine32 and wine64 (or
+  wine32-development and wine64-development) are installed. For more
+  information on this please have a look at README.debian.
 
-  * The package wine needs to be installed in any case now.
+  * The package wine (or wine-development) needs to be installed in any case
+    now.
   * Existing 32-bit wineprefixes don't get changed and continue to work.
   * Existing 64-bit wineprefixes in $HOME/.wine64 aren't found
-    automatically anymore if you are running wine from a terminal, while
+    automatically anymore if you are running Wine from a terminal, while
     Desktop launchers continue to work. You may rename the prefix to
     $HOME/.wine and adjust any launcher, or run:
     $ export WINEPREFIX="$HOME/.wine64"
