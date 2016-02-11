@@ -203,9 +203,9 @@ Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
+ libfontconfig1,
 Recommends:
  libxcursor1,
- libfontconfig1,
  fonts-liberation,
  fonts-wine (>= 1.8-7),
 Suggests:
