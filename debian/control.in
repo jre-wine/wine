@@ -230,8 +230,8 @@ Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
-Recommends:
  libfontconfig1,
+Recommends:
  libxcursor1,
  fonts-liberation,
  fonts-wineVERSION,
