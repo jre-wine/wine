@@ -11,7 +11,7 @@ if test -x "$wineserver64"; then
 elif test -x "$wineserver32"; then
     wineserver=$wineserver32
 else
-    echo "error: unable to find wineserver executable.  this shouldn't happen."
+    echo "error: unable to find wineserver executable.  this shouldn't happen." >&2
     exit 1
 fi
 
@@ -19,8 +19,8 @@ dist=$(cat /etc/debian_version)
 arch=$(dpkg --print-architecture)
 version=$($wineserver --version 2>&1 | cut -d- -f2)
 
-echo "Executing $name ($(basename $wineserver)) $version on Debian $dist ($arch)."
-echo "If something goes wrong, please rerun with \"WINEDEBUG=err+all $name\""
-echo "for more detailed debugging output."
+echo "Executing $name ($(basename $wineserver)) $version on Debian $dist ($arch)." >&2
+echo "If something goes wrong, please rerun with \"WINEDEBUG=err+all $name\"" >&2
+echo "for more detailed debugging output." >&2
 
 exec $wineserver -p0 "$@"
