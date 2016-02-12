@@ -1,4 +1,14 @@
-wine-development (1.9.0-2) UNRELEASED; urgency=medium
+wine-development (1.9.0-3) UNRELEASED; urgency=medium
+
+  * Update README.debian.
+  * Add wine-development information to already displayed NEWS.
+  * Only suggest currently unavailable libwine-gecko (see #814350).
+  * Depend on libfontconfig1 (thanks Johannes Stezenbach, see #813381).
+  * Send script messages to STDERR (thanks Joerg Schiermeier).
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Fri, 12 Feb 2016 02:27:16 +0100
+
+wine-development (1.9.0-2) unstable; urgency=medium
 
   * Simplify bug-control.
   * Install executables to bindir usr/lib/wine-development (closes: #813475).
