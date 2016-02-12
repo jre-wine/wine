@@ -1,3 +1,14 @@
+wine (1.8.1-2) UNRELEASED; urgency=medium
+
+  * Simplify bug-control.
+  * Use secure uri in vcs fields.
+  * Update README.debian.
+  * Only suggest currently unavailable libwine-gecko (closes: #814350).
+  * Depend on libfontconfig1 (thanks Johannes Stezenbach, see #813381).
+  * Send script messages to STDERR (thanks Joerg Schiermeier).
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Thu, 11 Feb 2016 23:48:10 +0100
+
 wine (1.8.1-1) unstable; urgency=medium
 
   * New upstream release 1.8.1, released Feb 3, 2016.
