@@ -1798,7 +1798,7 @@ static void shader_hw_map2gl(const struct wined3d_shader_instruction *ins)
         case WINED3DSIH_MOVA:instruction = "ARR"; break;
         case WINED3DSIH_DSX: instruction = "DDX"; break;
         default: instruction = "";
-            FIXME("Unhandled opcode %#x\n", ins->handler_idx);
+            FIXME("Unhandled opcode %s.\n", debug_d3dshaderinstructionhandler(ins->handler_idx));
             break;
     }
 
@@ -2487,7 +2487,7 @@ static void shader_hw_mnxn(const struct wined3d_shader_instruction *ins)
             tmp_ins.handler_idx = WINED3DSIH_DP3;
             break;
         default:
-            FIXME("Unhandled opcode %#x\n", ins->handler_idx);
+            FIXME("Unhandled opcode %s.\n", debug_d3dshaderinstructionhandler(ins->handler_idx));
             break;
     }
 
@@ -2559,7 +2559,7 @@ static void shader_hw_scalar_op(const struct wined3d_shader_instruction *ins)
             instruction = "LG2";
             break;
         default: instruction = "";
-            FIXME("Unhandled opcode %#x\n", ins->handler_idx);
+            FIXME("Unhandled opcode %s.\n", debug_d3dshaderinstructionhandler(ins->handler_idx));
             break;
     }
 
@@ -3218,8 +3218,8 @@ static void vshader_add_footer(struct shader_arb_ctx_priv *priv_ctx,
     }
     else if (args->clip.boolclip.clip_texcoord)
     {
+        static const char component[4] = {'x', 'y', 'z', 'w'};
         unsigned int cur_clip = 0;
-        char component[4] = {'x', 'y', 'z', 'w'};
         const char *zero = arb_get_helper_value(WINED3D_SHADER_TYPE_VERTEX, ARB_ZERO);
 
         for (i = 0; i < gl_info->limits.clipplanes; ++i)
@@ -5257,6 +5257,8 @@ static const SHADER_HANDLER shader_arb_instruction_handler_table[WINED3DSIH_TABL
     /* WINED3DSIH_IF                    */ NULL /* Hardcoded into the shader */,
     /* WINED3DSIH_IFC                   */ shader_hw_ifc,
     /* WINED3DSIH_IGE                   */ NULL,
+    /* WINED3DSIH_IMAX                  */ NULL,
+    /* WINED3DSIH_IMIN                  */ NULL,
     /* WINED3DSIH_IMUL                  */ NULL,
     /* WINED3DSIH_ISHL                  */ NULL,
     /* WINED3DSIH_ITOF                  */ NULL,
@@ -5417,8 +5419,8 @@ static void get_loop_control_const(const struct wined3d_shader_instruction *ins,
 static void record_instruction(struct list *list, const struct wined3d_shader_instruction *ins)
 {
     unsigned int i;
-    struct wined3d_shader_dst_param *dst_param = NULL;
-    struct wined3d_shader_src_param *src_param = NULL, *rel_addr = NULL;
+    struct wined3d_shader_dst_param *dst_param;
+    struct wined3d_shader_src_param *src_param = NULL, *rel_addr;
     struct recorded_instruction *rec = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*rec));
     if(!rec)
     {
@@ -5727,7 +5729,7 @@ static void shader_arb_handle_instruction(const struct wined3d_shader_instructio
     /* Unhandled opcode */
     if (!hw_fct)
     {
-        FIXME("Backend can't handle opcode %#x\n", ins->handler_idx);
+        FIXME("Backend can't handle opcode %s.\n", debug_d3dshaderinstructionhandler(ins->handler_idx));
         return;
     }
     hw_fct(ins);
@@ -6549,7 +6551,10 @@ static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, con
             gen_ffp_instr(&buffer, stage, TRUE, TRUE, settings->op[stage].dst,
                           settings->op[stage].cop, settings->op[stage].carg0,
                           settings->op[stage].carg1, settings->op[stage].carg2);
-        } else {
+        }
+        else if (settings->op[stage].cop != WINED3D_TOP_BUMPENVMAP
+                && settings->op[stage].cop != WINED3D_TOP_BUMPENVMAP_LUMINANCE)
+        {
             gen_ffp_instr(&buffer, stage, TRUE, FALSE, settings->op[stage].dst,
                           settings->op[stage].cop, settings->op[stage].carg0,
                           settings->op[stage].carg1, settings->op[stage].carg2);

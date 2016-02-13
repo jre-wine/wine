@@ -119,7 +119,7 @@ static inline bstr_t *bstr_from_str(BSTR str)
 
 static inline bstr_cache_entry_t *get_cache_entry(size_t size)
 {
-    unsigned cache_idx = FIELD_OFFSET(bstr_t, u.ptr[size-1])/BUCKET_SIZE;
+    unsigned cache_idx = FIELD_OFFSET(bstr_t, u.ptr[size+sizeof(WCHAR)-1])/BUCKET_SIZE;
     return bstr_cache_enabled && cache_idx < sizeof(bstr_cache)/sizeof(*bstr_cache)
         ? bstr_cache + cache_idx
         : NULL;
@@ -127,14 +127,14 @@ static inline bstr_cache_entry_t *get_cache_entry(size_t size)
 
 static bstr_t *alloc_bstr(size_t size)
 {
-    bstr_cache_entry_t *cache_entry = get_cache_entry(size+sizeof(WCHAR));
+    bstr_cache_entry_t *cache_entry = get_cache_entry(size);
     bstr_t *ret;
 
     if(cache_entry) {
         EnterCriticalSection(&cs_bstr_cache);
 
         if(!cache_entry->cnt) {
-            cache_entry = get_cache_entry(size+sizeof(WCHAR)+BUCKET_SIZE);
+            cache_entry = get_cache_entry(size+BUCKET_SIZE);
             if(cache_entry && !cache_entry->cnt)
                 cache_entry = NULL;
         }
@@ -149,12 +149,9 @@ static bstr_t *alloc_bstr(size_t size)
 
         if(cache_entry) {
             if(WARN_ON(heap)) {
-                size_t tail;
-
-                memset(ret, ARENA_INUSE_FILLER, FIELD_OFFSET(bstr_t, u.ptr[size+sizeof(WCHAR)]));
-                tail = bstr_alloc_size(size) - FIELD_OFFSET(bstr_t, u.ptr[size+sizeof(WCHAR)]);
-                if(tail)
-                    memset(ret->u.ptr+size+sizeof(WCHAR), ARENA_TAIL_FILLER, tail);
+                size_t fill_size = (FIELD_OFFSET(bstr_t, u.ptr[size])+2*sizeof(WCHAR)-1) & ~(sizeof(WCHAR)-1);
+                memset(ret, ARENA_INUSE_FILLER, fill_size);
+                memset((char *)ret+fill_size, ARENA_TAIL_FILLER, bstr_alloc_size(size)-fill_size);
             }
             ret->size = size;
             return ret;
@@ -258,7 +255,7 @@ void WINAPI SysFreeString(BSTR str)
         return;
 
     bstr = bstr_from_str(str);
-    cache_entry = get_cache_entry(bstr->size+sizeof(WCHAR));
+    cache_entry = get_cache_entry(bstr->size);
     if(cache_entry) {
         unsigned i;
 
@@ -280,7 +277,6 @@ void WINAPI SysFreeString(BSTR str)
 
             if(WARN_ON(heap)) {
                 unsigned n = bstr_alloc_size(bstr->size) / sizeof(DWORD) - 1;
-                bstr->size = ARENA_FREE_FILLER;
                 for(i=0; i<n; i++)
                     bstr->u.dwptr[i] = ARENA_FREE_FILLER;
             }
@@ -418,10 +414,11 @@ BSTR WINAPI SysAllocStringByteLen(LPCSTR str, UINT len)
 
     if(str) {
         memcpy(bstr->u.ptr, str, len);
-        bstr->u.ptr[len] = bstr->u.ptr[len+1] = 0;
+        bstr->u.ptr[len] = 0;
     }else {
-        memset(bstr->u.ptr, 0, len+sizeof(WCHAR));
+        memset(bstr->u.ptr, 0, len+1);
     }
+    bstr->u.str[(len+sizeof(WCHAR)-1)/sizeof(WCHAR)] = 0;
 
     return bstr->u.str;
 }

@@ -500,6 +500,8 @@ enum WINED3D_SHADER_INSTRUCTION_HANDLER
     WINED3DSIH_IF,
     WINED3DSIH_IFC,
     WINED3DSIH_IGE,
+    WINED3DSIH_IMAX,
+    WINED3DSIH_IMIN,
     WINED3DSIH_IMUL,
     WINED3DSIH_ISHL,
     WINED3DSIH_ITOF,
@@ -594,6 +596,8 @@ struct wined3d_shader_resource_info
     enum wined3d_shader_resource_type type;
     enum wined3d_data_type data_type;
 };
+
+#define WINED3D_SAMPLER_DEFAULT ~0x0u
 
 struct wined3d_shader_sampler_map_entry
 {
@@ -1175,6 +1179,7 @@ struct wined3d_context
     DWORD last_was_rhw : 1;             /* true iff last draw_primitive was in xyzrhw mode */
     DWORD last_was_pshader : 1;
     DWORD last_was_vshader : 1;
+    DWORD last_was_normal : 1;
     DWORD namedArraysLoaded : 1;
     DWORD numberedArraysLoaded : 1;
     DWORD last_was_blit : 1;
@@ -1185,17 +1190,17 @@ struct wined3d_context
     DWORD current : 1;
     DWORD destroyed : 1;
     DWORD valid : 1;
-    DWORD use_immediate_mode_draw : 1;
     DWORD texShaderBumpMap : 8;         /* MAX_TEXTURES, 8 */
     DWORD lastWasPow2Texture : 8;       /* MAX_TEXTURES, 8 */
     DWORD fixed_function_usage_map : 8; /* MAX_TEXTURES, 8 */
     DWORD lowest_disabled_stage : 4;    /* Max MAX_TEXTURES, 8 */
+    DWORD use_immediate_mode_draw : 1;
     DWORD rebind_fbo : 1;
     DWORD needs_set : 1;
     DWORD hdc_is_private : 1;
     DWORD hdc_has_format : 1;           /* only meaningful if hdc_is_private */
     DWORD update_shader_resource_bindings : 1;
-    DWORD padding : 15;
+    DWORD padding : 14;
     DWORD shader_update_mask;
     DWORD constant_update_mask;
     DWORD                   numbered_array_mask;
@@ -2125,6 +2130,9 @@ struct wined3d_device
     UINT dummy_texture_3d[MAX_COMBINED_SAMPLERS];
     UINT dummy_texture_cube[MAX_COMBINED_SAMPLERS];
 
+    /* Default sampler used to emulate the direct resource access without using wined3d_sampler */
+    GLuint default_sampler;
+
     /* Command stream */
     struct wined3d_cs *cs;
 
@@ -2334,14 +2342,12 @@ void wined3d_texture_set_swapchain(struct wined3d_texture *texture,
 
 const char *wined3d_debug_location(DWORD location) DECLSPEC_HIDDEN;
 
-#define WINED3D_VFLAG_CLIENT_STORAGE    0x00000001
-
 struct wined3d_volume
 {
     struct wined3d_resource resource;
     struct wined3d_texture *container;
 
-    DWORD flags, locations;
+    DWORD locations;
     GLint texture_level;
     DWORD download_count;
     GLuint pbo;
@@ -2494,7 +2500,6 @@ void draw_textured_quad(const struct wined3d_surface *src_surface, struct wined3
 #define SFLAG_DIBSECTION        0x00000001 /* Has a DIB section attached for GetDC. */
 #define SFLAG_DISCARD           0x00000002 /* ??? */
 #define SFLAG_NONPOW2           0x00000004 /* Surface sizes are not a power of 2 */
-#define SFLAG_CLIENT            0x00000010 /* GL_APPLE_client_storage is used with this surface. */
 #define SFLAG_DCINUSE           0x00000020 /* Set between GetDC and ReleaseDC calls. */
 
 struct wined3d_sampler
@@ -2755,6 +2760,8 @@ BYTE *buffer_get_sysmem(struct wined3d_buffer *This, struct wined3d_context *con
 void buffer_internal_preload(struct wined3d_buffer *buffer, struct wined3d_context *context,
         const struct wined3d_state *state) DECLSPEC_HIDDEN;
 void buffer_mark_used(struct wined3d_buffer *buffer) DECLSPEC_HIDDEN;
+HRESULT wined3d_buffer_upload_data(struct wined3d_buffer *buffer,
+        const struct wined3d_box *box, const void *data) DECLSPEC_HIDDEN;
 
 struct wined3d_rendertarget_view
 {
@@ -2850,6 +2857,7 @@ void swapchain_update_draw_bindings(struct wined3d_swapchain *swapchain) DECLSPE
  */
 
 /* Trace routines */
+const char *debug_d3dshaderinstructionhandler(enum WINED3D_SHADER_INSTRUCTION_HANDLER handler_idx) DECLSPEC_HIDDEN;
 const char *debug_d3dformat(enum wined3d_format_id format_id) DECLSPEC_HIDDEN;
 const char *debug_d3ddevicetype(enum wined3d_device_type device_type) DECLSPEC_HIDDEN;
 const char *debug_d3dresourcetype(enum wined3d_resource_type resource_type) DECLSPEC_HIDDEN;

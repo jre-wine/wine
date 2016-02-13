@@ -23,6 +23,7 @@
 #include <stdio.h>
 
 static NTSTATUS (WINAPI * pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
+static NTSTATUS (WINAPI * pNtQuerySystemInformationEx)(SYSTEM_INFORMATION_CLASS, void*, ULONG, void*, ULONG, ULONG*);
 static NTSTATUS (WINAPI * pNtPowerInformation)(POWER_INFORMATION_LEVEL, PVOID, ULONG, PVOID, ULONG);
 static NTSTATUS (WINAPI * pNtQueryInformationProcess)(HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
 static NTSTATUS (WINAPI * pNtQueryInformationThread)(HANDLE, THREADINFOCLASS, PVOID, ULONG, PULONG);
@@ -36,6 +37,7 @@ static NTSTATUS (WINAPI * pNtUnmapViewOfSection)(HANDLE,PVOID);
 static NTSTATUS (WINAPI * pNtClose)(HANDLE);
 static ULONG    (WINAPI * pNtGetCurrentProcessorNumber)(void);
 static BOOL     (WINAPI * pIsWow64Process)(HANDLE, PBOOL);
+static BOOL     (WINAPI * pGetLogicalProcessorInformationEx)(LOGICAL_PROCESSOR_RELATIONSHIP,SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*,DWORD*);
 
 static BOOL is_wow64;
 
@@ -56,6 +58,8 @@ static BOOL InitFunctionPtrs(void)
 {
     /* All needed functions are NT based, so using GetModuleHandle is a good check */
     HMODULE hntdll = GetModuleHandleA("ntdll");
+    HMODULE hkernel32 = GetModuleHandleA("kernel32");
+
     if (!hntdll)
     {
         win_skip("Not running on NT\n");
@@ -78,8 +82,16 @@ static BOOL InitFunctionPtrs(void)
     /* not present before XP */
     pNtGetCurrentProcessorNumber = (void *) GetProcAddress(hntdll, "NtGetCurrentProcessorNumber");
 
-    pIsWow64Process = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "IsWow64Process");
+    pIsWow64Process = (void *)GetProcAddress(hkernel32, "IsWow64Process");
     if (!pIsWow64Process || !pIsWow64Process( GetCurrentProcess(), &is_wow64 )) is_wow64 = FALSE;
+
+    /* starting with Win7 */
+    pNtQuerySystemInformationEx = (void *) GetProcAddress(hntdll, "NtQuerySystemInformationEx");
+    if (!pNtQuerySystemInformationEx)
+        win_skip("NtQuerySystemInformationEx() is not supported, some tests will be skipped.\n");
+
+    pGetLogicalProcessorInformationEx = (void *) GetProcAddress(hkernel32, "GetLogicalProcessorInformationEx");
+
     return TRUE;
 }
 
@@ -487,7 +499,7 @@ static void test_query_handle(void)
     /* Request the needed length : a SystemInformationLength greater than one struct sets ReturnLength */
     ReturnLength = 0xdeadbeef;
     status = pNtQuerySystemInformation(SystemHandleInformation, shi, SystemInformationLength, &ReturnLength);
-    todo_wine ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status);
+    ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status);
     ok( ReturnLength != 0xdeadbeef, "Expected valid ReturnLength\n" );
 
     SystemInformationLength = ReturnLength;
@@ -503,13 +515,13 @@ static void test_query_handle(void)
     }
     ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status );
     ExpectedLength = FIELD_OFFSET(SYSTEM_HANDLE_INFORMATION, Handle[shi->Count]);
-    todo_wine ok( ReturnLength == ExpectedLength || broken(ReturnLength == ExpectedLength - sizeof(DWORD)), /* Vista / 2008 */
-                  "Expected length %u, got %u\n", ExpectedLength, ReturnLength );
-    todo_wine ok( shi->Count > 1, "Expected more than 1 handle, got %u\n", shi->Count );
+    ok( ReturnLength == ExpectedLength || broken(ReturnLength == ExpectedLength - sizeof(DWORD)), /* Vista / 2008 */
+        "Expected length %u, got %u\n", ExpectedLength, ReturnLength );
+    ok( shi->Count > 1, "Expected more than 1 handle, got %u\n", shi->Count );
     for (i = 0, found = FALSE; i < shi->Count && !found; i++)
         found = (shi->Handle[i].OwnerPid == GetCurrentProcessId()) &&
                 ((HANDLE)(ULONG_PTR)shi->Handle[i].HandleValue == EventHandle);
-    todo_wine ok( found, "Expected to find event handle in handle list\n" );
+    ok( found, "Expected to find event handle in handle list\n" );
 
     CloseHandle(EventHandle);
 
@@ -694,6 +706,53 @@ static void test_query_logicalproc(void)
                 proc_no, si.dwNumberOfProcessors);
 
     HeapFree(GetProcessHeap(), 0, slpi);
+}
+
+static void test_query_logicalprocex(void)
+{
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *infoex, *infoex2;
+    DWORD relationship, len2, len;
+    NTSTATUS status;
+    BOOL ret;
+
+    if (!pNtQuerySystemInformationEx)
+        return;
+
+    len = 0;
+    relationship = RelationProcessorCore;
+    status = pNtQuerySystemInformationEx(SystemLogicalProcessorInformationEx, &relationship, sizeof(relationship), NULL, 0, &len);
+todo_wine {
+    ok(status == STATUS_INFO_LENGTH_MISMATCH, "got 0x%08x\n", status);
+    ok(len > 0, "got %u\n", len);
+}
+    len = 0;
+    relationship = RelationAll;
+    status = pNtQuerySystemInformationEx(SystemLogicalProcessorInformationEx, &relationship, sizeof(relationship), NULL, 0, &len);
+todo_wine {
+    ok(status == STATUS_INFO_LENGTH_MISMATCH, "got 0x%08x\n", status);
+    ok(len > 0, "got %u\n", len);
+}
+    len2 = 0;
+    ret = pGetLogicalProcessorInformationEx(RelationAll, NULL, &len2);
+todo_wine
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "got %d, error %d\n", ret, GetLastError());
+    ok(len == len2, "got %u, expected %u\n", len2, len);
+
+    if (len && len == len2) {
+        infoex = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len);
+        infoex2 = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len);
+
+        status = pNtQuerySystemInformationEx(SystemLogicalProcessorInformationEx, &relationship, sizeof(relationship), infoex, len, &len);
+        ok(status == STATUS_SUCCESS, "got 0x%08x\n", status);
+        ok(infoex->Size > 0, "got %u\n", infoex->Size);
+
+        ret = pGetLogicalProcessorInformationEx(RelationAll, infoex2, &len2);
+        ok(ret, "got %d, error %d\n", ret, GetLastError());
+        ok(!memcmp(infoex, infoex2, len), "returned info data mismatch\n");
+
+        HeapFree(GetProcessHeap(), 0, infoex);
+        HeapFree(GetProcessHeap(), 0, infoex2);
+    }
 }
 
 static void test_query_processor_power_info(void)
@@ -1934,6 +1993,7 @@ START_TEST(info)
     /* 0x49 SystemLogicalProcessorInformation */
     trace("Starting test_query_logicalproc()\n");
     test_query_logicalproc();
+    test_query_logicalprocex();
 
     /* NtPowerInformation */
 

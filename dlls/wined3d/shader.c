@@ -85,6 +85,8 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_IF                    */ "if",
     /* WINED3DSIH_IFC                   */ "ifc",
     /* WINED3DSIH_IGE                   */ "ige",
+    /* WINED3DSIH_IMAX                  */ "imax",
+    /* WINED3DSIH_IMIN                  */ "imin",
     /* WINED3DSIH_IMUL                  */ "imul",
     /* WINED3DSIH_ISHL                  */ "ishl",
     /* WINED3DSIH_ITOF                  */ "itof",
@@ -175,6 +177,14 @@ static const char * const semantic_names[] =
     /* WINED3D_DECL_USAGE_DEPTH         */ "DEPTH",
     /* WINED3D_DECL_USAGE_SAMPLE        */ "SAMPLE",
 };
+
+const char *debug_d3dshaderinstructionhandler(enum WINED3D_SHADER_INSTRUCTION_HANDLER handler_idx)
+{
+    if (handler_idx >= sizeof(shader_opcode_names) / sizeof(*shader_opcode_names))
+        return wine_dbg_sprintf("UNRECOGNIZED(%#x)", handler_idx);
+
+    return shader_opcode_names[handler_idx];
+}
 
 static const char *shader_semantic_name_from_usage(enum wined3d_decl_usage usage)
 {
@@ -1057,6 +1067,11 @@ static HRESULT shader_get_registers_used(struct wined3d_shader *shader, const st
             {
                 shader_record_sample(reg_maps, ins.src[1].reg.idx[0].offset,
                         ins.src[2].reg.idx[0].offset, reg_maps->sampler_map.count);
+            }
+            else if (ins.handler_idx == WINED3DSIH_LD)
+            {
+                shader_record_sample(reg_maps, ins.src[1].reg.idx[0].offset,
+                        WINED3D_SAMPLER_DEFAULT, reg_maps->sampler_map.count);
             }
 
             if (ins.predicate)
