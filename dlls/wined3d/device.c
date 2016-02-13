@@ -679,7 +679,7 @@ static void create_dummy_textures(struct wined3d_device *device, struct wined3d_
     count = min(MAX_COMBINED_SAMPLERS, gl_info->limits.combined_samplers);
     for (i = 0; i < count; ++i)
     {
-        DWORD color = 0x000000ff;
+        static const DWORD color = 0x000000ff;
 
         /* Make appropriate texture active */
         context_active_texture(context, gl_info, i);
@@ -771,6 +771,49 @@ static void destroy_dummy_textures(struct wined3d_device *device, const struct w
     memset(device->dummy_texture_3d, 0, count * sizeof(*device->dummy_texture_3d));
     memset(device->dummy_texture_rect, 0, count * sizeof(*device->dummy_texture_rect));
     memset(device->dummy_texture_2d, 0, count * sizeof(*device->dummy_texture_2d));
+}
+
+/* Context activation is done by the caller. */
+static void create_default_sampler(struct wined3d_device *device)
+{
+    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+
+    /*
+     * In SM4+ shaders there is a separation between resources and samplers. Some of shader
+     * instructions allow to access resources without using samplers.
+     * In GLSL resources are always accessed through sampler or image variables. The default
+     * sampler object is used to emulate the direct resource access when there is no sampler state
+     * to use.
+     */
+
+    if (gl_info->supported[ARB_SAMPLER_OBJECTS])
+    {
+        GL_EXTCALL(glGenSamplers(1, &device->default_sampler));
+        checkGLcall("glGenSamplers");
+        if (gl_info->supported[EXT_TEXTURE_SRGB_DECODE])
+        {
+            GL_EXTCALL(glSamplerParameteri(device->default_sampler, GL_TEXTURE_SRGB_DECODE_EXT, GL_SKIP_DECODE_EXT));
+            checkGLcall("glSamplerParamteri");
+        }
+    }
+    else
+    {
+        device->default_sampler = 0;
+    }
+}
+
+/* Context activation is done by the caller. */
+static void destroy_default_sampler(struct wined3d_device *device)
+{
+    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+
+    if (gl_info->supported[ARB_SAMPLER_OBJECTS])
+    {
+        GL_EXTCALL(glDeleteSamplers(1, &device->default_sampler));
+        checkGLcall("glDeleteSamplers");
+    }
+
+    device->default_sampler = 0;
 }
 
 static LONG fullscreen_style(LONG style)
@@ -972,6 +1015,7 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
             surface_from_resource(wined3d_texture_get_sub_resource(swapchain->front_buffer, 0)));
 
     create_dummy_textures(device, context);
+    create_default_sampler(device);
 
     device->contexts[0]->last_was_rhw = 0;
 
@@ -1119,6 +1163,7 @@ HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
     device->blitter->free_private(device);
     device->shader_backend->shader_free_private(device);
     destroy_dummy_textures(device, gl_info);
+    destroy_default_sampler(device);
 
     /* Release the context again as soon as possible. In particular,
      * releasing the render target views below may release the last reference
@@ -3989,6 +4034,23 @@ void CDECL wined3d_device_update_sub_resource(struct wined3d_device *device, str
     TRACE("device %p, resource %p, sub_resource_idx %u, box %p, data %p, row_pitch %u, depth_pitch %u.\n",
             device, resource, sub_resource_idx, box, data, row_pitch, depth_pitch);
 
+    if (resource->type == WINED3D_RTYPE_BUFFER)
+    {
+        struct wined3d_buffer *buffer = buffer_from_resource(resource);
+        HRESULT hr;
+
+        if (sub_resource_idx > 0)
+        {
+            WARN("Invalid sub_resource_idx %u.\n", sub_resource_idx);
+            return;
+        }
+
+        if (FAILED(hr = wined3d_buffer_upload_data(buffer, box, data)))
+            WARN("Failed to update buffer data, hr %#x.\n", hr);
+
+        return;
+    }
+
     if (resource->type != WINED3D_RTYPE_TEXTURE)
     {
         FIXME("Not implemented for %s resources.\n", debug_d3dresourcetype(resource->type));
@@ -4446,6 +4508,7 @@ static void delete_opengl_contexts(struct wined3d_device *device, struct wined3d
     device->blitter->free_private(device);
     device->shader_backend->shader_free_private(device);
     destroy_dummy_textures(device, gl_info);
+    destroy_default_sampler(device);
 
     context_release(context);
 
@@ -4503,6 +4566,7 @@ static HRESULT create_primary_opengl_context(struct wined3d_device *device, stru
     swapchain->context[0] = context;
     swapchain->num_contexts = 1;
     create_dummy_textures(device, context);
+    create_default_sampler(device);
     context_release(context);
 
     return WINED3D_OK;

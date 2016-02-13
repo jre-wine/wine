@@ -57,6 +57,9 @@ static const struct wined3d_format_channels formats[] =
     {WINED3DFMT_DXT3,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
     {WINED3DFMT_DXT4,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
     {WINED3DFMT_DXT5,                       0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
+    {WINED3DFMT_BC1_UNORM,                  0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
+    {WINED3DFMT_BC2_UNORM,                  0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
+    {WINED3DFMT_BC3_UNORM,                  0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
     {WINED3DFMT_MULTI2_ARGB8,               0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
     {WINED3DFMT_G8R8_G8B8,                  0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
     {WINED3DFMT_R8G8_B8G8,                  0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
@@ -99,6 +102,7 @@ static const struct wined3d_format_channels formats[] =
     {WINED3DFMT_R16G16_UNORM,              16, 16,  0,  0,   0, 16,  0,  0,    4,   0,     0},
     {WINED3DFMT_B10G10R10A2_UNORM,         10, 10, 10,  2,  20, 10,  0, 30,    4,   0,     0},
     {WINED3DFMT_R16G16B16A16_UNORM,        16, 16, 16, 16,   0, 16, 32, 48,    8,   0,     0},
+    {WINED3DFMT_R8G8_UNORM,                 8,  8,  0,  0,   0,  8,  0,  0,    2,   0,     0},
     /* Luminance */
     {WINED3DFMT_L8_UNORM,                   0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
     {WINED3DFMT_L8A8_UNORM,                 0,  0,  0,  8,   0,  0,  0,  8,    2,   0,     0},
@@ -201,15 +205,18 @@ struct wined3d_format_block_info
 
 static const struct wined3d_format_block_info format_block_info[] =
 {
-    {WINED3DFMT_DXT1,   4,  4,  8,  TRUE},
-    {WINED3DFMT_DXT2,   4,  4,  16, TRUE},
-    {WINED3DFMT_DXT3,   4,  4,  16, TRUE},
-    {WINED3DFMT_DXT4,   4,  4,  16, TRUE},
-    {WINED3DFMT_DXT5,   4,  4,  16, TRUE},
-    {WINED3DFMT_ATI1N,  4,  4,  8,  FALSE},
-    {WINED3DFMT_ATI2N,  4,  4,  16, FALSE},
-    {WINED3DFMT_YUY2,   2,  1,  4,  FALSE},
-    {WINED3DFMT_UYVY,   2,  1,  4,  FALSE},
+    {WINED3DFMT_DXT1,      4,  4,  8,  TRUE},
+    {WINED3DFMT_DXT2,      4,  4,  16, TRUE},
+    {WINED3DFMT_DXT3,      4,  4,  16, TRUE},
+    {WINED3DFMT_DXT4,      4,  4,  16, TRUE},
+    {WINED3DFMT_DXT5,      4,  4,  16, TRUE},
+    {WINED3DFMT_BC1_UNORM, 4,  4,  8,  TRUE},
+    {WINED3DFMT_BC2_UNORM, 4,  4,  16, TRUE},
+    {WINED3DFMT_BC3_UNORM, 4,  4,  16, TRUE},
+    {WINED3DFMT_ATI1N,     4,  4,  8,  FALSE},
+    {WINED3DFMT_ATI2N,     4,  4,  16, FALSE},
+    {WINED3DFMT_YUY2,      2,  1,  4,  FALSE},
+    {WINED3DFMT_UYVY,      2,  1,  4,  FALSE},
 };
 
 struct wined3d_format_vertex_info
@@ -950,6 +957,21 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
             | WINED3DFMT_FLAG_SRGB_READ | WINED3DFMT_FLAG_COMPRESSED,
             EXT_TEXTURE_COMPRESSION_S3TC, NULL},
+    {WINED3DFMT_BC1_UNORM,              GL_COMPRESSED_RGBA_S3TC_DXT1_EXT, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,       0,
+            GL_RGBA,                    GL_UNSIGNED_BYTE,                 0,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
+            | WINED3DFMT_FLAG_COMPRESSED,
+            EXT_TEXTURE_COMPRESSION_S3TC, NULL},
+    {WINED3DFMT_BC2_UNORM,              GL_COMPRESSED_RGBA_S3TC_DXT3_EXT, GL_COMPRESSED_RGBA_S3TC_DXT3_EXT,       0,
+            GL_RGBA,                    GL_UNSIGNED_BYTE,                 0,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
+            | WINED3DFMT_FLAG_COMPRESSED,
+            EXT_TEXTURE_COMPRESSION_S3TC, NULL},
+    {WINED3DFMT_BC3_UNORM,              GL_COMPRESSED_RGBA_S3TC_DXT5_EXT, GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,       0,
+            GL_RGBA,                    GL_UNSIGNED_BYTE,                 0,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
+            | WINED3DFMT_FLAG_COMPRESSED,
+            EXT_TEXTURE_COMPRESSION_S3TC, NULL},
     /* IEEE formats */
     {WINED3DFMT_R32_FLOAT,              GL_RGB32F_ARB,                    GL_RGB32F_ARB,                          0,
             GL_RED,                     GL_FLOAT,                         0,
@@ -1088,6 +1110,10 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
             | WINED3DFMT_FLAG_RENDERTARGET,
             WINED3D_GL_EXT_NONE,        NULL},
+    {WINED3DFMT_R8G8_UNORM,             GL_RG8,                           GL_RG8,                                 0,
+            GL_RG,                      GL_UNSIGNED_BYTE,                 0,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
+            ARB_TEXTURE_RG,             NULL},
     /* Luminance */
     {WINED3DFMT_L8_UNORM,               GL_LUMINANCE8,                    GL_SLUMINANCE8_EXT,                     0,
             GL_LUMINANCE,               GL_UNSIGNED_BYTE,                 0,
@@ -2647,6 +2673,12 @@ static void apply_format_fixups(struct wined3d_adapter *adapter, struct wined3d_
     idx = getFmtIdx(WINED3DFMT_DXT4);
     gl_info->formats[idx].flags[WINED3D_GL_RES_TYPE_TEX_3D] &= ~WINED3DFMT_FLAG_TEXTURE;
     idx = getFmtIdx(WINED3DFMT_DXT5);
+    gl_info->formats[idx].flags[WINED3D_GL_RES_TYPE_TEX_3D] &= ~WINED3DFMT_FLAG_TEXTURE;
+    idx = getFmtIdx(WINED3DFMT_BC1_UNORM);
+    gl_info->formats[idx].flags[WINED3D_GL_RES_TYPE_TEX_3D] &= ~WINED3DFMT_FLAG_TEXTURE;
+    idx = getFmtIdx(WINED3DFMT_BC2_UNORM);
+    gl_info->formats[idx].flags[WINED3D_GL_RES_TYPE_TEX_3D] &= ~WINED3DFMT_FLAG_TEXTURE;
+    idx = getFmtIdx(WINED3DFMT_BC3_UNORM);
     gl_info->formats[idx].flags[WINED3D_GL_RES_TYPE_TEX_3D] &= ~WINED3DFMT_FLAG_TEXTURE;
     /* Similarly with ATI1N / ATI2N and GL_ARB_texture_compression_rgtc. */
     idx = getFmtIdx(WINED3DFMT_ATI1N);

@@ -393,6 +393,7 @@ AC_CHECK_HEADERS(\
 	AudioUnit/AudioComponent.h \
 	CL/cl.h \
 	Carbon/Carbon.h \
+	CommonCrypto/CommonDigest.h \
 	CoreAudio/CoreAudio.h \
 	CoreServices/CoreServices.h \
 	DiskArbitration/DiskArbitration.h \
@@ -944,7 +945,7 @@ dnl Check for cross compiler to build test programs
 AC_SUBST(CROSSTARGET,"")
 if test "$cross_compiling" = "no" -a "x$enable_tests" != xno -a "$LIBEXT" != "dll"
 then
-    WINE_CHECK_MINGW_PROG(CROSSCC,gcc,false)
+    WINE_CHECK_MINGW_PROG(CROSSCC,false)
     if test "$CROSSCC" != "false"
     then
         ac_save_CC="$CC"
@@ -958,6 +959,7 @@ then
                            do
                                case "$1" in
                                  *-gcc) CROSSTARGET=`expr "$1" : '\(.*\)-gcc'` ;;
+                                 *-clang) CROSSTARGET=`expr "$1" : '\(.*\)-clang'` ;;
                                esac
                                shift
                            done],
@@ -2689,6 +2691,7 @@ WINE_CONFIG_DLL(api-ms-win-ntuser-dc-access-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-security-base-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-security-base-l1-2-0)
 WINE_CONFIG_DLL(api-ms-win-security-lsalookup-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-security-lsalookup-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-security-sddl-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-service-core-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-service-management-l1-1-0)

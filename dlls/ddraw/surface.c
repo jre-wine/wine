@@ -1653,7 +1653,6 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_Blt(IDirectDrawSurface7 *
     switch(hr)
     {
         case WINED3DERR_NOTAVAILABLE:       return DDERR_UNSUPPORTED;
-        case WINED3DERR_WRONGTEXTUREFORMAT: return DDERR_INVALIDPIXELFORMAT;
         default:                            return hr;
     }
 }
@@ -2377,12 +2376,9 @@ static HRESULT WINAPI ddraw_surface7_GetPriority(IDirectDrawSurface7 *iface, DWO
         WARN("Called on offscreenplain surface, returning DDERR_INVALIDOBJECT.\n");
         hr = DDERR_INVALIDOBJECT;
     }
-    else if (!(surface->surface_desc.ddsCaps.dwCaps2 & managed)
-            || (surface->surface_desc.ddsCaps.dwCaps2 & DDSCAPS2_MIPMAPSUBLEVEL)
-            || ((surface->surface_desc.ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP)
-                    && !(surface->surface_desc.ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP_POSITIVEX)))
+    else if (!(surface->surface_desc.ddsCaps.dwCaps2 & managed) || !surface->is_complex_root)
     {
-        WARN("Called on non-managed texture, mipmap sublevel or non +X toplevel surface, returning DDERR_INVALIDPARAMS.\n");
+        WARN("Called on non-managed texture or non-root surface, returning DDERR_INVALIDPARAMS.\n");
         hr = DDERR_INVALIDPARAMS;
     }
     else
@@ -4167,7 +4163,6 @@ static HRESULT WINAPI DECLSPEC_HOTPATCH ddraw_surface7_BltFast(IDirectDrawSurfac
     switch(hr)
     {
         case WINED3DERR_NOTAVAILABLE:           return DDERR_UNSUPPORTED;
-        case WINED3DERR_WRONGTEXTUREFORMAT:     return DDERR_INVALIDPIXELFORMAT;
         default:                                return hr;
     }
 }
@@ -4726,13 +4721,8 @@ static HRESULT WINAPI ddraw_surface7_SetColorKey(IDirectDrawSurface7 *iface, DWO
 
     TRACE("iface %p, flags %#x, color_key %p.\n", iface, flags, color_key);
 
-    wined3d_mutex_lock();
-    if (!surface->wined3d_texture)
-    {
-        wined3d_mutex_unlock();
+    if (surface->surface_desc.ddsCaps.dwCaps2 & DDSCAPS2_MIPMAPSUBLEVEL)
         return DDERR_NOTONMIPMAPSUBLEVEL;
-    }
-    wined3d_mutex_unlock();
 
     return ddraw_surface_set_color_key(surface, flags, color_key);
 }
@@ -5743,6 +5733,13 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
         return DDERR_INVALIDCAPS;
     }
 
+    if ((desc->ddsCaps.dwCaps & DDSCAPS_MIPMAP) && !(desc->ddsCaps.dwCaps & DDSCAPS_TEXTURE))
+    {
+        WARN("DDSCAPS_MIPMAP requested without DDSCAPS_TEXTURE.\n");
+        HeapFree(GetProcessHeap(), 0, texture);
+        return DDERR_INVALIDCAPS;
+    }
+
     if ((desc->ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP_ALLFACES)
             && !(desc->ddsCaps.dwCaps2 & DDSCAPS2_CUBEMAP))
     {
@@ -5883,7 +5880,10 @@ HRESULT ddraw_surface_create(struct ddraw *ddraw, const DDSURFACEDESC2 *surface_
             {
                 /* Undocumented feature: Create sublevels until either the
                  * width or the height is 1. */
-                desc->u2.dwMipMapCount = wined3d_log2i(min(desc->dwWidth, desc->dwHeight)) + 1;
+                if (version == 7)
+                    desc->u2.dwMipMapCount = wined3d_log2i(max(desc->dwWidth, desc->dwHeight)) + 1;
+                else
+                    desc->u2.dwMipMapCount = wined3d_log2i(min(desc->dwWidth, desc->dwHeight)) + 1;
             }
         }
         else

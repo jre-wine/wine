@@ -644,6 +644,8 @@ HRESULT get_elem_attr_value_by_dispid(HTMLElement *elem, DISPID dispid, DWORD fl
     EXCEPINFO excep;
     HRESULT hres;
 
+    static const WCHAR nullW[] = {'n','u','l','l',0};
+
     hres = IDispatchEx_InvokeEx(&elem->node.event_target.dispex.IDispatchEx_iface, dispid, LOCALE_SYSTEM_DEFAULT,
             DISPATCH_PROPERTYGET, &dispParams, ret, &excep, NULL);
     if(FAILED(hres))
@@ -652,6 +654,12 @@ HRESULT get_elem_attr_value_by_dispid(HTMLElement *elem, DISPID dispid, DWORD fl
     if(flags & ATTRFLAG_ASSTRING) {
         switch(V_VT(ret)) {
         case VT_BSTR:
+            break;
+        case VT_NULL:
+            V_BSTR(ret) = SysAllocString(nullW);
+            if(!V_BSTR(ret))
+                return E_OUTOFMEMORY;
+            V_VT(ret) = VT_BSTR;
             break;
         case VT_DISPATCH:
             IDispatch_Release(V_DISPATCH(ret));
@@ -1265,15 +1273,43 @@ static HRESULT WINAPI HTMLElement_get_recordNumber(IHTMLElement *iface, VARIANT 
 static HRESULT WINAPI HTMLElement_put_lang(IHTMLElement *iface, BSTR v)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsAString nsstr;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    if(!This->nselem) {
+        FIXME("NULL nselem\n");
+        return E_NOTIMPL;
+    }
+
+    nsAString_InitDepend(&nsstr, v);
+    nsres = nsIDOMHTMLElement_SetLang(This->nselem, &nsstr);
+    nsAString_Finish(&nsstr);
+    if(NS_FAILED(nsres)) {
+        ERR("SetLang failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLElement_get_lang(IHTMLElement *iface, BSTR *p)
 {
     HTMLElement *This = impl_from_IHTMLElement(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString nsstr;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!This->nselem) {
+        FIXME("NULL nselem\n");
+        return E_NOTIMPL;
+    }
+
+    nsAString_Init(&nsstr, NULL);
+    nsres = nsIDOMHTMLElement_GetLang(This->nselem, &nsstr);
+    return return_nsstr(nsres, &nsstr, p);
 }
 
 static HRESULT WINAPI HTMLElement_get_offsetLeft(IHTMLElement *iface, LONG *p)

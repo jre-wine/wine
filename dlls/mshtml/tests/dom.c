@@ -1411,8 +1411,19 @@ static void test_get_set_attr(IHTMLDocument2 *doc)
     ok(V_VT(&val) == VT_BOOL, "variant type should have been VT_BOOL (0x%x), was: 0x%x\n", VT_BOOL, V_VT(&val));
     ok(V_BOOL(&val) == VARIANT_TRUE, "variant value should have been VARIANT_TRUE (0x%x), was %d\n", VARIANT_TRUE, V_BOOL(&val));
     VariantClear(&val);
-    SysFreeString(bstr);
 
+    /* overwrite the attribute with null */
+    V_VT(&val) = VT_NULL;
+    hres = IHTMLElement_setAttribute(elem, bstr, val, 0);
+    ok(hres == S_OK, "setAttribute failed: %08x\n", hres);
+
+    hres = IHTMLElement_getAttribute(elem, bstr, 2, &val);
+    ok(hres == S_OK, "getAttribute failed: %08x\n", hres);
+    ok(V_VT(&val) == VT_BSTR, "V_VT(val) = %u, expected VT_BSTR", V_VT(&val));
+    ok(!strcmp_wa(V_BSTR(&val), "null"), "V_BSTR(val) = %s, expected \"null\"\n", wine_dbgstr_w(V_BSTR(&val)));
+    VariantClear(&val);
+
+    SysFreeString(bstr);
     IHTMLElement_Release(elem);
 }
 
@@ -3584,6 +3595,36 @@ static void _set_elem_language(unsigned line, IHTMLElement *elem, const char *la
     SysFreeString(str);
 
     _test_elem_language(line, elem, lang);
+}
+
+#define test_elem_lang(e,i) _test_elem_lang(__LINE__,e,i)
+static void _test_elem_lang(unsigned line, IHTMLElement *elem, const char *exlang)
+{
+    BSTR lang = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLElement_get_lang(elem, &lang);
+    ok_(__FILE__,line) (hres == S_OK, "get_lang failed: %08x\n", hres);
+
+    if(exlang)
+        ok_(__FILE__,line) (!strcmp_wa(lang, exlang), "unexpected lang %s\n", wine_dbgstr_w(lang));
+    else
+        ok_(__FILE__,line) (!lang, "lang=%s\n", wine_dbgstr_w(lang));
+
+    SysFreeString(lang);
+}
+
+#define set_elem_lang(e,i) _set_elem_lang(__LINE__,e,i)
+static void _set_elem_lang(unsigned line, IHTMLElement *elem, const char *lang)
+{
+    BSTR str = a2bstr(lang);
+    HRESULT hres;
+
+    hres = IHTMLElement_put_lang(elem, str);
+    ok_(__FILE__,line) (hres == S_OK, "get_lang failed: %08x\n", hres);
+    SysFreeString(str);
+
+    _test_elem_lang(line, elem, lang);
 }
 
 #define test_elem_put_id(u,i) _test_elem_put_id(__LINE__,u,i)
@@ -6167,6 +6208,35 @@ static void test_default_selection(IHTMLDocument2 *doc)
     IHTMLTxtRange_Release(range);
 }
 
+static void test_unique_id(IHTMLDocument2 *doc)
+{
+    IHTMLDocument3 *doc3 = get_doc3_iface(doc);
+    BSTR id, id2;
+    HRESULT hres;
+
+    static const WCHAR prefixW[] = {'m','s','_','_','i','d',0};
+
+    hres = IHTMLDocument3_get_uniqueID(doc3, &id);
+    ok(hres == S_OK, "get_uniqueID failed: %08x\n", hres);
+    ok(SysStringLen(id) >= sizeof(prefixW)/sizeof(*prefixW), "id %s too short\n", wine_dbgstr_w(id));
+
+    hres = IHTMLDocument3_get_uniqueID(doc3, &id2);
+    ok(hres == S_OK, "get_uniqueID failed: %08x\n", hres);
+    ok(SysStringLen(id2) >= sizeof(prefixW)/sizeof(*prefixW), "id %s too short\n", wine_dbgstr_w(id2));
+
+    ok(lstrcmpW(id, id2), "same unique ids %s\n", wine_dbgstr_w(id));
+
+    id[sizeof(prefixW)/sizeof(*prefixW)-1] = 0;
+    ok(!lstrcmpW(id, prefixW), "unexpected prefix %s\n", wine_dbgstr_w(id));
+    id2[sizeof(prefixW)/sizeof(*prefixW)-1] = 0;
+    ok(!lstrcmpW(id2, prefixW), "unexpected prefix %s\n", wine_dbgstr_w(id2));
+
+    SysFreeString(id);
+    SysFreeString(id2);
+
+    IHTMLDocument3_Release(doc3);
+}
+
 static void test_doc_elem(IHTMLDocument2 *doc)
 {
     IHTMLDocument2 *doc_node, *owner_doc;
@@ -6203,6 +6273,8 @@ static void test_doc_elem(IHTMLDocument2 *doc)
     test_elem_client_rect((IUnknown*)elem);
 
     IHTMLElement_Release(elem);
+
+    test_unique_id(doc);
 }
 
 static void test_default_body(IHTMLBodyElement *body)
@@ -8033,6 +8105,9 @@ static void test_elems(IHTMLDocument2 *doc)
 
         test_input_readOnly(input, VARIANT_TRUE);
         test_input_readOnly(input, VARIANT_FALSE);
+
+        test_elem_lang(elem, NULL);
+        set_elem_lang(elem, "en-us");
 
         IHTMLInputElement_Release(input);
         IHTMLElement_Release(elem);

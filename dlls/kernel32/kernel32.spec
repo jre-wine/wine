@@ -615,7 +615,7 @@
 @ stdcall GetConsoleOutputCP()
 @ stdcall GetConsoleProcessList(ptr long)
 @ stdcall GetConsoleScreenBufferInfo(long ptr)
-# @ stub GetConsoleScreenBufferInfoEx
+@ stdcall GetConsoleScreenBufferInfoEx(long ptr)
 # @ stub GetConsoleSelectionInfo
 @ stdcall GetConsoleTitleA(ptr long)
 @ stdcall GetConsoleTitleW(ptr long)
@@ -1345,7 +1345,7 @@
 @ stub SetConsoleCursorMode
 @ stdcall SetConsoleCursorPosition(long long)
 @ stdcall SetConsoleDisplayMode(long long ptr)
-@ stub SetConsoleFont
+@ stdcall SetConsoleFont(long long)
 @ stub SetConsoleHardwareState
 @ stdcall SetConsoleIcon(ptr)
 @ stdcall SetConsoleInputExeNameA(ptr)
@@ -1361,7 +1361,7 @@
 @ stub SetConsoleOS2OemFormat
 @ stdcall SetConsoleOutputCP(long)
 @ stub SetConsolePalette
-# @ stub SetConsoleScreenBufferInfoEx
+@ stdcall SetConsoleScreenBufferInfoEx(long ptr)
 @ stdcall SetConsoleScreenBufferSize(long long)
 @ stdcall SetConsoleTextAttribute(long long)
 @ stdcall SetConsoleTitleA(str)

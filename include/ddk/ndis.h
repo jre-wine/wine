@@ -1,5 +1,7 @@
 /*
- * Copyright 2004  Tom Wickline
+ * ndis.h
+ *
+ * Copyright 2015 Austin English
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -15,13 +17,14 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+#ifndef _NDIS_
+#define _NDIS_
 
-#define WINE_FILEDESCRIPTION_STR "Wine OpenGL Client"
-#define WINE_FILENAME_STR "opengl32.dll"
-#define WINE_FILEVERSION 5,1,2600,2082
-#define WINE_FILEVERSION_STR "5.1.2600.2082"
-#define WINE_LEGALCOPYRIGHT "Copyright (c) 1993-2016 the Wine project. Not Microsoft" /* CATIA needs 'Microsoft' in both CompanyName _and_ LegalCopyright */
-#define WINE_PRODUCTVERSION 5,1,2600,2082
-#define WINE_PRODUCTVERSION_STR "5.1"
+typedef void *NDIS_HANDLE, *PNDIS_HANDLE;
+typedef int   NDIS_STATUS, *PNDIS_STATUS;
 
-#include "wine/wine_common_ver.rc"
+#define NDIS_STATUS_FAILURE                                ((NDIS_STATUS) STATUS_UNSUCCESSFUL)
+
+NDIS_STATUS WINAPI NdisAllocateMemoryWithTag(void **, UINT, ULONG);
+
+#endif /* _NDIS_ */
