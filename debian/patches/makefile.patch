@@ -20,7 +20,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  mandir          = @mandir@
 -fontdir         = ${datadir}/wine/fonts
 -includedir      = @includedir@/wine
-+fontdir         = /usr/share/wine/wine/fonts
++fontdir         = /usr/share/wine/fonts
 +includedir      = @includedir@
  dlldir          = @dlldir@
  fakedlldir      = ${dlldir}/fakedlls

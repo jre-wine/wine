@@ -5,6 +5,7 @@ Maintainer: Debian Wine Party <pkg-wine-party@lists.alioth.debian.org>
 Uploaders:
  Michael Gilbert <mgilbert@debian.org>,
  Stephen Kitt <skitt@debian.org>,
+ Jens Reyer <jre.winesim@gmail.com>,
 Build-Depends:
  debhelper (>= 9.20151220),
  dh-autoreconf,
@@ -60,7 +61,7 @@ Build-Depends:
  libfontconfig1-dev,
  freebsd-glue [kfreebsd-any],
  ocl-icd-opencl-dev,
-Standards-Version: 3.9.6
+Standards-Version: 3.9.7
 Homepage: http://www.winehq.org/
 Vcs-Browser: https://anonscm.debian.org/git/pkg-wine/wine.git
 Vcs-Git: https://anonscm.debian.org/git/pkg-wine/wine.git
@@ -173,6 +174,8 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libwineVERSION-dev (= ${binary:Version}),
+Conflicts:
+ wine64VERSION-tools,
 Description: Windows API implementation - 32-bit developer tools
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -189,6 +192,8 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libwineVERSION-dev (= ${binary:Version}),
+Conflicts:
+ wine32VERSION-tools,
 Description: Windows API implementation - 64-bit developer tools
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -207,7 +212,7 @@ Depends:
 Recommends:
  libxcursor1,
  fonts-liberation,
- fonts-wine (>= 1.8-7),
+ fonts-wine (>= 1.8.1-2),
 Suggests:
  cups-bsd,
  ttf-mscorefonts-installer,

@@ -1,12 +1,24 @@
-wine-development (1.9.0-3) UNRELEASED; urgency=medium
+wine-development (1.9.1-1) unstable; urgency=medium
 
+  [ Michael Gilbert ]
+  * New upstream release 1.9.1, released Jan 9, 2016.
+    - A few more deferred fixes.
+    - Support for debug registers on x86-64.
+    - More Shader Model 4 instructions.
+    - Support for the Mingw ARM toolchain.
+    - Various bug fixes.
+  * Update standards version.
+  * Use fonts from /usr/share/wine.
+  * Remove reference to the gecko package while its missing.
+  * Make wine32-tools and wine64-tools conflict with eachother.
+
+  [ Jens Reyer ]
   * Update README.debian.
   * Add wine-development information to already displayed NEWS.
-  * Only suggest currently unavailable libwine-gecko (see #814350).
   * Depend on libfontconfig1 (thanks Johannes Stezenbach, see #813381).
-  * Send script messages to STDERR (thanks Joerg Schiermeier).
+  * Send script messages to STDERR (thanks Joerg Schiermeier, closes: #814572).
 
- -- Jens Reyer <jre.winesim@gmail.com>  Fri, 12 Feb 2016 02:27:16 +0100
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 13 Feb 2016 17:47:17 +0000
 
 wine-development (1.9.0-2) unstable; urgency=medium
 
