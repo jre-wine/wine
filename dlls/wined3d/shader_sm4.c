@@ -29,6 +29,9 @@ WINE_DECLARE_DEBUG_CHANNEL(d3d_bytecode);
 #define WINED3D_SM4_INSTRUCTION_LENGTH_SHIFT    24
 #define WINED3D_SM4_INSTRUCTION_LENGTH_MASK     (0x1fu << WINED3D_SM4_INSTRUCTION_LENGTH_SHIFT)
 
+#define WINED3D_SM4_INSTRUCTION_FLAGS_SHIFT     11
+#define WINED3D_SM4_INSTRUCTION_FLAGS_MASK      (0x7u << WINED3D_SM4_INSTRUCTION_FLAGS_SHIFT)
+
 #define WINED3D_SM4_RESOURCE_TYPE_SHIFT         11
 #define WINED3D_SM4_RESOURCE_TYPE_MASK          (0xfu << WINED3D_SM4_RESOURCE_TYPE_SHIFT)
 
@@ -72,6 +75,8 @@ WINE_DECLARE_DEBUG_CHANNEL(d3d_bytecode);
 #define WINED3D_SM4_ADDRESSING_RELATIVE         0x2
 #define WINED3D_SM4_ADDRESSING_OFFSET           0x1
 
+#define WINED3D_SM4_INSTRUCTION_FLAG_SATURATE   0x4
+
 enum wined3d_sm4_opcode
 {
     WINED3D_SM4_OP_ADD                  = 0x00,
@@ -93,14 +98,19 @@ enum wined3d_sm4_opcode
     WINED3D_SM4_OP_EXP                  = 0x19,
     WINED3D_SM4_OP_FRC                  = 0x1a,
     WINED3D_SM4_OP_FTOI                 = 0x1b,
+    WINED3D_SM4_OP_FTOU                 = 0x1c,
     WINED3D_SM4_OP_GE                   = 0x1d,
     WINED3D_SM4_OP_IADD                 = 0x1e,
     WINED3D_SM4_OP_IF                   = 0x1f,
     WINED3D_SM4_OP_IEQ                  = 0x20,
     WINED3D_SM4_OP_IGE                  = 0x21,
+    WINED3D_SM4_OP_ILT                  = 0x22,
+    WINED3D_SM4_OP_IMAD                 = 0x23,
     WINED3D_SM4_OP_IMAX                 = 0x24,
     WINED3D_SM4_OP_IMIN                 = 0x25,
     WINED3D_SM4_OP_IMUL                 = 0x26,
+    WINED3D_SM4_OP_INE                  = 0x27,
+    WINED3D_SM4_OP_INEG                 = 0x28,
     WINED3D_SM4_OP_ISHL                 = 0x29,
     WINED3D_SM4_OP_ITOF                 = 0x2b,
     WINED3D_SM4_OP_LD                   = 0x2d,
@@ -115,6 +125,7 @@ enum wined3d_sm4_opcode
     WINED3D_SM4_OP_MUL                  = 0x38,
     WINED3D_SM4_OP_NE                   = 0x39,
     WINED3D_SM4_OP_OR                   = 0x3c,
+    WINED3D_SM4_OP_RESINFO              = 0x3d,
     WINED3D_SM4_OP_RET                  = 0x3e,
     WINED3D_SM4_OP_ROUND_NI             = 0x41,
     WINED3D_SM4_OP_RSQ                  = 0x44,
@@ -145,6 +156,7 @@ enum wined3d_sm4_register_type
     WINED3D_SM4_RT_RESOURCE     = 0x7,
     WINED3D_SM4_RT_CONSTBUFFER  = 0x8,
     WINED3D_SM4_RT_PRIMID       = 0xb,
+    WINED3D_SM4_RT_DEPTHOUT     = 0xc,
     WINED3D_SM4_RT_NULL         = 0xd,
 };
 
@@ -166,6 +178,7 @@ enum wined3d_sm4_input_primitive_type
 
 enum wined3d_sm4_swizzle_type
 {
+    WINED3D_SM4_SWIZZLE_NONE            = 0x0,
     WINED3D_SM4_SWIZZLE_VEC4            = 0x1,
     WINED3D_SM4_SWIZZLE_SCALAR          = 0x2,
 };
@@ -264,14 +277,19 @@ static const struct wined3d_sm4_opcode_info opcode_table[] =
     {WINED3D_SM4_OP_EXP,                    WINED3DSIH_EXP,                 "F",    "F"},
     {WINED3D_SM4_OP_FRC,                    WINED3DSIH_FRC,                 "F",    "F"},
     {WINED3D_SM4_OP_FTOI,                   WINED3DSIH_FTOI,                "I",    "F"},
+    {WINED3D_SM4_OP_FTOU,                   WINED3DSIH_FTOU,                "U",    "F"},
     {WINED3D_SM4_OP_GE,                     WINED3DSIH_GE,                  "U",    "FF"},
     {WINED3D_SM4_OP_IADD,                   WINED3DSIH_IADD,                "I",    "II"},
     {WINED3D_SM4_OP_IF,                     WINED3DSIH_IF,                  "",     "U"},
     {WINED3D_SM4_OP_IEQ,                    WINED3DSIH_IEQ,                 "U",    "II"},
     {WINED3D_SM4_OP_IGE,                    WINED3DSIH_IGE,                 "U",    "II"},
+    {WINED3D_SM4_OP_ILT,                    WINED3DSIH_ILT,                 "U",    "II"},
+    {WINED3D_SM4_OP_IMAD,                   WINED3DSIH_IMAD,                "I",    "III"},
     {WINED3D_SM4_OP_IMAX,                   WINED3DSIH_IMAX,                "I",    "II"},
     {WINED3D_SM4_OP_IMIN,                   WINED3DSIH_IMIN,                "I",    "II"},
     {WINED3D_SM4_OP_IMUL,                   WINED3DSIH_IMUL,                "II",   "II"},
+    {WINED3D_SM4_OP_INE,                    WINED3DSIH_INE,                 "U",    "II"},
+    {WINED3D_SM4_OP_INEG,                   WINED3DSIH_INEG,                "I",    "I"},
     {WINED3D_SM4_OP_ISHL,                   WINED3DSIH_ISHL,                "I",    "II"},
     {WINED3D_SM4_OP_ITOF,                   WINED3DSIH_ITOF,                "F",    "I"},
     {WINED3D_SM4_OP_LD,                     WINED3DSIH_LD,                  "U",    "IR"},
@@ -286,6 +304,7 @@ static const struct wined3d_sm4_opcode_info opcode_table[] =
     {WINED3D_SM4_OP_MUL,                    WINED3DSIH_MUL,                 "F",    "FF"},
     {WINED3D_SM4_OP_NE,                     WINED3DSIH_NE,                  "U",    "FF"},
     {WINED3D_SM4_OP_OR,                     WINED3DSIH_OR,                  "U",    "UU"},
+    {WINED3D_SM4_OP_RESINFO,                WINED3DSIH_RESINFO,             "F",    "IR"},
     {WINED3D_SM4_OP_RET,                    WINED3DSIH_RET,                 "",     ""},
     {WINED3D_SM4_OP_ROUND_NI,               WINED3DSIH_ROUND_NI,            "F",    "F"},
     {WINED3D_SM4_OP_RSQ,                    WINED3DSIH_RSQ,                 "F",    "F"},
@@ -320,7 +339,7 @@ static const enum wined3d_shader_register_type register_type_table[] =
     /* UNKNOWN */                       0,
     /* UNKNOWN */                       0,
     /* WINED3D_SM4_RT_PRIMID */         WINED3DSPR_PRIMID,
-    /* UNKNOWN */                       0,
+    /* WINED3D_SM4_RT_DEPTHOUT */       WINED3DSPR_DEPTHOUT,
     /* WINED3D_SM4_RT_NULL */           WINED3DSPR_NULL,
 };
 
@@ -605,9 +624,6 @@ static BOOL shader_sm4_read_param(struct wined3d_sm4_data *priv, const DWORD **p
     {
         DWORD m = *(*ptr)++;
 
-        /* FIXME: This will probably break down at some point. The SM4
-         * modifiers look like flags, while wined3d currently has an enum
-         * with possible combinations, e.g. WINED3DSPSM_ABSNEG. */
         switch (m)
         {
             case 0x41:
@@ -616,6 +632,10 @@ static BOOL shader_sm4_read_param(struct wined3d_sm4_data *priv, const DWORD **p
 
             case 0x81:
                 *modifier = WINED3DSPSM_ABS;
+                break;
+
+            case 0xc1:
+                *modifier = WINED3DSPSM_ABSNEG;
                 break;
 
             default:
@@ -710,6 +730,10 @@ static BOOL shader_sm4_read_src_param(struct wined3d_sm4_data *priv, const DWORD
 
         switch (swizzle_type)
         {
+            case WINED3D_SM4_SWIZZLE_NONE:
+                src_param->swizzle = WINED3DSP_NOSWIZZLE;
+                break;
+
             case WINED3D_SM4_SWIZZLE_SCALAR:
                 src_param->swizzle = (token & WINED3D_SM4_SWIZZLE_MASK) >> WINED3D_SM4_SWIZZLE_SHIFT;
                 src_param->swizzle = (src_param->swizzle & 0x3) * 0x55;
@@ -878,6 +902,16 @@ static void shader_sm4_read_instruction(void *data, const DWORD **ptr, struct wi
     }
     else
     {
+        enum wined3d_shader_dst_modifier instruction_dst_modifier = WINED3DSPDM_NONE;
+
+        ins->flags = (opcode_token & WINED3D_SM4_INSTRUCTION_FLAGS_MASK) >> WINED3D_SM4_INSTRUCTION_FLAGS_SHIFT;
+
+        if (ins->flags & WINED3D_SM4_INSTRUCTION_FLAG_SATURATE)
+        {
+            ins->flags &= ~WINED3D_SM4_INSTRUCTION_FLAG_SATURATE;
+            instruction_dst_modifier = WINED3DSPDM_SATURATE;
+        }
+
         for (i = 0; i < ins->dst_count; ++i)
         {
             if (!(shader_sm4_read_dst_param(priv, &p, map_data_type(opcode_info->dst_info[i]), &priv->dst_param[i])))
@@ -885,6 +919,7 @@ static void shader_sm4_read_instruction(void *data, const DWORD **ptr, struct wi
                 ins->handler_idx = WINED3DSIH_TABLE_SIZE;
                 return;
             }
+            priv->dst_param[i].modifiers |= instruction_dst_modifier;
         }
 
         for (i = 0; i < ins->src_count; ++i)

@@ -269,11 +269,7 @@ static const struct fd_ops named_pipe_device_fd_ops =
 
 static void named_pipe_dump( struct object *obj, int verbose )
 {
-    struct named_pipe *pipe = (struct named_pipe *) obj;
-    assert( obj->ops == &named_pipe_ops );
-    fprintf( stderr, "Named pipe " );
-    dump_object_name( &pipe->obj );
-    fprintf( stderr, "\n" );
+    fputs( "Named pipe\n", stderr );
 }
 
 static unsigned int named_pipe_map_access( struct object *obj, unsigned int access )
@@ -443,8 +439,7 @@ static void pipe_client_destroy( struct object *obj)
 
 static void named_pipe_device_dump( struct object *obj, int verbose )
 {
-    assert( obj->ops == &named_pipe_device_ops );
-    fprintf( stderr, "Named pipe device\n" );
+    fputs( "Named pipe device\n", stderr );
 }
 
 static struct object_type *named_pipe_device_get_type( struct object *obj )
@@ -923,8 +918,10 @@ DECL_HANDLER(create_named_pipe)
     struct pipe_server *server;
     struct unicode_str name;
     struct directory *root = NULL;
-    const struct object_attributes *objattr = get_req_data();
     const struct security_descriptor *sd;
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
+
+    if (!objattr) return;
 
     if (!req->sharing || (req->sharing & ~(FILE_SHARE_READ | FILE_SHARE_WRITE)) ||
         (!(req->flags & NAMED_PIPE_MESSAGE_STREAM_WRITE) && (req->flags & NAMED_PIPE_MESSAGE_STREAM_READ)))
@@ -933,18 +930,10 @@ DECL_HANDLER(create_named_pipe)
         return;
     }
 
-    reply->handle = 0;
-
-    if (!objattr_is_valid( objattr, get_req_data_size() ))
-        return;
-
-    sd = objattr->sd_len ? (const struct security_descriptor *)(objattr + 1) : NULL;
-    objattr_get_name( objattr, &name );
-
     if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 )))
         return;
 
-    pipe = create_named_pipe( root, &name, req->attributes | OBJ_OPENIF, sd );
+    pipe = create_named_pipe( root, &name, objattr->attributes | OBJ_OPENIF, sd );
 
     if (root) release_object( root );
     if (!pipe) return;
@@ -982,7 +971,7 @@ DECL_HANDLER(create_named_pipe)
     server = create_pipe_server( pipe, req->options, req->flags );
     if (server)
     {
-        reply->handle = alloc_handle( current->process, server, req->access, req->attributes );
+        reply->handle = alloc_handle( current->process, server, req->access, objattr->attributes );
         server->pipe->instances++;
         if (sd) default_set_sd( &server->obj, sd, OWNER_SECURITY_INFORMATION |
                                                   GROUP_SECURITY_INFORMATION |

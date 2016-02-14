@@ -824,7 +824,7 @@
 @ stdcall GetSystemFirmwareTable(long long ptr long)
 @ stdcall GetSystemInfo(ptr)
 @ stdcall GetSystemPowerStatus(ptr)
-# @ stub GetSystemPreferredUILanguages
+@ stdcall GetSystemPreferredUILanguages(long ptr ptr ptr)
 @ stdcall GetSystemRegistryQuota(ptr ptr)
 @ stdcall GetSystemTime(ptr)
 @ stdcall GetSystemTimeAdjustment(ptr ptr ptr)
@@ -1429,7 +1429,7 @@
 # @ stub SetProcessUserModeExceptionPolicy
 @ stdcall SetProcessWorkingSetSize(long long long)
 # @ stub SetProcessWorkingSetSizeEx
-# @ stub SetSearchPathMode
+@ stdcall SetSearchPathMode(long)
 @ stdcall SetStdHandle(long long)
 # @ stub SetStdHandleEx
 @ stdcall SetSystemFileCacheSize(long long long)

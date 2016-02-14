@@ -850,7 +850,7 @@
 @ cdecl _Strftime(str long str ptr ptr)
 @ cdecl _W_Getdays()
 @ cdecl _W_Getmonths()
-@ stub _W_Gettnames
+@ cdecl _W_Gettnames()
 @ stub _Wcsftime
 @ cdecl _XcptFilter(long ptr)
 @ cdecl __AdjustPointer(ptr ptr)
@@ -1084,8 +1084,8 @@
 @ cdecl _cputws(wstr)
 @ cdecl _creat(str long) MSVCRT__creat
 @ cdecl _create_locale(long str) MSVCRT__create_locale
-@ stub -arch=i386 _crt_debugger_hook
-@ stub -arch=arm,win64 __crt_debugger_hook
+@ cdecl -arch=i386 _crt_debugger_hook(long) MSVCRT__crt_debugger_hook
+@ cdecl -arch=arm,win64 __crt_debugger_hook(long) MSVCRT__crt_debugger_hook
 @ varargs _cscanf(str)
 @ varargs _cscanf_l(str ptr)
 @ varargs _cscanf_s(str)
@@ -1110,7 +1110,7 @@
 @ cdecl _difftime32(long long) MSVCRT__difftime32
 @ cdecl _difftime64(long long) MSVCRT__difftime64
 @ stub _dosmaperr
-@ stub _dpcomp
+@ cdecl _dpcomp(double double) MSVCR120__dpcomp
 @ cdecl _dsign(double) MSVCR120__dsign
 @ extern _dstbias MSVCRT__dstbias
 @ cdecl _dtest(ptr) MSVCR120__dtest
@@ -1144,7 +1144,7 @@
 @ cdecl _fcvt_s(ptr long double long ptr ptr) MSVCRT__fcvt_s
 @ cdecl _fdclass(float) MSVCR120__fdclass
 @ cdecl _fdopen(long str) MSVCRT__fdopen
-@ stub _fdpcomp
+@ cdecl _fdpcomp(float float) MSVCR120__fdpcomp
 @ cdecl _fdsign(float) MSVCR120__fdsign
 @ cdecl _fdtest(ptr) MSVCR120__fdtest
 @ cdecl _fflush_nolock(ptr) MSVCRT__fflush_nolock
@@ -1392,7 +1392,7 @@
 @ cdecl _jn(long double) MSVCRT__jn
 @ cdecl _kbhit()
 @ cdecl _ldclass(double) MSVCR120__ldclass
-@ stub _ldpcomp
+@ cdecl _ldpcomp(double double) MSVCR120__dpcomp
 @ cdecl _ldsign(double) MSVCR120__dsign
 @ cdecl _ldtest(ptr) MSVCR120__ldtest
 @ cdecl _lfind(ptr ptr ptr long ptr)
@@ -1639,7 +1639,7 @@
 @ stdcall -arch=i386 _seh_longjmp_unwind4(ptr)
 @ stdcall -arch=i386 _seh_longjmp_unwind(ptr)
 @ cdecl -arch=i386 _set_SSE2_enable(long) MSVCRT__set_SSE2_enable
-@ stub -arch=win64 _set_FMA3_enable
+@ cdecl -arch=win64 _set_FMA3_enable(long) MSVCRT__set_FMA3_enable
 @ cdecl _set_abort_behavior(long long) MSVCRT__set_abort_behavior
 @ cdecl _set_controlfp(long long)
 @ cdecl _set_doserrno(long)
@@ -2028,7 +2028,7 @@
 @ stub atanh
 @ stub atanhf
 @ stub atanhl
-@ cdecl atexit(ptr) MSVCRT_atexit
+@ cdecl -private atexit(ptr) MSVCRT_atexit  # not imported to avoid conflicts with Mingw
 @ cdecl atof(str) MSVCRT_atof
 @ cdecl atoi(str) MSVCRT_atoi
 @ cdecl atol(str) ntdll.atol

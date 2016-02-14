@@ -686,17 +686,16 @@ DECL_HANDLER(create_file)
 {
     struct object *file;
     struct fd *root_fd = NULL;
-    const struct object_attributes *objattr = get_req_data();
+    struct unicode_str unicode_name;
     const struct security_descriptor *sd;
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &unicode_name );
     const char *name;
     data_size_t name_len;
 
-    reply->handle = 0;
+    if (!objattr) return;
 
-    if (!objattr_is_valid( objattr, get_req_data_size() ))
-        return;
     /* name is transferred in the unix codepage outside of the objattr structure */
-    if (objattr->name_len)
+    if (unicode_name.len)
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -712,16 +711,13 @@ DECL_HANDLER(create_file)
         if (!root_fd) return;
     }
 
-    sd = objattr->sd_len ? (const struct security_descriptor *)(objattr + 1) : NULL;
-
-    name = (const char *)get_req_data() + sizeof(*objattr) + objattr->sd_len;
-    name_len = get_req_data_size() - sizeof(*objattr) - objattr->sd_len;
+    name = get_req_data_after_objattr( objattr, &name_len );
 
     reply->handle = 0;
     if ((file = create_file( root_fd, name, name_len, req->access, req->sharing,
                              req->create, req->options, req->attrs, sd )))
     {
-        reply->handle = alloc_handle( current->process, file, req->access, req->attributes );
+        reply->handle = alloc_handle( current->process, file, req->access, objattr->attributes );
         release_object( file );
     }
     if (root_fd) release_object( root_fd );

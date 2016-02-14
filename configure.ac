@@ -943,7 +943,7 @@ test "$ac_cv_header_linux_joystick_h" = "yes" -o "$ac_cv_header_IOKit_hid_IOHIDL
 
 dnl Check for cross compiler to build test programs
 AC_SUBST(CROSSTARGET,"")
-if test "$cross_compiling" = "no" -a "x$enable_tests" != xno -a "$LIBEXT" != "dll"
+if test "x$enable_tests" != xno -a "$LIBEXT" != "dll"
 then
     WINE_CHECK_MINGW_PROG(CROSSCC,false)
     if test "$CROSSCC" != "false"
@@ -1268,7 +1268,9 @@ then
         [AC_CHECK_HEADER(gnutls/gnutls.h,
             [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gnutls/gnutls.h>
 #include <gnutls/crypto.h>]], [[static typeof(gnutls_mac_get_key_size) *func; if (func) return 0;]])],
-                [WINE_CHECK_SONAME(gnutls,gnutls_global_init,,[GNUTLS_CFLAGS=""],[$GNUTLS_LIBS],[[libgnutls\\(-deb0\\)\\{0,1\\}]])])],
+                [WINE_CHECK_SONAME(gnutls,gnutls_global_init,,[GNUTLS_CFLAGS=""],[$GNUTLS_LIBS],[[libgnutls\\(-deb0\\)\\{0,1\\}]])
+                 WINE_CHECK_LIB_FUNCS(gnutls_hash,[$GNUTLS_LIBS],,
+                                      [WINE_NOTICE([libgnutls ${notice_platform}development files too old, no bcrypt hash support.])])])],
             [GNUTLS_CFLAGS=""])])
 fi
 WINE_WARNING_WITH(gnutls,[test "x$ac_cv_lib_soname_gnutls" = "x"],
@@ -1460,7 +1462,7 @@ test -n "$PULSE_LIBS" || enable_winepulse_drv=${enable_winepulse_drv:-no}
 dnl **** Check for gstreamer ****
 if test "x$with_gstreamer" != "xno"
 then
-    WINE_PACKAGE_FLAGS(GSTREAMER,[gstreamer-app-0.10],,,,
+    WINE_PACKAGE_FLAGS(GSTREAMER,[gstreamer-1.0 gstreamer-video-1.0 gstreamer-audio-1.0],,,,
         [ac_gst_incl=""
         for i in $GSTREAMER_CFLAGS
         do
@@ -1470,20 +1472,17 @@ then
         done
         GSTREAMER_CFLAGS=$ac_gst_incl
         CPPFLAGS="$ac_save_CPPFLAGS $GSTREAMER_CFLAGS"
-        AC_CHECK_HEADER([gst/gstpad.h],
-            [AC_CHECK_HEADER([gst/app/gstappsink.h],
-                 [AC_MSG_CHECKING([whether gint64 defined by gst/app/gstappsink.h is indeed 64-bit])
-                  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gst/app/gstappsink.h>]],
-                                                     [[static int a[sizeof(gint64) > 4 ? 1 : -1]; if (a[0]) return 0;]])],
-                    [AC_MSG_RESULT([yes])
-                     AC_CHECK_LIB(gstreamer-0.10,gst_pad_get_caps_reffed,
-                       [AC_CHECK_LIB(gstapp-0.10,gst_app_buffer_new,[:],,[$GSTREAMER_LIBS])])],
-                    [AC_MSG_RESULT([no])])])],
-            [GSTREAMER_CFLAGS=""])])
+        AC_CHECK_HEADER([gst/gst.h],
+            [AC_MSG_CHECKING([whether gint64 defined by gst/gst.h is indeed 64-bit])
+              AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gst/gst.h>]],
+                                                 [[static int a[sizeof(gint64) > 4 ? 1 : -1]; if (a[0]) return 0;]])],
+                [AC_MSG_RESULT([yes])
+                 AC_CHECK_LIB(gstreamer-1.0,gst_pad_new,[:],,[$GSTREAMER_LIBS])],
+                [AC_MSG_RESULT([no])])])])
 fi
-WINE_NOTICE_WITH(gstreamer,[test "x$ac_cv_lib_gstapp_0_10_gst_app_buffer_new" != xyes -a "x$ac_cv_header_QuickTime_ImageCompression_h" != xyes],
-                 [gstreamer-0.10 base plugins ${notice_platform}development files not found, gstreamer support disabled])
-test "x$ac_cv_lib_gstapp_0_10_gst_app_buffer_new" = xyes || enable_winegstreamer=${enable_winegstreamer:-no}
+WINE_NOTICE_WITH(gstreamer,[test "x$ac_cv_lib_gstreamer_1_0_gst_pad_new" != xyes -a "x$ac_cv_header_QuickTime_ImageCompression_h" != xyes],
+                 [gstreamer-1.0 base plugins ${notice_platform}development files not found, gstreamer support disabled])
+test "x$ac_cv_lib_gstreamer_1_0_gst_pad_new" = xyes || enable_winegstreamer=${enable_winegstreamer:-no}
 
 dnl **** Check for ALSA 1.x ****
 AC_SUBST(ALSA_LIBS,"")
@@ -1662,7 +1661,29 @@ fi
 if test "x$ac_cv_have_openalsoft" != xyes
 then
     WINE_NOTICE([openal-soft ${notice_platform}development files not found (or too old), XAudio2 won't be supported])
+    enable_x3daudio1_0=${enable_x3daudio1_0:-no}
+    enable_x3daudio1_1=${enable_x3daudio1_1:-no}
+    enable_x3daudio1_2=${enable_x3daudio1_2:-no}
+    enable_x3daudio1_3=${enable_x3daudio1_3:-no}
+    enable_x3daudio1_4=${enable_x3daudio1_4:-no}
+    enable_x3daudio1_5=${enable_x3daudio1_5:-no}
+    enable_x3daudio1_6=${enable_x3daudio1_6:-no}
+    enable_x3daudio1_7=${enable_x3daudio1_7:-no}
+    enable_xapofx1_1=${enable_xapofx1_1:-no}
+    enable_xapofx1_2=${enable_xapofx1_2:-no}
+    enable_xapofx1_3=${enable_xapofx1_3:-no}
+    enable_xapofx1_4=${enable_xapofx1_4:-no}
+    enable_xapofx1_5=${enable_xapofx1_5:-no}
+    enable_xaudio2_0=${enable_xaudio2_0:-no}
+    enable_xaudio2_1=${enable_xaudio2_1:-no}
+    enable_xaudio2_2=${enable_xaudio2_2:-no}
+    enable_xaudio2_3=${enable_xaudio2_3:-no}
+    enable_xaudio2_4=${enable_xaudio2_4:-no}
+    enable_xaudio2_5=${enable_xaudio2_5:-no}
+    enable_xaudio2_6=${enable_xaudio2_6:-no}
     enable_xaudio2_7=${enable_xaudio2_7:-no}
+    enable_xaudio2_8=${enable_xaudio2_8:-no}
+    enable_xaudio2_9=${enable_xaudio2_9:-no}
 fi
 
 dnl **** Check for libkstat ****
@@ -2573,7 +2594,9 @@ CLEAN_FILES = *.o *.a *.so *.res *.fake *.ok *.tab.[[ch]] *.yy.c
 .MAKEFILEDEPS:
 all: Makefile
 Makefile: $srcdir/Makefile.in config.status \$(MAKEDEP)
-	@./config.status Make.tmp Makefile])
+	@./config.status Make.tmp Makefile
+depend: \$(MAKEDEP) dummy
+	\$(MAKEDEP)])
 
 test "$srcdir" = . && WINE_APPEND_RULE(
 [all: .gitignore
@@ -2713,7 +2736,7 @@ WINE_CONFIG_DLL(avifil32,,[clean,implib,po])
 WINE_CONFIG_TEST(dlls/avifil32/tests)
 WINE_CONFIG_DLL(avifile.dll16,enable_win16)
 WINE_CONFIG_DLL(avrt,,[implib])
-WINE_CONFIG_DLL(bcrypt)
+WINE_CONFIG_DLL(bcrypt,,[implib])
 WINE_CONFIG_TEST(dlls/bcrypt/tests)
 WINE_CONFIG_DLL(bluetoothapis)
 WINE_CONFIG_DLL(browseui,,[clean,po])
@@ -2946,6 +2969,7 @@ WINE_CONFIG_DLL(inkobj)
 WINE_CONFIG_DLL(inseng,,[clean])
 WINE_CONFIG_DLL(iphlpapi,,[implib])
 WINE_CONFIG_TEST(dlls/iphlpapi/tests)
+WINE_CONFIG_DLL(irprops.cpl)
 WINE_CONFIG_DLL(itircl)
 WINE_CONFIG_DLL(itss,,[clean])
 WINE_CONFIG_TEST(dlls/itss/tests)
@@ -3376,7 +3400,8 @@ WINE_CONFIG_DLL(xaudio2_5,,[clean])
 WINE_CONFIG_DLL(xaudio2_6,,[clean])
 WINE_CONFIG_DLL(xaudio2_7,,[clean])
 WINE_CONFIG_TEST(dlls/xaudio2_7/tests)
-WINE_CONFIG_DLL(xaudio2_8,,[implib])
+WINE_CONFIG_DLL(xaudio2_8,,[clean])
+WINE_CONFIG_DLL(xaudio2_9,,[clean])
 WINE_CONFIG_DLL(xinput1_1)
 WINE_CONFIG_DLL(xinput1_2)
 WINE_CONFIG_DLL(xinput1_3,,[implib],[xinput])
@@ -3575,7 +3600,7 @@ fi
 AC_CONFIG_COMMANDS([Makefile], [wine_fn_output_makefile Makefile],
 [wine_fn_output_makefile ()
 {
-    cat Make.tmp - <<\_WINE_EOF >\$tmp/makefile && mv -f \$tmp/makefile \$[]1 && rm -f Make.tmp && "$wine_makedep" . && return
+    cat Make.tmp - <<\_WINE_EOF >\$tmp/makefile && mv -f \$tmp/makefile \$[]1 && rm -f Make.tmp && "$wine_makedep" && return
 `cat $wine_rules_file`
 _WINE_EOF
     AS_ERROR([could not create Makefile])

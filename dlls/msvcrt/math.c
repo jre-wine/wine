@@ -73,6 +73,17 @@ int CDECL MSVCRT__set_SSE2_enable(int flag)
     return sse2_enabled;
 }
 
+#ifdef _WIN64
+/*********************************************************************
+ *      _set_FMA3_enable (MSVCR120.@)
+ */
+int CDECL MSVCRT__set_FMA3_enable(int flag)
+{
+    FIXME("(%x) stub\n", flag);
+    return 0;
+}
+#endif
+
 #if defined(__x86_64__) || defined(__arm__) || _MSVCR_VER>=120
 
 /*********************************************************************
@@ -331,7 +342,7 @@ float CDECL MSVCRT__scalbf(float num, MSVCRT_long power)
 /*********************************************************************
  *      modff (MSVCRT.@)
  */
-double CDECL MSVCRT_modff( float x, float *iptr )
+float CDECL MSVCRT_modff( float x, float *iptr )
 {
   return modff( x, iptr );
 }
@@ -2682,6 +2693,27 @@ int CDECL MSVCR120__fdsign(float x)
 int CDECL MSVCR120__dsign(double x)
 {
     return signbit(x) ? 0x8000 : 0;
+}
+
+
+/*********************************************************************
+ *      _dpcomp (MSVCR120.@)
+ */
+int CDECL MSVCR120__dpcomp(double x, double y)
+{
+    if(isnan(x) || isnan(y))
+        return 0;
+
+    if(x == y) return 2;
+    return x < y ? 1 : 4;
+}
+
+/*********************************************************************
+ *      _fdpcomp (MSVCR120.@)
+ */
+int CDECL MSVCR120__fdpcomp(float x, float y)
+{
+    return MSVCR120__dpcomp(x, y);
 }
 
 /*********************************************************************

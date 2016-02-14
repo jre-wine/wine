@@ -422,6 +422,11 @@ static HRESULT WINAPI rendertarget_DrawGlyphRun(IDWriteBitmapRenderTarget1 *ifac
         if (texturetype == DWRITE_TEXTURE_CLEARTYPE_3x1)
             size *= 3;
         bitmap = heap_alloc_zero(size);
+        if (!bitmap) {
+            IDWriteGlyphRunAnalysis_Release(analysis);
+            return E_OUTOFMEMORY;
+        }
+
         hr = IDWriteGlyphRunAnalysis_CreateAlphaTexture(analysis, texturetype, &target, bitmap, size);
         if (hr == S_OK) {
             /* blit to target dib */
@@ -461,7 +466,7 @@ static HRESULT WINAPI rendertarget_SetPixelsPerDip(IDWriteBitmapRenderTarget1 *i
 
     TRACE("(%p)->(%.2f)\n", This, ppdip);
 
-    if (ppdip <= 0.0)
+    if (ppdip <= 0.0f)
         return E_INVALIDARG;
 
     This->ppdip = ppdip;

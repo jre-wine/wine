@@ -138,9 +138,7 @@ static void mutex_dump( struct object *obj, int verbose )
 {
     struct mutex *mutex = (struct mutex *)obj;
     assert( obj->ops == &mutex_ops );
-    fprintf( stderr, "Mutex count=%u owner=%p ", mutex->count, mutex->owner );
-    dump_object_name( &mutex->obj );
-    fputc( '\n', stderr );
+    fprintf( stderr, "Mutex count=%u owner=%p\n", mutex->count, mutex->owner );
 }
 
 static struct object_type *mutex_get_type( struct object *obj )
@@ -211,26 +209,21 @@ DECL_HANDLER(create_mutex)
     struct mutex *mutex;
     struct unicode_str name;
     struct directory *root = NULL;
-    const struct object_attributes *objattr = get_req_data();
     const struct security_descriptor *sd;
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
 
-    reply->handle = 0;
-
-    if (!objattr_is_valid( objattr, get_req_data_size() ))
-        return;
-
-    sd = objattr->sd_len ? (const struct security_descriptor *)(objattr + 1) : NULL;
-    objattr_get_name( objattr, &name );
+    if (!objattr) return;
 
     if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 )))
         return;
 
-    if ((mutex = create_mutex( root, &name, req->attributes, req->owned, sd )))
+    if ((mutex = create_mutex( root, &name, objattr->attributes, req->owned, sd )))
     {
         if (get_error() == STATUS_OBJECT_NAME_EXISTS)
-            reply->handle = alloc_handle( current->process, mutex, req->access, req->attributes );
+            reply->handle = alloc_handle( current->process, mutex, req->access, objattr->attributes );
         else
-            reply->handle = alloc_handle_no_access_check( current->process, mutex, req->access, req->attributes );
+            reply->handle = alloc_handle_no_access_check( current->process, mutex,
+                                                          req->access, objattr->attributes );
         release_object( mutex );
     }
 

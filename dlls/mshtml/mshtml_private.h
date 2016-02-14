@@ -706,12 +706,14 @@ typedef struct {
     IHTMLElement2 IHTMLElement2_iface;
     IHTMLElement3 IHTMLElement3_iface;
     IHTMLElement4 IHTMLElement4_iface;
+    IHTMLUniqueName IHTMLUniqueName_iface;
 
     nsIDOMHTMLElement *nselem;
     HTMLStyle *style;
     HTMLStyle *runtime_style;
     HTMLAttributeCollection *attrs;
     WCHAR *filter;
+    unsigned unique_id;
 } HTMLElement;
 
 #define HTMLELEMENT_TIDS    \
@@ -720,7 +722,8 @@ typedef struct {
     IHTMLElement_tid,       \
     IHTMLElement2_tid,      \
     IHTMLElement3_tid,      \
-    IHTMLElement4_tid
+    IHTMLElement4_tid,      \
+    IHTMLUniqueName_tid
 
 extern cp_static_data_t HTMLElementEvents2_data DECLSPEC_HIDDEN;
 #define HTMLELEMENT_CPC {&DIID_HTMLElementEvents2, &HTMLElementEvents2_data}
@@ -1018,6 +1021,8 @@ nsresult get_elem_attr_value(nsIDOMHTMLElement*,const WCHAR*,nsAString*,const PR
 HRESULT elem_string_attr_getter(HTMLElement*,const WCHAR*,BOOL,BSTR*) DECLSPEC_HIDDEN;
 HRESULT elem_string_attr_setter(HTMLElement*,const WCHAR*,const WCHAR*) DECLSPEC_HIDDEN;
 
+HRESULT elem_unique_id(unsigned id, BSTR *p) DECLSPEC_HIDDEN;
+
 /* commands */
 typedef struct {
     DWORD id;
@@ -1266,6 +1271,7 @@ static inline void windowref_release(windowref_t *ref)
 }
 
 UINT cp_from_charset_string(BSTR) DECLSPEC_HIDDEN;
+BSTR charset_string_from_cp(UINT) DECLSPEC_HIDDEN;
 HDC get_display_dc(void) DECLSPEC_HIDDEN;
 HINSTANCE get_shdoclc(void) DECLSPEC_HIDDEN;
 void set_statustext(HTMLDocumentObj*,INT,LPCWSTR) DECLSPEC_HIDDEN;

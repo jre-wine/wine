@@ -79,15 +79,20 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_EXPP                  */ "expp",
     /* WINED3DSIH_FRC                   */ "frc",
     /* WINED3DSIH_FTOI                  */ "ftoi",
+    /* WINED3DSIH_FTOU                  */ "ftou",
     /* WINED3DSIH_GE                    */ "ge",
     /* WINED3DSIH_IADD                  */ "iadd",
     /* WINED3DSIH_IEQ                   */ "ieq",
     /* WINED3DSIH_IF                    */ "if",
     /* WINED3DSIH_IFC                   */ "ifc",
     /* WINED3DSIH_IGE                   */ "ige",
+    /* WINED3DSIH_ILT                   */ "ilt",
+    /* WINED3DSIH_IMAD                  */ "imad",
     /* WINED3DSIH_IMAX                  */ "imax",
     /* WINED3DSIH_IMIN                  */ "imin",
     /* WINED3DSIH_IMUL                  */ "imul",
+    /* WINED3DSIH_INE                   */ "ine",
+    /* WINED3DSIH_INEG                  */ "ineg",
     /* WINED3DSIH_ISHL                  */ "ishl",
     /* WINED3DSIH_ITOF                  */ "itof",
     /* WINED3DSIH_LABEL                 */ "label",
@@ -118,6 +123,7 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_POW                   */ "pow",
     /* WINED3DSIH_RCP                   */ "rcp",
     /* WINED3DSIH_REP                   */ "rep",
+    /* WINED3DSIH_RESINFO               */ "resinfo",
     /* WINED3DSIH_RET                   */ "ret",
     /* WINED3DSIH_ROUND_NI              */ "round_ni",
     /* WINED3DSIH_RSQ                   */ "rsq",
@@ -1068,7 +1074,8 @@ static HRESULT shader_get_registers_used(struct wined3d_shader *shader, const st
                 shader_record_sample(reg_maps, ins.src[1].reg.idx[0].offset,
                         ins.src[2].reg.idx[0].offset, reg_maps->sampler_map.count);
             }
-            else if (ins.handler_idx == WINED3DSIH_LD)
+            else if (ins.handler_idx == WINED3DSIH_LD
+                    || ins.handler_idx == WINED3DSIH_RESINFO)
             {
                 shader_record_sample(reg_maps, ins.src[1].reg.idx[0].offset,
                         WINED3D_SAMPLER_DEFAULT, reg_maps->sampler_map.count);
@@ -1867,6 +1874,16 @@ static void shader_trace_init(const struct wined3d_shader_frontend *fe, void *fe
                     && (ins.flags & WINED3DSI_TEXLD_PROJECT))
             {
                 TRACE("p");
+            }
+            else if (ins.handler_idx == WINED3DSIH_RESINFO
+                    && ins.flags)
+            {
+                switch (ins.flags)
+                {
+                    case WINED3DSI_RESINFO_RCP_FLOAT: TRACE("_rcpFloat"); break;
+                    case WINED3DSI_RESINFO_UINT: TRACE("_uint"); break;
+                    default: TRACE("_unrecognized(%#x)", ins.flags);
+                }
             }
 
             for (i = 0; i < ins.dst_count; ++i)

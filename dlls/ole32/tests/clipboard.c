@@ -455,6 +455,17 @@ static HRESULT DataObjectImpl_CreateComplex(LPDATAOBJECT *lplpdataobj)
     return S_OK;
 }
 
+static void test_get_clipboard_unitialized(void)
+{
+    HRESULT hr;
+    IDataObject *pDObj;
+
+    pDObj = (IDataObject *)0xdeadbeef;
+    hr = OleGetClipboard(&pDObj);
+    todo_wine ok(hr == S_OK, "OleGetClipboard() got 0x%08x instead of 0x%08x\n", hr, S_OK);
+    if (pDObj && pDObj != (IDataObject *)0xdeadbeef) IDataObject_Release(pDObj);
+}
+
 static void test_get_clipboard(void)
 {
     HRESULT hr;
@@ -1571,12 +1582,33 @@ static void test_multithreaded_clipboard(void)
     OleUninitialize();
 }
 
+static void test_get_clipboard_locked(void)
+{
+    HRESULT hr;
+    IDataObject *pDObj;
+
+    OleInitialize(NULL);
+
+    pDObj = (IDataObject *)0xdeadbeef;
+    /* lock clipboard */
+    OpenClipboard(NULL);
+    hr = OleGetClipboard(&pDObj);
+    todo_wine ok(hr == CLIPBRD_E_CANT_OPEN, "OleGetClipboard() got 0x%08x instead of 0x%08x\n", hr, CLIPBRD_E_CANT_OPEN);
+    todo_wine ok(pDObj == NULL, "OleGetClipboard() got 0x%p instead of NULL\n",pDObj);
+    if (pDObj) IDataObject_Release(pDObj);
+    CloseClipboard();
+
+    OleUninitialize();
+}
+
 START_TEST(clipboard)
 {
+    test_get_clipboard_unitialized();
     test_set_clipboard();
     test_consumer_refs();
     test_flushed_getdata();
     test_nonole_clipboard();
     test_getdatahere();
     test_multithreaded_clipboard();
+    test_get_clipboard_locked();
 }

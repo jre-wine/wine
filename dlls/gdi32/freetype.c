@@ -162,6 +162,7 @@ MAKE_FUNCPTR(FT_Render_Glyph);
 MAKE_FUNCPTR(FT_Select_Charmap);
 MAKE_FUNCPTR(FT_Set_Charmap);
 MAKE_FUNCPTR(FT_Set_Pixel_Sizes);
+MAKE_FUNCPTR(FT_Vector_Length);
 MAKE_FUNCPTR(FT_Vector_Transform);
 MAKE_FUNCPTR(FT_Vector_Unit);
 static FT_Error (*pFT_Outline_Embolden)(FT_Outline *, FT_Pos);
@@ -4084,6 +4085,7 @@ static BOOL init_freetype(void)
     LOAD_FUNCPTR(FT_Select_Charmap)
     LOAD_FUNCPTR(FT_Set_Charmap)
     LOAD_FUNCPTR(FT_Set_Pixel_Sizes)
+    LOAD_FUNCPTR(FT_Vector_Length)
     LOAD_FUNCPTR(FT_Vector_Transform)
     LOAD_FUNCPTR(FT_Vector_Unit)
 #undef LOAD_FUNCPTR
@@ -6384,42 +6386,46 @@ static inline BOOL is_identity_MAT2(const MAT2 *matrix)
     return !memcmp(matrix, &identity, sizeof(MAT2));
 }
 
-static void synthesize_bold_glyph(FT_GlyphSlot glyph, LONG ppem, FT_Glyph_Metrics *metrics)
+static inline FT_Vector normalize_vector(FT_Vector *vec)
+{
+    FT_Vector out;
+    FT_Fixed len;
+    len = pFT_Vector_Length(vec);
+    if (len) {
+        out.x = (vec->x << 6) / len;
+        out.y = (vec->y << 6) / len;
+    }
+    else
+        out.x = out.y = 0;
+    return out;
+}
+
+static BOOL get_bold_glyph_outline(FT_GlyphSlot glyph, LONG ppem, FT_Glyph_Metrics *metrics)
 {
     FT_Error err;
-    static UINT once;
+    FT_Pos strength;
+    FT_BBox bbox;
 
-    switch(glyph->format) {
-    case FT_GLYPH_FORMAT_OUTLINE:
-    {
-        FT_Pos strength;
-        FT_BBox bbox;
-        if(!pFT_Outline_Embolden)
-            break;
+    if(glyph->format != FT_GLYPH_FORMAT_OUTLINE)
+        return FALSE;
+    if(!pFT_Outline_Embolden)
+        return FALSE;
 
-        strength = MulDiv(ppem, 1 << 6, 24);
-        err = pFT_Outline_Embolden(&glyph->outline, strength);
-        if(err) {
-            TRACE("FT_Ouline_Embolden returns %d, ignored\n", err);
-            break;
-        }
-
-        pFT_Outline_Get_CBox(&glyph->outline, &bbox);
-        metrics->width = bbox.xMax - bbox.xMin;
-        metrics->height = bbox.yMax - bbox.yMin;
-        metrics->horiBearingX = bbox.xMin;
-        metrics->horiBearingY = bbox.yMax;
-        metrics->horiAdvance += (1 << 6);
-        metrics->vertAdvance += (1 << 6);
-        metrics->vertBearingX = metrics->horiBearingX - metrics->horiAdvance / 2;
-        metrics->vertBearingY = (metrics->vertAdvance - metrics->height) / 2;
-        break;
+    strength = MulDiv(ppem, 1 << 6, 24);
+    err = pFT_Outline_Embolden(&glyph->outline, strength);
+    if(err) {
+        TRACE("FT_Ouline_Embolden returns %d\n", err);
+        return FALSE;
     }
-    default:
-        if (!once++)
-            WARN("Emboldening format 0x%x is not supported\n", glyph->format);
-        return;
-    }
+
+    pFT_Outline_Get_CBox(&glyph->outline, &bbox);
+    metrics->width = bbox.xMax - bbox.xMin;
+    metrics->height = bbox.yMax - bbox.yMin;
+    metrics->horiBearingX = bbox.xMin;
+    metrics->horiBearingY = bbox.yMax;
+    metrics->vertBearingX = metrics->horiBearingX - metrics->horiAdvance / 2;
+    metrics->vertBearingY = (metrics->vertAdvance - metrics->height) / 2;
+    return TRUE;
 }
 
 static inline BYTE get_max_level( UINT format )
@@ -6442,6 +6448,68 @@ static BOOL check_unicode_tategaki(WCHAR uchar)
     /* We only reach this code if typographical substitution did not occur */
     /* Type: U or Type: Tu */
     return (orientation ==  1 || orientation == 3);
+}
+
+static FT_Vector get_advance_metric(GdiFont *incoming_font, GdiFont *font,
+                                    const FT_Glyph_Metrics *metrics,
+                                    const FT_Matrix *transMat, BOOL vertical_metrics)
+{
+    FT_Vector adv;
+    FT_Fixed base_advance, em_scale = 0;
+    BOOL fixed_pitch_full = FALSE;
+
+    if (vertical_metrics)
+        base_advance = metrics->vertAdvance;
+    else
+        base_advance = metrics->horiAdvance;
+
+    adv.x = base_advance;
+    adv.y = 0;
+
+    /* In fixed-pitch font, we adjust the fullwidth character advance so that
+       they have double halfwidth character width. E.g. if the font is 19 ppem,
+       we return 20 (not 19) for fullwidth characters as we return 10 for
+       halfwidth characters. */
+    if(FT_IS_SCALABLE(incoming_font->ft_face) &&
+       (incoming_font->potm || get_outline_text_metrics(incoming_font)) &&
+       !(incoming_font->potm->otmTextMetrics.tmPitchAndFamily & TMPF_FIXED_PITCH)) {
+        UINT avg_advance;
+        em_scale = MulDiv(incoming_font->ppem, 1 << 16,
+                          incoming_font->ft_face->units_per_EM);
+        avg_advance = pFT_MulFix(incoming_font->ntmAvgWidth, em_scale);
+        fixed_pitch_full = (avg_advance > 0 &&
+                            (base_advance + 63) >> 6 ==
+                            pFT_MulFix(incoming_font->ntmAvgWidth*2, em_scale));
+        if (fixed_pitch_full && !transMat)
+            adv.x = (avg_advance * 2) << 6;
+    }
+
+    if (transMat) {
+        pFT_Vector_Transform(&adv, transMat);
+        if (fixed_pitch_full && adv.y == 0) {
+            FT_Vector vec;
+            vec.x = incoming_font->ntmAvgWidth;
+            vec.y = 0;
+            pFT_Vector_Transform(&vec, transMat);
+            adv.x = (pFT_MulFix(vec.x, em_scale) * 2) << 6;
+        }
+    }
+
+    if (font->fake_bold) {
+        if (!transMat)
+            adv.x += 1 << 6;
+        else {
+            FT_Vector fake_bold_adv, vec = { 1 << 6, 0 };
+            pFT_Vector_Transform(&vec, transMat);
+            fake_bold_adv = normalize_vector(&vec);
+            adv.x += fake_bold_adv.x;
+            adv.y += fake_bold_adv.y;
+        }
+    }
+
+    adv.x = (adv.x + 63) & -64;
+    adv.y = -((adv.y + 63) & -64);
+    return adv;
 }
 
 static unsigned int get_native_glyph_outline(FT_Outline *outline, unsigned int buflen, char *buf)
@@ -6656,7 +6724,8 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     DWORD width, height, pitch, needed = 0;
     FT_Bitmap ft_bitmap;
     FT_Error err;
-    INT left, right, top = 0, bottom = 0, adv;
+    INT left, right, top = 0, bottom = 0;
+    FT_Vector adv;
     INT origin_x = 0, origin_y = 0;
     FT_Angle angle = 0;
     FT_Int load_flags = FT_LOAD_DEFAULT | FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH;
@@ -6668,8 +6737,6 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     BOOL tategaki = (font->name[0] == '@');
     BOOL vertical_metrics;
     UINT original_index;
-    LONG avgAdvance = 0;
-    FT_Fixed em_scale;
 
     TRACE("%p, %04x, %08x, %p, %08x, %p, %p\n", font, glyph, format, lpgm,
 	  buflen, buf, lpmat);
@@ -6850,8 +6917,10 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     }
 
     metrics = ft_face->glyph->metrics;
-    if(font->fake_bold)
-        synthesize_bold_glyph(ft_face->glyph, font->ppem, &metrics);
+    if(font->fake_bold) {
+        if (!get_bold_glyph_outline(ft_face->glyph, font->ppem, &metrics) && metrics.width)
+            metrics.width += 1 << 6;
+    }
 
     /* Some poorly-created fonts contain glyphs that exceed the boundaries set
      * by the text metrics. The proper behavior is to clip the glyph metrics to
@@ -6868,32 +6937,13 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         /* metrics.width = min( metrics.width, ptm->tmMaxCharWidth << 6 ); */
     }
 
-    em_scale = MulDiv(incoming_font->ppem, 1 << 16, incoming_font->ft_face->units_per_EM);
-
-    if(FT_IS_SCALABLE(incoming_font->ft_face) && !font->fake_bold) {
-        TEXTMETRICW tm;
-        if (get_text_metrics(incoming_font, &tm) &&
-            !(tm.tmPitchAndFamily & TMPF_FIXED_PITCH)) {
-            avgAdvance = pFT_MulFix(incoming_font->ntmAvgWidth, em_scale);
-            if (avgAdvance &&
-                (metrics.horiAdvance+63) >> 6 == pFT_MulFix(incoming_font->ntmAvgWidth*2, em_scale))
-                TRACE("Fixed-pitch full-width character detected\n");
-            else
-                avgAdvance = 0; /* cancel this feature */
-        }
-    }
-
     if(!needsTransform) {
         left = (INT)(metrics.horiBearingX) & -64;
         right = (INT)((metrics.horiBearingX + metrics.width) + 63) & -64;
-        if (!avgAdvance)
-            adv = (INT)(metrics.horiAdvance + 63) >> 6;
-        else
-            adv = (INT)avgAdvance * 2;
-
 	top = (metrics.horiBearingY + 63) & -64;
 	bottom = (metrics.horiBearingY - metrics.height) & -64;
-	gm.gmCellIncX = adv;
+	adv = get_advance_metric(incoming_font, font, &metrics, NULL, vertical_metrics);
+	gm.gmCellIncX = adv.x >> 6;
 	gm.gmCellIncY = 0;
         origin_x = left;
         origin_y = top;
@@ -6949,36 +6999,11 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
         }
 
 	TRACE("transformed box: (%d,%d - %d,%d)\n", left, top, right, bottom);
-        if (vertical_metrics)
-            vec.x = metrics.vertAdvance;
-        else
-            vec.x = metrics.horiAdvance;
-	vec.y = 0;
-	pFT_Vector_Transform(&vec, &transMat);
-	gm.gmCellIncY = -((vec.y+63) >> 6);
-	if (!avgAdvance || vec.y)
-	    gm.gmCellIncX = (vec.x+63) >> 6;
-	else {
-	    vec.x = incoming_font->ntmAvgWidth;
-	    vec.y = 0;
-	    pFT_Vector_Transform(&vec, &transMat);
-	    gm.gmCellIncX = pFT_MulFix(vec.x, em_scale) * 2;
-	}
+        adv = get_advance_metric(incoming_font, font, &metrics, &transMat, vertical_metrics);
+        gm.gmCellIncX = adv.x >> 6;
+        gm.gmCellIncY = adv.y >> 6;
 
-        if (vertical_metrics)
-            vec.x = metrics.vertAdvance;
-        else
-            vec.x = metrics.horiAdvance;
-        vec.y = 0;
-        pFT_Vector_Transform(&vec, &transMatUnrotated);
-        if (!avgAdvance || vec.y)
-            adv = (vec.x+63) >> 6;
-        else {
-            vec.x = incoming_font->ntmAvgWidth;
-            vec.y = 0;
-            pFT_Vector_Transform(&vec, &transMatUnrotated);
-            adv = pFT_MulFix(vec.x, em_scale) * 2;
-        }
+        adv = get_advance_metric(incoming_font, font, &metrics, &transMatUnrotated, vertical_metrics);
 
         vec.x = lsb;
         vec.y = 0;
@@ -7001,7 +7026,7 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
     gm.gmptGlyphOrigin.x = origin_x >> 6;
     gm.gmptGlyphOrigin.y = origin_y >> 6;
     if (!abc->abcB) abc->abcB = 1;
-    abc->abcC = adv - abc->abcA - abc->abcB;
+    abc->abcC = (adv.x >> 6) - abc->abcA - abc->abcB;
 
     TRACE("%u,%u,%s,%d,%d\n", gm.gmBlackBoxX, gm.gmBlackBoxY,
           wine_dbgstr_point(&gm.gmptGlyphOrigin),
@@ -7045,7 +7070,17 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
 	    INT w = min( pitch, (ft_face->glyph->bitmap.width + 7) >> 3 );
 	    INT h = min( height, ft_face->glyph->bitmap.rows );
 	    while(h--) {
-	        memcpy(dst, src, w);
+		if (!font->fake_bold)
+		    memcpy(dst, src, w);
+		else {
+		    INT x;
+		    dst[0] = 0;
+		    for (x = 0; x < w; x++) {
+			dst[x  ] = (dst[x] & 0x80) | (src[x] >> 1) | src[x];
+			if (x+1 < pitch)
+			    dst[x+1] = (src[x] & 0x01) << 7;
+		    }
+		}
 		src += ft_face->glyph->bitmap.pitch;
 		dst += pitch;
 	    }
@@ -7101,8 +7136,12 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
             INT x;
             memset( buf, 0, needed );
             while(h--) {
-                for(x = 0; x < pitch && x < ft_face->glyph->bitmap.width; x++)
-                    if (src[x / 8] & masks[x % 8]) dst[x] = max_level;
+                for(x = 0; x < pitch && x < ft_face->glyph->bitmap.width; x++) {
+                    if (src[x / 8] & masks[x % 8]) {
+                        dst[x] = max_level;
+                        if (font->fake_bold && x+1 < pitch) dst[x+1] = max_level;
+                    }
+                }
                 src += ft_face->glyph->bitmap.pitch;
                 dst += pitch;
             }
@@ -7176,7 +7215,10 @@ static DWORD get_glyph_outline(GdiFont *incoming_font, UINT glyph, UINT format,
                 for (x = 0; x < width && x < ft_face->glyph->bitmap.width; x++)
                 {
                     if ( src[x / 8] & masks[x % 8] )
+                    {
                         ((unsigned int *)dst)[x] = ~0u;
+                        if (font->fake_bold && x+1 < width) ((unsigned int *)dst)[x+1] = ~0u;
+                    }
                 }
                 src += src_pitch;
                 dst += pitch;

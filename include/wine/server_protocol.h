@@ -377,8 +377,9 @@ struct security_descriptor
 struct object_attributes
 {
     obj_handle_t rootdir;
-    data_size_t sd_len;
-    data_size_t name_len;
+    unsigned int attributes;
+    data_size_t  sd_len;
+    data_size_t  name_len;
 
 
 };
@@ -1157,11 +1158,9 @@ struct create_event_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
     int          manual_reset;
     int          initial_state;
     /* VARARG(objattr,object_attributes); */
-    char __pad_28[4];
 };
 struct create_event_reply
 {
@@ -1218,9 +1217,7 @@ struct create_keyed_event_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
     /* VARARG(objattr,object_attributes); */
-    char __pad_20[4];
 };
 struct create_keyed_event_reply
 {
@@ -1251,9 +1248,9 @@ struct create_mutex_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
     int          owned;
     /* VARARG(objattr,object_attributes); */
+    char __pad_20[4];
 };
 struct create_mutex_reply
 {
@@ -1299,11 +1296,9 @@ struct create_semaphore_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
     unsigned int initial;
     unsigned int max;
     /* VARARG(objattr,object_attributes); */
-    char __pad_28[4];
 };
 struct create_semaphore_reply
 {
@@ -1362,14 +1357,12 @@ struct create_file_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
     unsigned int sharing;
     int          create;
     unsigned int options;
     unsigned int attrs;
     /* VARARG(objattr,object_attributes); */
     /* VARARG(filename,string); */
-    char __pad_36[4];
 };
 struct create_file_reply
 {
@@ -2105,8 +2098,8 @@ struct create_mapping_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
     unsigned int protect;
+    char __pad_20[4];
     mem_size_t   size;
     obj_handle_t file_handle;
     /* VARARG(objattr,object_attributes); */
@@ -2400,13 +2393,11 @@ struct write_process_memory_reply
 struct create_key_request
 {
     struct request_header __header;
-    obj_handle_t parent;
     unsigned int access;
-    unsigned int attributes;
     unsigned int options;
-    data_size_t  namelen;
-    /* VARARG(name,unicode_str,namelen); */
+    /* VARARG(objattr,object_attributes); */
     /* VARARG(class,unicode_str); */
+    char __pad_20[4];
 };
 struct create_key_reply
 {
@@ -2550,10 +2541,8 @@ struct delete_key_value_reply
 struct load_registry_request
 {
     struct request_header __header;
-    obj_handle_t hkey;
     obj_handle_t file;
-    /* VARARG(name,unicode_str); */
-    char __pad_20[4];
+    /* VARARG(objattr,object_attributes); */
 };
 struct load_registry_reply
 {
@@ -2608,11 +2597,9 @@ struct create_timer_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
-    obj_handle_t rootdir;
     int          manual;
-    /* VARARG(name,unicode_str); */
-    char __pad_28[4];
+    /* VARARG(objattr,object_attributes); */
+    char __pad_20[4];
 };
 struct create_timer_reply
 {
@@ -3267,12 +3254,12 @@ struct create_named_pipe_request
 {
     struct request_header __header;
     unsigned int   access;
-    unsigned int   attributes;
     unsigned int   options;
     unsigned int   sharing;
     unsigned int   maxinstances;
     unsigned int   outsize;
     unsigned int   insize;
+    char __pad_36[4];
     timeout_t      timeout;
     unsigned int   flags;
     /* VARARG(objattr,object_attributes); */
@@ -3808,7 +3795,9 @@ struct create_winstation_request
     unsigned int flags;
     unsigned int access;
     unsigned int attributes;
+    obj_handle_t rootdir;
     /* VARARG(name,unicode_str); */
+    char __pad_28[4];
 };
 struct create_winstation_reply
 {
@@ -3824,8 +3813,8 @@ struct open_winstation_request
     struct request_header __header;
     unsigned int access;
     unsigned int attributes;
+    obj_handle_t rootdir;
     /* VARARG(name,unicode_str); */
-    char __pad_20[4];
 };
 struct open_winstation_reply
 {
@@ -4682,12 +4671,10 @@ struct create_mailslot_request
 {
     struct request_header __header;
     unsigned int   access;
-    unsigned int   attributes;
-    obj_handle_t   rootdir;
     timeout_t      read_timeout;
     unsigned int   max_msgsize;
-    /* VARARG(name,unicode_str); */
-    char __pad_36[4];
+    /* VARARG(objattr,object_attributes); */
+    char __pad_28[4];
 };
 struct create_mailslot_reply
 {
@@ -4721,9 +4708,7 @@ struct create_directory_request
 {
     struct request_header __header;
     unsigned int   access;
-    unsigned int   attributes;
-    obj_handle_t   rootdir;
-    /* VARARG(directory_name,unicode_str); */
+    /* VARARG(objattr,object_attributes); */
 };
 struct create_directory_reply
 {
@@ -4773,12 +4758,8 @@ struct create_symlink_request
 {
     struct request_header __header;
     unsigned int   access;
-    unsigned int   attributes;
-    obj_handle_t   rootdir;
-    data_size_t    name_len;
-    /* VARARG(name,unicode_str,name_len); */
+    /* VARARG(objattr,object_attributes); */
     /* VARARG(target_name,unicode_str); */
-    char __pad_28[4];
 };
 struct create_symlink_reply
 {
@@ -4997,11 +4978,9 @@ struct create_completion_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
     unsigned int concurrent;
-    obj_handle_t rootdir;
-    /* VARARG(filename,unicode_str); */
-    char __pad_28[4];
+    /* VARARG(objattr,object_attributes); */
+    char __pad_20[4];
 };
 struct create_completion_reply
 {
@@ -5271,9 +5250,7 @@ struct create_job_request
 {
     struct request_header __header;
     unsigned int access;
-    unsigned int attributes;
     /* VARARG(objattr,object_attributes); */
-    char __pad_20[4];
 };
 struct create_job_reply
 {
@@ -6180,6 +6157,6 @@ union generic_reply
     struct terminate_job_reply terminate_job_reply;
 };
 
-#define SERVER_PROTOCOL_VERSION 492
+#define SERVER_PROTOCOL_VERSION 500
 
 #endif /* __WINE_WINE_SERVER_PROTOCOL_H */
