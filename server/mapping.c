@@ -604,12 +604,10 @@ static void mapping_dump( struct object *obj, int verbose )
     struct mapping *mapping = (struct mapping *)obj;
     assert( obj->ops == &mapping_ops );
     fprintf( stderr, "Mapping size=%08x%08x prot=%08x fd=%p header_size=%08x base=%08lx "
-             "shared_file=%p ",
+             "shared_file=%p\n",
              (unsigned int)(mapping->size >> 32), (unsigned int)mapping->size,
              mapping->protect, mapping->fd, mapping->header_size,
              (unsigned long)mapping->base, mapping->shared_file );
-    dump_object_name( &mapping->obj );
-    fputc( '\n', stderr );
 }
 
 static struct object_type *mapping_get_type( struct object *obj )
@@ -664,26 +662,22 @@ DECL_HANDLER(create_mapping)
     struct object *obj;
     struct unicode_str name;
     struct directory *root = NULL;
-    const struct object_attributes *objattr = get_req_data();
     const struct security_descriptor *sd;
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
 
-    reply->handle = 0;
-
-    if (!objattr_is_valid( objattr, get_req_data_size() ))
-        return;
-
-    sd = objattr->sd_len ? (const struct security_descriptor *)(objattr + 1) : NULL;
-    objattr_get_name( objattr, &name );
+    if (!objattr) return;
 
     if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 )))
         return;
 
-    if ((obj = create_mapping( root, &name, req->attributes, req->size, req->protect, req->file_handle, sd )))
+    if ((obj = create_mapping( root, &name, objattr->attributes,
+                               req->size, req->protect, req->file_handle, sd )))
     {
         if (get_error() == STATUS_OBJECT_NAME_EXISTS)
-            reply->handle = alloc_handle( current->process, obj, req->access, req->attributes );
+            reply->handle = alloc_handle( current->process, obj, req->access, objattr->attributes );
         else
-            reply->handle = alloc_handle_no_access_check( current->process, obj, req->access, req->attributes );
+            reply->handle = alloc_handle_no_access_check( current->process, obj,
+                                                          req->access, objattr->attributes );
         release_object( obj );
     }
 

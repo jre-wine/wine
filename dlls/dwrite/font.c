@@ -2,7 +2,7 @@
  *    Font and collections
  *
  * Copyright 2011 Huw Davies
- * Copyright 2012, 2014-2015 Nikolay Sivov for CodeWeavers
+ * Copyright 2012, 2014-2016 Nikolay Sivov for CodeWeavers
  * Copyright 2014 Aric Stewart for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -202,6 +202,8 @@ struct dwrite_fontface {
     DWRITE_CARET_METRICS caret;
     INT charmap;
     BOOL is_symbol;
+    BOOL has_kerning_pairs : 1;
+    BOOL is_monospaced : 1;
 
     struct dwrite_fonttable cmap;
     struct dwrite_fonttable vdmx;
@@ -584,84 +586,11 @@ static void WINAPI dwritefontface_ReleaseFontTable(IDWriteFontFace2 *iface, void
     IDWriteFontFileStream_ReleaseFileFragment(This->streams[0], table_context);
 }
 
-HRESULT new_glyph_outline(UINT32 count, struct glyph_outline **ret)
-{
-    struct glyph_outline *outline;
-    D2D1_POINT_2F *points;
-    UINT8 *tags;
-
-    *ret = NULL;
-
-    outline = heap_alloc(sizeof(*outline));
-    if (!outline)
-        return E_OUTOFMEMORY;
-
-    points = heap_alloc(count*sizeof(D2D1_POINT_2F));
-    tags = heap_alloc_zero(count*sizeof(UINT8));
-    if (!points || !tags) {
-        heap_free(points);
-        heap_free(tags);
-        heap_free(outline);
-        return E_OUTOFMEMORY;
-    }
-
-    outline->points = points;
-    outline->tags = tags;
-    outline->count = count;
-    outline->advance = 0.0;
-
-    *ret = outline;
-    return S_OK;
-}
-
-static void free_glyph_outline(struct glyph_outline *outline)
-{
-    heap_free(outline->points);
-    heap_free(outline->tags);
-    heap_free(outline);
-}
-
-static void report_glyph_outline(const struct glyph_outline *outline, IDWriteGeometrySink *sink)
-{
-    UINT16 p;
-
-    for (p = 0; p < outline->count; p++) {
-        if (outline->tags[p] & OUTLINE_POINT_START) {
-            ID2D1SimplifiedGeometrySink_BeginFigure(sink, outline->points[p], D2D1_FIGURE_BEGIN_FILLED);
-            continue;
-        }
-
-        if (outline->tags[p] & OUTLINE_POINT_LINE)
-            ID2D1SimplifiedGeometrySink_AddLines(sink, outline->points+p, 1);
-        else if (outline->tags[p] & OUTLINE_POINT_BEZIER) {
-            static const UINT16 segment_length = 3;
-            ID2D1SimplifiedGeometrySink_AddBeziers(sink, (D2D1_BEZIER_SEGMENT*)&outline->points[p], 1);
-            p += segment_length - 1;
-        }
-
-        if (outline->tags[p] & OUTLINE_POINT_END)
-            ID2D1SimplifiedGeometrySink_EndFigure(sink, D2D1_FIGURE_END_CLOSED);
-    }
-}
-
-static inline void translate_glyph_outline(struct glyph_outline *outline, FLOAT xoffset, FLOAT yoffset)
-{
-    UINT16 p;
-
-    for (p = 0; p < outline->count; p++) {
-        outline->points[p].x += xoffset;
-        outline->points[p].y += yoffset;
-    }
-}
-
 static HRESULT WINAPI dwritefontface_GetGlyphRunOutline(IDWriteFontFace2 *iface, FLOAT emSize,
     UINT16 const *glyphs, FLOAT const* advances, DWRITE_GLYPH_OFFSET const *offsets,
     UINT32 count, BOOL is_sideways, BOOL is_rtl, IDWriteGeometrySink *sink)
 {
     struct dwrite_fontface *This = impl_from_IDWriteFontFace2(iface);
-    FLOAT advance = 0.0;
-    HRESULT hr;
-    UINT32 g;
 
     TRACE("(%p)->(%.2f %p %p %p %u %d %d %p)\n", This, emSize, glyphs, advances, offsets,
         count, is_sideways, is_rtl, sink);
@@ -672,42 +601,7 @@ static HRESULT WINAPI dwritefontface_GetGlyphRunOutline(IDWriteFontFace2 *iface,
     if (is_sideways)
         FIXME("sideways mode is not supported.\n");
 
-    if (count)
-        ID2D1SimplifiedGeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
-
-    for (g = 0; g < count; g++) {
-        FLOAT xoffset = 0.0, yoffset = 0.0;
-        struct glyph_outline *outline;
-
-        /* FIXME: cache outlines */
-
-        hr = freetype_get_glyph_outline(iface, emSize, glyphs[g], This->simulations, &outline);
-        if (FAILED(hr))
-            return hr;
-
-        /* glyph offsets act as current glyph adjustment */
-        if (offsets) {
-            xoffset += is_rtl ? -offsets[g].advanceOffset : offsets[g].advanceOffset;
-            yoffset -= offsets[g].ascenderOffset;
-        }
-
-        if (g == 0)
-            advance = is_rtl ? -outline->advance : 0.0;
-
-        xoffset += advance;
-        translate_glyph_outline(outline, xoffset, yoffset);
-
-        /* update advance to next glyph */
-        if (advances)
-            advance += is_rtl ? -advances[g] : advances[g];
-        else
-            advance += is_rtl ? -outline->advance : outline->advance;
-
-        report_glyph_outline(outline, sink);
-        free_glyph_outline(outline);
-    }
-
-    return S_OK;
+    return freetype_get_glyphrun_outline(iface, emSize, glyphs, advances, offsets, count, is_rtl, sink);
 }
 
 static DWRITE_RENDERING_MODE fontface_renderingmode_from_measuringmode(DWRITE_MEASURING_MODE measuring,
@@ -845,13 +739,13 @@ static HRESULT WINAPI dwritefontface1_GetGdiCompatibleMetrics(IDWriteFontFace2 *
 
     TRACE("(%p)->(%.2f %.2f %p %p)\n", This, em_size, pixels_per_dip, m, metrics);
 
-    if (em_size <= 0.0 || pixels_per_dip <= 0.0) {
+    if (em_size <= 0.0f || pixels_per_dip <= 0.0f) {
         memset(metrics, 0, sizeof(*metrics));
         return E_INVALIDARG;
     }
 
     em_size *= pixels_per_dip;
-    if (m && m->m22 != 0.0)
+    if (m && m->m22 != 0.0f)
         em_size *= fabs(m->m22);
 
     scale = em_size / design->designUnitsPerEm;
@@ -916,7 +810,7 @@ static BOOL WINAPI dwritefontface1_IsMonospacedFont(IDWriteFontFace2 *iface)
 {
     struct dwrite_fontface *This = impl_from_IDWriteFontFace2(iface);
     TRACE("(%p)\n", This);
-    return freetype_is_monospaced(iface);
+    return This->is_monospaced;
 }
 
 static HRESULT WINAPI dwritefontface1_GetDesignGlyphAdvances(IDWriteFontFace2 *iface,
@@ -947,13 +841,13 @@ static HRESULT WINAPI dwritefontface1_GetGdiCompatibleGlyphAdvances(IDWriteFontF
     TRACE("(%p)->(%.2f %.2f %p %d %d %u %p %p)\n", This, em_size, ppdip, m,
         use_gdi_natural, is_sideways, glyph_count, glyphs, advances);
 
-    if (em_size < 0.0 || ppdip <= 0.0) {
+    if (em_size < 0.0f || ppdip <= 0.0f) {
         memset(advances, 0, sizeof(*advances) * glyph_count);
         return E_INVALIDARG;
     }
 
     em_size *= ppdip;
-    if (em_size == 0.0) {
+    if (em_size == 0.0f) {
         memset(advances, 0, sizeof(*advances) * glyph_count);
         return S_OK;
     }
@@ -986,6 +880,11 @@ static HRESULT WINAPI dwritefontface1_GetKerningPairAdjustments(IDWriteFontFace2
         return E_INVALIDARG;
     }
 
+    if (!This->has_kerning_pairs) {
+        memset(adjustments, 0, count*sizeof(INT32));
+        return S_OK;
+    }
+
     for (i = 0; i < count-1; i++)
         adjustments[i] = freetype_get_kerning_pair_adjustment(iface, indices[i], indices[i+1]);
     adjustments[count-1] = 0;
@@ -997,7 +896,7 @@ static BOOL WINAPI dwritefontface1_HasKerningPairs(IDWriteFontFace2 *iface)
 {
     struct dwrite_fontface *This = impl_from_IDWriteFontFace2(iface);
     TRACE("(%p)\n", This);
-    return freetype_has_kerning_pairs(iface);
+    return This->has_kerning_pairs;
 }
 
 static HRESULT WINAPI dwritefontface1_GetRecommendedRenderingMode(IDWriteFontFace2 *iface,
@@ -2737,7 +2636,7 @@ static BOOL font_apply_differentiation_rules(struct dwrite_font_data *font, WCHA
     /* for known weight values use appropriate names */
     else if (is_known_weight_value(font->weight, weightW)) {
     }
-    /* use Wnnn format as a fallback in case weight is not one of defined values */
+    /* use Wnnn format as a fallback in case weight is not one of known values */
     else {
         static const WCHAR fmtW[] = {'W','%','d',0};
         sprintfW(weightW, fmtW, font->weight);
@@ -3592,7 +3491,8 @@ static HRESULT WINAPI dwritefontfile_GetLoader(IDWriteFontFile *iface, IDWriteFo
     return S_OK;
 }
 
-static HRESULT WINAPI dwritefontfile_Analyze(IDWriteFontFile *iface, BOOL *isSupportedFontType, DWRITE_FONT_FILE_TYPE *fontFileType, DWRITE_FONT_FACE_TYPE *fontFaceType, UINT32 *numberOfFaces)
+static HRESULT WINAPI dwritefontfile_Analyze(IDWriteFontFile *iface, BOOL *isSupportedFontType, DWRITE_FONT_FILE_TYPE *fontFileType,
+    DWRITE_FONT_FACE_TYPE *fontFaceType, UINT32 *numberOfFaces)
 {
     struct dwrite_fontfile *This = impl_from_IDWriteFontFile(iface);
     IDWriteFontFileStream *stream;
@@ -3730,6 +3630,8 @@ HRESULT create_fontface(DWRITE_FONT_FACE_TYPE facetype, UINT32 files_number, IDW
         }
     }
     fontface->charmap = freetype_get_charmap_index(&fontface->IDWriteFontFace2_iface, &fontface->is_symbol);
+    fontface->has_kerning_pairs = freetype_has_kerning_pairs(&fontface->IDWriteFontFace2_iface);
+    fontface->is_monospaced = freetype_is_monospaced(&fontface->IDWriteFontFace2_iface);
 
     *ret = &fontface->IDWriteFontFace2_iface;
     return S_OK;
@@ -3880,9 +3782,13 @@ static const IDWriteFontFileStreamVtbl localfontfilestreamvtbl =
     localfontfilestream_GetLastWriteTime
 };
 
-static HRESULT create_localfontfilestream(const void *file_ptr, UINT64 size, struct local_cached_stream *entry, IDWriteFontFileStream** iface)
+static HRESULT create_localfontfilestream(const void *file_ptr, UINT64 size, struct local_cached_stream *entry, IDWriteFontFileStream **ret)
 {
-    struct dwrite_localfontfilestream *This = heap_alloc(sizeof(struct dwrite_localfontfilestream));
+    struct dwrite_localfontfilestream *This;
+
+    *ret = NULL;
+
+    This = heap_alloc(sizeof(struct dwrite_localfontfilestream));
     if (!This)
         return E_OUTOFMEMORY;
 
@@ -3893,7 +3799,7 @@ static HRESULT create_localfontfilestream(const void *file_ptr, UINT64 size, str
     This->size = size;
     This->entry = entry;
 
-    *iface = &This->IDWriteFontFileStream_iface;
+    *ret = &This->IDWriteFontFileStream_iface;
     return S_OK;
 }
 
@@ -3933,7 +3839,7 @@ static ULONG WINAPI localfontfileloader_Release(IDWriteLocalFontFileLoader *ifac
         struct local_cached_stream *stream, *stream2;
 
         /* This will detach all entries from cache. Entries are released together with streams,
-           so stream controls its lifetime. */
+           so stream controls cache entry lifetime. */
         LIST_FOR_EACH_ENTRY_SAFE(stream, stream2, &This->streams, struct local_cached_stream, entry)
             list_init(&stream->entry);
 
@@ -4060,9 +3966,13 @@ static const struct IDWriteLocalFontFileLoaderVtbl localfontfileloadervtbl = {
     localfontfileloader_GetLastWriteTimeFromKey
 };
 
-HRESULT create_localfontfileloader(IDWriteLocalFontFileLoader** iface)
+HRESULT create_localfontfileloader(IDWriteLocalFontFileLoader **ret)
 {
-    struct dwrite_localfontfileloader *This = heap_alloc(sizeof(struct dwrite_localfontfileloader));
+    struct dwrite_localfontfileloader *This;
+
+    *ret = NULL;
+
+    This = heap_alloc(sizeof(struct dwrite_localfontfileloader));
     if (!This)
         return E_OUTOFMEMORY;
 
@@ -4070,7 +3980,7 @@ HRESULT create_localfontfileloader(IDWriteLocalFontFileLoader** iface)
     This->ref = 1;
     list_init(&This->streams);
 
-    *iface = &This->IDWriteLocalFontFileLoader_iface;
+    *ret = &This->IDWriteLocalFontFileLoader_iface;
     return S_OK;
 }
 

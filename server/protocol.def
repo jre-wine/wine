@@ -392,9 +392,10 @@ struct security_descriptor
 
 struct object_attributes
 {
-    obj_handle_t rootdir; /* root directory */
-    data_size_t sd_len;   /* length of security_descriptor data. may be 0 */
-    data_size_t name_len; /* length of the name string. may be 0 */
+    obj_handle_t rootdir;       /* root directory */
+    unsigned int attributes;    /* object attributes */
+    data_size_t  sd_len;        /* length of security_descriptor data. may be 0 */
+    data_size_t  name_len;      /* length of the name string. may be 0 */
     /* VARARG(sd,security_descriptor); */
     /* VARARG(name,unicode_str); */
 };
@@ -1012,7 +1013,6 @@ struct rawinput_device
 /* Create an event */
 @REQ(create_event)
     unsigned int access;        /* wanted access rights */
-    unsigned int attributes;    /* object attributes */
     int          manual_reset;  /* manual reset event */
     int          initial_state; /* initial state of the event */
     VARARG(objattr,object_attributes); /* object attributes */
@@ -1048,7 +1048,6 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Create a keyed event */
 @REQ(create_keyed_event)
     unsigned int access;        /* wanted access rights */
-    unsigned int attributes;    /* object attributes */
     VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t handle;        /* handle to the event */
@@ -1068,7 +1067,6 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Create a mutex */
 @REQ(create_mutex)
     unsigned int access;        /* wanted access rights */
-    unsigned int attributes;    /* object attributes */
     int          owned;         /* initially owned? */
     VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
@@ -1098,7 +1096,6 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Create a semaphore */
 @REQ(create_semaphore)
     unsigned int access;        /* wanted access rights */
-    unsigned int attributes;    /* object attributes */
     unsigned int initial;       /* initial count */
     unsigned int max;           /* maximum count */
     VARARG(objattr,object_attributes); /* object attributes */
@@ -1136,7 +1133,6 @@ enum event_op { PULSE_EVENT, SET_EVENT, RESET_EVENT };
 /* Create a file */
 @REQ(create_file)
     unsigned int access;        /* wanted access rights */
-    unsigned int attributes;    /* object attributes */
     unsigned int sharing;       /* sharing flags */
     int          create;        /* file create action */
     unsigned int options;       /* file options */
@@ -1636,7 +1632,6 @@ enum char_info_mode
 /* Create a file mapping */
 @REQ(create_mapping)
     unsigned int access;        /* wanted access rights */
-    unsigned int attributes;    /* object attributes */
     unsigned int protect;       /* protection flags (see below) */
     mem_size_t   size;          /* mapping size */
     obj_handle_t file_handle;   /* file handle */
@@ -1825,12 +1820,9 @@ enum char_info_mode
 
 /* Create a registry key */
 @REQ(create_key)
-    obj_handle_t parent;       /* handle to the parent key */
     unsigned int access;       /* desired access rights */
-    unsigned int attributes;   /* object attributes */
     unsigned int options;      /* creation options */
-    data_size_t  namelen;      /* length of key name in bytes */
-    VARARG(name,unicode_str,namelen);  /* key name */
+    VARARG(objattr,object_attributes); /* object attributes */
     VARARG(class,unicode_str);         /* class name */
 @REPLY
     obj_handle_t hkey;         /* handle to the created key */
@@ -1924,9 +1916,8 @@ enum char_info_mode
 
 /* Load a registry branch from a file */
 @REQ(load_registry)
-    obj_handle_t hkey;         /* root key to load to */
     obj_handle_t file;         /* file to load from */
-    VARARG(name,unicode_str);  /* subkey name */
+    VARARG(objattr,object_attributes); /* object attributes */
 @END
 
 
@@ -1955,10 +1946,8 @@ enum char_info_mode
 /* Create a waitable timer */
 @REQ(create_timer)
     unsigned int access;        /* wanted access rights */
-    unsigned int attributes;    /* object attributes */
-    obj_handle_t rootdir;       /* root directory */
     int          manual;        /* manual reset */
-    VARARG(name,unicode_str);   /* object name */
+    VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t handle;        /* handle to the timer */
 @END
@@ -2372,7 +2361,6 @@ enum message_type
 /* Create a named pipe */
 @REQ(create_named_pipe)
     unsigned int   access;
-    unsigned int   attributes;   /* object attributes */
     unsigned int   options;
     unsigned int   sharing;
     unsigned int   maxinstances;
@@ -2731,6 +2719,7 @@ enum coords_relative
     unsigned int flags;           /* window station flags */
     unsigned int access;          /* wanted access rights */
     unsigned int attributes;      /* object attributes */
+    obj_handle_t rootdir;         /* root directory */
     VARARG(name,unicode_str);     /* object name */
 @REPLY
     obj_handle_t handle;          /* handle to the window station */
@@ -2741,6 +2730,7 @@ enum coords_relative
 @REQ(open_winstation)
     unsigned int access;          /* wanted access rights */
     unsigned int attributes;      /* object attributes */
+    obj_handle_t rootdir;         /* root directory */
     VARARG(name,unicode_str);     /* object name */
 @REPLY
     obj_handle_t handle;          /* handle to the window station */
@@ -3285,11 +3275,9 @@ struct handle_info
 /* Create a mailslot */
 @REQ(create_mailslot)
     unsigned int   access;        /* wanted access rights */
-    unsigned int   attributes;    /* object attributes */
-    obj_handle_t   rootdir;       /* root directory */
     timeout_t      read_timeout;
     unsigned int   max_msgsize;
-    VARARG(name,unicode_str);     /* mailslot name */
+    VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t   handle;        /* handle to the mailslot */
 @END
@@ -3310,9 +3298,7 @@ struct handle_info
 /* Create a directory object */
 @REQ(create_directory)
     unsigned int   access;        /* access flags */
-    unsigned int   attributes;    /* object attributes */
-    obj_handle_t   rootdir;       /* root directory */
-    VARARG(directory_name,unicode_str); /* Directory name */
+    VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t   handle;        /* handle to the directory */
 @END
@@ -3343,10 +3329,7 @@ struct handle_info
 /* Create a symbolic link object */
 @REQ(create_symlink)
     unsigned int   access;        /* access flags */
-    unsigned int   attributes;    /* object attributes */
-    obj_handle_t   rootdir;       /* root directory */
-    data_size_t    name_len;      /* length of the symlink name in bytes */
-    VARARG(name,unicode_str,name_len); /* symlink name */
+    VARARG(objattr,object_attributes); /* object attributes */
     VARARG(target_name,unicode_str);   /* target name */
 @REPLY
     obj_handle_t   handle;        /* handle to the symlink */
@@ -3481,10 +3464,8 @@ struct handle_info
 /* Create I/O completion port */
 @REQ(create_completion)
     unsigned int access;          /* desired access to a port */
-    unsigned int attributes;      /* object attributes */
     unsigned int concurrent;      /* max number of concurrent active threads */
-    obj_handle_t rootdir;         /* root directory */
-    VARARG(filename,unicode_str); /* port name */
+    VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t handle;          /* port handle */
 @END
@@ -3643,7 +3624,6 @@ struct handle_info
 /* Create a new job object */
 @REQ(create_job)
     unsigned int access;          /* wanted access rights */
-    unsigned int attributes;      /* object attributes */
     VARARG(objattr,object_attributes); /* object attributes */
 @REPLY
     obj_handle_t handle;          /* handle to the job */

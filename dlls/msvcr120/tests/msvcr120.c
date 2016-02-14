@@ -24,9 +24,24 @@
 
 #include <windef.h>
 #include <winbase.h>
+#include <winnls.h>
 #include "wine/test.h"
 
 #include <locale.h>
+
+static inline float __port_infinity(void)
+{
+    static const unsigned __inf_bytes = 0x7f800000;
+    return *(const float *)&__inf_bytes;
+}
+#define INFINITY __port_infinity()
+
+static inline float __port_nan(void)
+{
+    static const unsigned __nan_bytes = 0x7fc00000;
+    return *(const float *)&__nan_bytes;
+}
+#define NAN __port_nan()
 
 struct MSVCRT_lconv
 {
@@ -63,8 +78,11 @@ static struct MSVCRT_lconv* (CDECL *p_localeconv)(void);
 static size_t (CDECL *p_wcstombs_s)(size_t *ret, char* dest, size_t sz, const wchar_t* src, size_t max);
 static int (CDECL *p__dsign)(double);
 static int (CDECL *p__fdsign)(float);
+static int (__cdecl *p__dpcomp)(double x, double y);
 static wchar_t** (CDECL *p____lc_locale_name_func)(void);
 static unsigned int (CDECL *p__GetConcurrency)(void);
+static void* (CDECL *p__W_Gettnames)(void);
+static void (CDECL *p_free)(void*);
 
 static BOOL init(void)
 {
@@ -82,8 +100,11 @@ static BOOL init(void)
     p_wcstombs_s = (void*)GetProcAddress(module, "wcstombs_s");
     p__dsign = (void*)GetProcAddress(module, "_dsign");
     p__fdsign = (void*)GetProcAddress(module, "_fdsign");
+    p__dpcomp = (void*)GetProcAddress(module, "_dpcomp");
     p____lc_locale_name_func = (void*)GetProcAddress(module, "___lc_locale_name_func");
     p__GetConcurrency = (void*)GetProcAddress(module,"?_GetConcurrency@details@Concurrency@@YAIXZ");
+    p__W_Gettnames = (void*)GetProcAddress(module, "_W_Gettnames");
+    p_free = (void*)GetProcAddress(module, "free");
     return TRUE;
 }
 
@@ -175,6 +196,26 @@ static void test__dsign(void)
     ok(ret == 0x8000, "p_fdsign(-1) = %x\n", ret);
 }
 
+static void test__dpcomp(void)
+{
+    struct {
+        double x, y;
+        int ret;
+    } tests[] = {
+        {0, 0, 2}, {1, 1, 2}, {-1, -1, 2},
+        {-2, -1, 1}, {-1, 1, 1}, {1, 2, 1},
+        {1, -1, 4}, {2, 1, 4}, {-1, -2, 4},
+        {NAN, NAN, 0}, {NAN, 1, 0}, {1, NAN, 0},
+        {INFINITY, INFINITY, 2}, {-1, INFINITY, 1}, {1, INFINITY, 1},
+    };
+    int i, ret;
+
+    for(i=0; i<sizeof(tests)/sizeof(*tests); i++) {
+        ret = p__dpcomp(tests[i].x, tests[i].y);
+        ok(ret == tests[i].ret, "%d) dpcomp(%f, %f) = %x\n", i, tests[i].x, tests[i].y, ret);
+    }
+}
+
 static void test____lc_locale_name_func(void)
 {
     struct {
@@ -233,11 +274,60 @@ static void test__GetConcurrency(void)
     ok(c == si.dwNumberOfProcessors, "expected %u, got %u\n", si.dwNumberOfProcessors, c);
 }
 
+static void test__W_Gettnames(void)
+{
+    static const char *str[] = {
+        "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
+        "Sunday", "Monday", "Tuesday", "Wednesday",
+        "Thursday", "Friday", "Saturday",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        "January", "February", "March", "April", "May", "June", "July",
+        "August", "September", "October", "November", "December",
+        "AM", "PM", "M/d/yyyy"
+    };
+
+    struct {
+        char *str[43];
+        int  unk[2];
+        wchar_t *wstr[43];
+        wchar_t *locname;
+        char data[1];
+    } *ret;
+    int i, size;
+    WCHAR buf[64];
+
+    if(!p_setlocale(LC_ALL, "english"))
+        return;
+
+    ret = p__W_Gettnames();
+    size = ret->str[0]-(char*)ret;
+    if(sizeof(void*) == 8)
+        ok(size==0x2c0, "structure size: %x\n", size);
+    else
+        ok(size==0x164, "structure size: %x\n", size);
+
+    for(i=0; i<sizeof(str)/sizeof(*str); i++) {
+        ok(!strcmp(ret->str[i], str[i]), "ret->str[%d] = %s, expected %s\n",
+                i, ret->str[i], str[i]);
+
+        MultiByteToWideChar(CP_ACP, 0, str[i], strlen(str[i])+1,
+                buf, sizeof(buf)/sizeof(*buf));
+        ok(!lstrcmpW(ret->wstr[i], buf), "ret->wstr[%d] = %s, expected %s\n",
+                i, wine_dbgstr_w(ret->wstr[i]), wine_dbgstr_w(buf));
+    }
+    p_free(ret);
+
+    p_setlocale(LC_ALL, "C");
+}
+
 START_TEST(msvcr120)
 {
     if (!init()) return;
     test_lconv();
     test__dsign();
+    test__dpcomp();
     test____lc_locale_name_func();
     test__GetConcurrency();
+    test__W_Gettnames();
 }

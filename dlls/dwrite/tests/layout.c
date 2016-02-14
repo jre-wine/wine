@@ -1461,7 +1461,7 @@ static void test_Draw(void)
     flush_sequence(sequences, RENDERER_ID);
     hr = IDWriteTextLayout_Draw(layout, &ctxt, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok_sequence(sequences, RENDERER_ID, draw_seq, "draw test", TRUE);
+    ok_sequence(sequences, RENDERER_ID, draw_seq, "draw test", FALSE);
     IDWriteTextLayout_Release(layout);
 
     /* with reduced width DrawGlyphRun() is called for every line */
@@ -2097,7 +2097,6 @@ if (0) /* crashes on native */
     range.length = 0;
     hr = IDWriteTextLayout_GetLocaleName(layout, 0, buffW, sizeof(buffW)/sizeof(WCHAR), &range);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-todo_wine
     ok(!lstrcmpW(buffW, enusW), "got %s\n", wine_dbgstr_w(buffW));
     ok((range.startPosition == 0 && range.length == ~0u) ||
         broken(range.startPosition == 0 && range.length == 4) /* vista/win7 */, "got %u,%u\n", range.startPosition, range.length);
@@ -2107,7 +2106,6 @@ todo_wine
     range.length = 0;
     hr = IDWriteTextLayout_GetLocaleName(layout, 100, buffW, sizeof(buffW)/sizeof(WCHAR), &range);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-todo_wine
     ok(!lstrcmpW(buffW, enusW), "got %s\n", wine_dbgstr_w(buffW));
     ok((range.startPosition == 0 && range.length == ~0u) ||
         broken(range.startPosition == 4 && range.length == ~0u-4) /* vista/win7 */, "got %u,%u\n", range.startPosition, range.length);
@@ -2998,7 +2996,7 @@ static void test_SetDrawingEffect(void)
     flush_sequence(sequences, RENDERER_ID);
     hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0, 0.0);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok_sequence(sequences, RENDERER_ID, draweffect2_seq, "effect draw test 2", TRUE);
+    ok_sequence(sequences, RENDERER_ID, draweffect2_seq, "effect draw test 2", FALSE);
     IDWriteTextLayout_Release(layout);
 
     /* Inline object - effect set for same range */
@@ -4336,6 +4334,14 @@ static const struct drawcall_entry drawunderline3_seq[] = {
     { DRAW_LAST_KIND }
 };
 
+static const struct drawcall_entry drawunderline4_seq[] = {
+    { DRAW_GLYPHRUN, {'a',0} },
+    { DRAW_GLYPHRUN, {'e',0} },
+    { DRAW_UNDERLINE, {0}, {'e','n','-','u','s',0} },
+    { DRAW_STRIKETHROUGH },
+    { DRAW_LAST_KIND }
+};
+
 static void test_SetUnderline(void)
 {
     static const WCHAR encaW[] = {'e','n','-','C','A',0};
@@ -4399,7 +4405,7 @@ todo_wine
     flush_sequence(sequences, RENDERER_ID);
     hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0f, 0.0f);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok_sequence(sequences, RENDERER_ID, drawunderline2_seq, "draw underline test 2", TRUE);
+    ok_sequence(sequences, RENDERER_ID, drawunderline2_seq, "draw underline test 2", FALSE);
 
     /* now set different locale for second char, draw again */
     range.startPosition = 0;
@@ -4410,7 +4416,28 @@ todo_wine
     flush_sequence(sequences, RENDERER_ID);
     hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0f, 0.0f);
     ok(hr == S_OK, "got 0x%08x\n", hr);
-    ok_sequence(sequences, RENDERER_ID, drawunderline3_seq, "draw underline test 2", TRUE);
+    ok_sequence(sequences, RENDERER_ID, drawunderline3_seq, "draw underline test 2", FALSE);
+
+    IDWriteTextLayout_Release(layout);
+
+    /* 2 characters, same font properties, first with strikethrough, both underlined */
+    hr = IDWriteFactory_CreateTextLayout(factory, strW, 2, format, 1000.0f, 1000.0f, &layout);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    range.startPosition = 0;
+    range.length = 1;
+    hr = IDWriteTextLayout_SetStrikethrough(layout, TRUE, range);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    range.startPosition = 0;
+    range.length = 2;
+    hr = IDWriteTextLayout_SetUnderline(layout, TRUE, range);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    flush_sequence(sequences, RENDERER_ID);
+    hr = IDWriteTextLayout_Draw(layout, NULL, &testrenderer, 0.0f, 0.0f);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok_sequence(sequences, RENDERER_ID, drawunderline4_seq, "draw underline test 4", FALSE);
 
     IDWriteTextLayout_Release(layout);
 

@@ -844,7 +844,7 @@
 @ cdecl _Strftime(str long str ptr ptr) msvcr120._Strftime
 @ cdecl _W_Getdays() msvcr120._W_Getdays
 @ cdecl _W_Getmonths() msvcr120._W_Getmonths
-@ stub _W_Gettnames
+@ cdecl _W_Gettnames() msvcr120._W_Gettnames
 @ stub _Wcsftime
 @ cdecl _XcptFilter(long ptr) msvcr120._XcptFilter
 @ cdecl __AdjustPointer(ptr ptr) msvcr120.__AdjustPointer
@@ -1038,8 +1038,8 @@
 @ cdecl _copysignf(float float) msvcr120._copysignf
 @ cdecl _creat(str long) msvcr120._creat
 @ cdecl _create_locale(long str) msvcr120._create_locale
-@ stub -arch=i386 _crt_debugger_hook
-@ stub -arch=arm,win64 __crt_debugger_hook
+@ cdecl -arch=i386 _crt_debugger_hook(long) msvcr120._crt_debugger_hook
+@ cdecl -arch=arm,win64 __crt_debugger_hook(long) msvcr120.__crt_debugger_hook
 @ cdecl _ctime32(ptr) msvcr120._ctime32
 @ cdecl _ctime32_s(str long ptr) msvcr120._ctime32_s
 @ cdecl _ctime64(ptr) msvcr120._ctime64
@@ -1049,7 +1049,7 @@
 @ cdecl _difftime32(long long) msvcr120._difftime32
 @ cdecl _difftime64(long long) msvcr120._difftime64
 @ stub _dosmaperr
-@ stub _dpcomp
+@ cdecl _dpcomp(double double) msvcr120._dpcomp
 @ cdecl _dsign(double) msvcr120._dsign
 @ extern _dstbias msvcr120._dstbias
 @ cdecl _dtest(ptr) msvcr120._dtest
@@ -1072,7 +1072,7 @@
 @ cdecl _fcvt_s(ptr long double long ptr ptr) msvcr120._fcvt_s
 @ cdecl _fdclass(float) msvcr120._fdclass
 @ cdecl _fdopen(long str) msvcr120._fdopen
-@ stub _fdpcomp
+@ cdecl _fdpcomp(float float) msvcr120._fdpcomp
 @ cdecl _fdsign(float) msvcr120._fdsign
 @ cdecl _fdtest(ptr) msvcr120._fdtest
 @ cdecl _fflush_nolock(ptr) msvcr120._fflush_nolock
@@ -1256,7 +1256,7 @@
 @ cdecl _j1(double) msvcr120._j1
 @ cdecl _jn(long double) msvcr120._jn
 @ cdecl _ldclass(double) msvcr120._ldclass
-@ stub _ldpcomp
+@ cdecl _ldpcomp(double double) msvcr120._ldpcomp
 @ cdecl _ldsign(double) msvcr120._ldsign
 @ cdecl _ldtest(ptr) msvcr120._ldtest
 @ cdecl _lfind(ptr ptr ptr long ptr) msvcr120._lfind
@@ -1694,7 +1694,7 @@
 @ stub atanh
 @ stub atanhf
 @ stub atanhl
-@ cdecl atexit(ptr) msvcr120.atexit
+@ cdecl -private atexit(ptr) msvcr120.atexit
 @ cdecl atof(str) msvcr120.atof
 @ cdecl atoi(str) msvcr120.atoi
 @ cdecl atol(str) msvcr120.atol

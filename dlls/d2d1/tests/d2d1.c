@@ -587,6 +587,29 @@ static void test_clip(void)
     ok(dpi_x == 96.0f, "Got unexpected dpi_x %.8e.\n", dpi_x);
     ok(dpi_y == 96.0f, "Got unexpected dpi_y %.8e.\n", dpi_y);
 
+    ID2D1RenderTarget_SetDpi(rt, 192.0f, 192.0f);
+    ID2D1RenderTarget_SetDpi(rt, 0.0f, 96.0f);
+    ID2D1RenderTarget_GetDpi(rt, &dpi_x, &dpi_y);
+    ok(dpi_x == 192.0f, "Got unexpected dpi_x %.8e.\n", dpi_x);
+    ok(dpi_y == 192.0f, "Got unexpected dpi_y %.8e.\n", dpi_y);
+
+    ID2D1RenderTarget_SetDpi(rt, -10.0f, 96.0f);
+    ID2D1RenderTarget_GetDpi(rt, &dpi_x, &dpi_y);
+    ok(dpi_x == 192.0f, "Got unexpected dpi_x %.8e.\n", dpi_x);
+    ok(dpi_y == 192.0f, "Got unexpected dpi_y %.8e.\n", dpi_y);
+
+    ID2D1RenderTarget_SetDpi(rt, 96.0f, -10.0f);
+    ID2D1RenderTarget_GetDpi(rt, &dpi_x, &dpi_y);
+    ok(dpi_x == 192.0f, "Got unexpected dpi_x %.8e.\n", dpi_x);
+    ok(dpi_y == 192.0f, "Got unexpected dpi_y %.8e.\n", dpi_y);
+
+    ID2D1RenderTarget_SetDpi(rt, 96.0f, 0.0f);
+    ID2D1RenderTarget_GetDpi(rt, &dpi_x, &dpi_y);
+    ok(dpi_x == 192.0f, "Got unexpected dpi_x %.8e.\n", dpi_x);
+    ok(dpi_y == 192.0f, "Got unexpected dpi_y %.8e.\n", dpi_y);
+
+    ID2D1RenderTarget_SetDpi(rt, 96.0f, 96.0f);
+
     /* Transformations apply to clip rects, the effective clip rect is the
      * (axis-aligned) bounding box of the transformed clip rect. */
     set_point(&point, 320.0f, 240.0f);
@@ -2428,6 +2451,181 @@ static void test_opacity_brush(void)
     DestroyWindow(window);
 }
 
+static void test_create_target(void)
+{
+    IDXGISwapChain *swapchain;
+    ID2D1Factory *factory;
+    ID2D1RenderTarget *rt;
+    ID3D10Device1 *device;
+    IDXGISurface *surface;
+    HWND window;
+    HRESULT hr;
+    static const struct
+    {
+        float dpi_x, dpi_y;
+        float rt_dpi_x, rt_dpi_y;
+        HRESULT hr;
+    }
+    create_dpi_tests[] =
+    {
+        {   0.0f,   0.0f, 96.0f, 96.0f, S_OK },
+        { 192.0f,   0.0f, 96.0f, 96.0f, E_INVALIDARG },
+        {   0.0f, 192.0f, 96.0f, 96.0f, E_INVALIDARG },
+        { 192.0f, -10.0f, 96.0f, 96.0f, E_INVALIDARG },
+        { -10.0f, 192.0f, 96.0f, 96.0f, E_INVALIDARG },
+        {  48.0f,  96.0f, 48.0f, 96.0f, S_OK },
+    };
+    unsigned int i;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+    window = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    swapchain = create_swapchain(device, window, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain, 0, &IID_IDXGISurface, (void **)&surface);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+
+    hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
+    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+
+    for (i = 0; i < sizeof(create_dpi_tests) / sizeof(*create_dpi_tests); ++i)
+    {
+        D2D1_RENDER_TARGET_PROPERTIES desc;
+        float dpi_x, dpi_y;
+
+        desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+        desc.pixelFormat.format = DXGI_FORMAT_UNKNOWN;
+        desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+        desc.dpiX = create_dpi_tests[i].dpi_x;
+        desc.dpiY = create_dpi_tests[i].dpi_y;
+        desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
+        desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
+
+        hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory, surface, &desc, &rt);
+        ok(hr == create_dpi_tests[i].hr, "Wrong return code, hr %#x, expected %#x, test %u.\n", hr,
+            create_dpi_tests[i].hr, i);
+
+        if (FAILED(hr))
+            continue;
+
+        ID2D1RenderTarget_GetDpi(rt, &dpi_x, &dpi_y);
+        ok(dpi_x == create_dpi_tests[i].rt_dpi_x, "Wrong dpi_x %.8e, expected %.8e, test %u\n",
+            dpi_x, create_dpi_tests[i].rt_dpi_x, i);
+        ok(dpi_y == create_dpi_tests[i].rt_dpi_y, "Wrong dpi_y %.8e, expected %.8e, test %u\n",
+            dpi_y, create_dpi_tests[i].rt_dpi_y, i);
+
+        ID2D1RenderTarget_Release(rt);
+    }
+
+    ID2D1Factory_Release(factory);
+    IDXGISurface_Release(surface);
+    IDXGISwapChain_Release(swapchain);
+    ID3D10Device1_Release(device);
+    DestroyWindow(window);
+}
+
+static void test_draw_text_layout(void)
+{
+    static const WCHAR tahomaW[] = {'T','a','h','o','m','a',0};
+    static const WCHAR textW[] = {'t','e','x','t',0};
+    static const WCHAR emptyW[] = {0};
+    D2D1_RENDER_TARGET_PROPERTIES desc;
+    IDXGISwapChain *swapchain;
+    ID2D1Factory *factory, *factory2;
+    ID2D1RenderTarget *rt, *rt2;
+    ID3D10Device1 *device;
+    IDXGISurface *surface;
+    HWND window;
+    HRESULT hr;
+    IDWriteFactory *dwrite_factory;
+    IDWriteTextFormat *text_format;
+    IDWriteTextLayout *text_layout;
+    D2D1_POINT_2F origin;
+    DWRITE_TEXT_RANGE range;
+    D2D1_COLOR_F color;
+    ID2D1SolidColorBrush *brush, *brush2;
+
+    if (!(device = create_device()))
+    {
+        skip("Failed to create device, skipping tests.\n");
+        return;
+    }
+    window = CreateWindowA("static", "d2d1_test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    swapchain = create_swapchain(device, window, TRUE);
+    hr = IDXGISwapChain_GetBuffer(swapchain, 0, &IID_IDXGISurface, (void **)&surface);
+    ok(SUCCEEDED(hr), "Failed to get buffer, hr %#x.\n", hr);
+
+    hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory);
+    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+
+    hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &IID_ID2D1Factory, NULL, (void **)&factory2);
+    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+    ok(factory != factory2, "got same factory\n");
+
+    desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+    desc.pixelFormat.format = DXGI_FORMAT_UNKNOWN;
+    desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    desc.dpiX = 0.0f;
+    desc.dpiY = 0.0f;
+    desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
+    desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
+
+    hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory, surface, &desc, &rt);
+    ok(SUCCEEDED(hr), "Failed to create a target, hr %#x.\n", hr);
+
+    hr = ID2D1Factory_CreateDxgiSurfaceRenderTarget(factory2, surface, &desc, &rt2);
+    ok(SUCCEEDED(hr), "Failed to create a target, hr %#x.\n", hr);
+
+    hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (IUnknown **)&dwrite_factory);
+    ok(SUCCEEDED(hr), "Failed to create factory, hr %#x.\n", hr);
+
+    hr = IDWriteFactory_CreateTextFormat(dwrite_factory, tahomaW, NULL, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, 10.0f, emptyW, &text_format);
+    ok(SUCCEEDED(hr), "Failed to create text format, hr %#x.\n", hr);
+
+    hr = IDWriteFactory_CreateTextLayout(dwrite_factory, textW, 4, text_format, 100.0f, 100.0f, &text_layout);
+    ok(SUCCEEDED(hr), "Failed to create text layout, hr %#x.\n", hr);
+
+    set_color(&color, 0.0f, 0.0f, 0.0f, 0.0f);
+    hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &color, NULL, &brush);
+    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+
+    hr = ID2D1RenderTarget_CreateSolidColorBrush(rt2, &color, NULL, &brush2);
+    ok(SUCCEEDED(hr), "Failed to create brush, hr %#x.\n", hr);
+
+    /* effect brush is created from different factory */
+    range.startPosition = 0;
+    range.length = 4;
+    hr = IDWriteTextLayout_SetDrawingEffect(text_layout, (IUnknown*)brush2, range);
+    ok(SUCCEEDED(hr), "Failed to set drawing effect, hr %#x.\n", hr);
+
+    ID2D1RenderTarget_BeginDraw(rt);
+
+    origin.x = origin.y = 0.0f;
+    ID2D1RenderTarget_DrawTextLayout(rt, origin, text_layout, (ID2D1Brush*)brush, D2D1_DRAW_TEXT_OPTIONS_NONE);
+
+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+todo_wine
+    ok(hr == D2DERR_WRONG_FACTORY, "EndDraw failure expected, hr %#x.\n", hr);
+
+    IDWriteTextFormat_Release(text_format);
+    IDWriteTextLayout_Release(text_layout);
+    IDWriteFactory_Release(dwrite_factory);
+    ID2D1RenderTarget_Release(rt);
+    ID2D1RenderTarget_Release(rt2);
+
+    ID2D1Factory_Release(factory);
+    ID2D1Factory_Release(factory2);
+    IDXGISurface_Release(surface);
+    IDXGISwapChain_Release(swapchain);
+    ID3D10Device1_Release(device);
+    DestroyWindow(window);
+}
+
 START_TEST(d2d1)
 {
     test_clip();
@@ -2440,4 +2638,6 @@ START_TEST(d2d1)
     test_shared_bitmap();
     test_bitmap_updates();
     test_opacity_brush();
+    test_create_target();
+    test_draw_text_layout();
 }
