@@ -91,6 +91,8 @@ static const struct object_ops file_ops =
     file_get_sd,                  /* get_sd */
     file_set_sd,                  /* set_sd */
     no_lookup_name,               /* lookup_name */
+    no_link_name,                 /* link_name */
+    NULL,                         /* unlink_name */
     file_open_file,               /* open_file */
     fd_close_handle,              /* close_handle */
     file_destroy                  /* destroy */
@@ -688,7 +690,7 @@ DECL_HANDLER(create_file)
     struct fd *root_fd = NULL;
     struct unicode_str unicode_name;
     const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &unicode_name );
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &unicode_name, NULL );
     const char *name;
     data_size_t name_len;
 

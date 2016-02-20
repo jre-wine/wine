@@ -32,6 +32,17 @@ struct d2d_draw_text_layout_ctx
     D2D1_DRAW_TEXT_OPTIONS options;
 };
 
+static ID2D1Brush *d2d_draw_get_text_brush(struct d2d_draw_text_layout_ctx *context, IUnknown *effect)
+{
+    ID2D1Brush *brush = NULL;
+
+    if (effect && SUCCEEDED(IUnknown_QueryInterface(effect, &IID_ID2D1Brush, (void**)&brush)))
+        return brush;
+
+    ID2D1Brush_AddRef(context->brush);
+    return context->brush;
+}
+
 static void d2d_point_set(D2D1_POINT_2F *dst, float x, float y)
 {
     dst->x = x;
@@ -1638,6 +1649,7 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
     struct d2d_d3d_render_target *render_target = impl_from_IDWriteTextRenderer(iface);
     D2D1_POINT_2F baseline_origin = {baseline_origin_x, baseline_origin_y};
     struct d2d_draw_text_layout_ctx *context = ctx;
+    ID2D1Brush *brush;
 
     TRACE("iface %p, ctx %p, baseline_origin_x %.8e, baseline_origin_y %.8e, "
             "measuring_mode %#x, glyph_run %p, desc %p, effect %p.\n",
@@ -1646,14 +1658,16 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
 
     if (desc)
         WARN("Ignoring glyph run description %p.\n", desc);
-    if (effect)
-        FIXME("Ignoring effect %p.\n", effect);
     if (context->options & ~D2D1_DRAW_TEXT_OPTIONS_NO_SNAP)
         FIXME("Ignoring options %#x.\n", context->options);
 
+    brush = d2d_draw_get_text_brush(context, effect);
+
     TRACE("%s\n", debugstr_wn(desc->string, desc->stringLength));
     ID2D1RenderTarget_DrawGlyphRun(&render_target->ID2D1RenderTarget_iface,
-            baseline_origin, glyph_run, context->brush, measuring_mode);
+            baseline_origin, glyph_run, brush, measuring_mode);
+
+    ID2D1Brush_Release(brush);
 
     return S_OK;
 }
@@ -1661,10 +1675,31 @@ static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawGlyphRun(IDWriteTextRende
 static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawUnderline(IDWriteTextRenderer *iface, void *ctx,
         float baseline_origin_x, float baseline_origin_y, const DWRITE_UNDERLINE *underline, IUnknown *effect)
 {
-    FIXME("iface %p, ctx %p, baseline_origin_x %.8e, baseline_origin_y %.8e, underline %p, effect %p stub!\n",
+    struct d2d_d3d_render_target *render_target = impl_from_IDWriteTextRenderer(iface);
+    const D2D1_MATRIX_3X2_F *m = &render_target->drawing_state.transform;
+    struct d2d_draw_text_layout_ctx *context = ctx;
+    float min_thickness;
+    ID2D1Brush *brush;
+    D2D1_RECT_F rect;
+
+    TRACE("iface %p, ctx %p, baseline_origin_x %.8e, baseline_origin_y %.8e, underline %p, effect %p\n",
             iface, ctx, baseline_origin_x, baseline_origin_y, underline, effect);
 
-    return E_NOTIMPL;
+    /* minimal thickness in DIPs that will result in at least 1 pixel thick line */
+    min_thickness = 96.0f / (render_target->dpi_y * sqrtf(m->_21 * m->_21 + m->_22 * m->_22));
+
+    rect.left   = baseline_origin_x;
+    rect.top    = baseline_origin_y + underline->offset;
+    rect.right  = baseline_origin_x + underline->width;
+    rect.bottom = baseline_origin_y + underline->offset + max(underline->thickness, min_thickness);
+
+    brush = d2d_draw_get_text_brush(context, effect);
+
+    ID2D1RenderTarget_FillRectangle(&render_target->ID2D1RenderTarget_iface, &rect, brush);
+
+    ID2D1Brush_Release(brush);
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d2d_text_renderer_DrawStrikethrough(IDWriteTextRenderer *iface, void *ctx,

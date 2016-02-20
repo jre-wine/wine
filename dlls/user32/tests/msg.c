@@ -5942,7 +5942,7 @@ static const struct message WMSetFocusComboBoxSeq[] =
     { WM_SETFOCUS, sent },
     { WM_KILLFOCUS, sent|parent },
     { WM_SETFOCUS, sent },
-    { WM_COMMAND, sent|defwinproc },
+    { WM_COMMAND, sent|defwinproc|wparam, MAKEWPARAM(1001, EN_SETFOCUS) },
     { EM_SETSEL, sent|defwinproc|wparam|lparam, 0, INT_MAX },
     { WM_CTLCOLOREDIT, sent|defwinproc|optional },/* Not sent on W2000, XP or Server 2003 */
     { WM_CTLCOLOREDIT, sent|parent|optional },/* Not sent on W2000, XP or Server 2003 */
@@ -5971,7 +5971,7 @@ static const struct message SetFocusComboBoxSeq[] =
     { WM_SETFOCUS, sent },
     { WM_KILLFOCUS, sent|defwinproc },
     { WM_SETFOCUS, sent },
-    { WM_COMMAND, sent|defwinproc },
+    { WM_COMMAND, sent|defwinproc|wparam, MAKEWPARAM(1001, EN_SETFOCUS) },
     { EM_SETSEL, sent|defwinproc|wparam|lparam, 0, INT_MAX },
     { WM_CTLCOLOREDIT, sent|defwinproc|optional },/* Not sent on W2000, XP or Server 2003 */
     { WM_CTLCOLOREDIT, sent|parent|optional },/* Not sent on W2000, XP or Server 2003 */
@@ -8763,9 +8763,11 @@ static void test_timers(void)
 
 static void test_timers_no_wnd(void)
 {
+    static UINT_PTR ids[0xffff];
     UINT_PTR id, id2;
     DWORD start;
     MSG msg;
+    int i;
 
     count = 0;
     id = SetTimer(NULL, 0, 100, callback_count);
@@ -8800,6 +8802,18 @@ static void test_timers_no_wnd(void)
        count, TIMER_COUNT_EXPECTED);
     KillTimer(NULL, id);
     /* Note: SetSystemTimer doesn't support a NULL window, see test_timers */
+
+    /* Check what happens when we're running out of timers */
+    for (i=0; i<sizeof(ids)/sizeof(ids[0]); i++)
+    {
+        SetLastError(0xdeadbeef);
+        ids[i] = SetTimer(NULL, 0, USER_TIMER_MAXIMUM, tfunc);
+        if (!ids[i]) break;
+    }
+    ok(i != sizeof(ids)/sizeof(ids[0]), "all timers were created successfully\n");
+    ok(GetLastError()==ERROR_NO_MORE_USER_HANDLES || broken(GetLastError()==0xdeadbeef),
+            "GetLastError() = %d\n", GetLastError());
+    while (i > 0) KillTimer(NULL, ids[--i]);
 }
 
 static void test_timers_exception(DWORD code)
@@ -15111,6 +15125,33 @@ else
     flush_sequence();
 }
 
+static const struct message DoubleSetCaptureSeq[] =
+{
+    { WM_CAPTURECHANGED, sent },
+    { 0 }
+};
+
+static void test_DoubleSetCapture(void)
+{
+    HWND hwnd;
+
+    hwnd = CreateWindowExA(0, "TestWindowClass", "Test DoubleSetCapture",
+                           WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                           100, 100, 200, 200, 0, 0, 0, NULL);
+    ok (hwnd != 0, "Failed to create overlapped window\n");
+
+    ShowWindow( hwnd, SW_SHOW );
+    UpdateWindow( hwnd );
+    flush_events();
+    flush_sequence();
+
+    SetCapture( hwnd );
+    SetCapture( hwnd );
+    ok_sequence(DoubleSetCaptureSeq, "SetCapture( hwnd ) twice", FALSE);
+
+    DestroyWindow(hwnd);
+}
+
 static void init_funcs(void)
 {
     HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
@@ -15251,6 +15292,7 @@ START_TEST(msg)
     test_layered_window();
     test_TrackPopupMenu();
     test_TrackPopupMenuEmpty();
+    test_DoubleSetCapture();
     /* keep it the last test, under Windows it tends to break the tests
      * which rely on active/foreground windows being correct.
      */

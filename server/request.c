@@ -104,6 +104,8 @@ static const struct object_ops master_socket_ops =
     default_get_sd,                /* get_sd */
     default_set_sd,                /* set_sd */
     no_lookup_name,                /* lookup_name */
+    no_link_name,                  /* link_name */
+    NULL,                          /* unlink_name */
     no_open_file,                  /* open_file */
     no_close_handle,               /* close_handle */
     master_socket_destroy          /* destroy */
@@ -167,11 +169,14 @@ void *set_reply_data_size( data_size_t size )
 
 /* return object attributes from the current request */
 const struct object_attributes *get_req_object_attributes( const struct security_descriptor **sd,
-                                                           struct unicode_str *name )
+                                                           struct unicode_str *name,
+                                                           struct directory **root )
 {
     static const struct object_attributes empty_attributes;
     const struct object_attributes *attr = get_req_data();
     data_size_t size = get_req_data_size();
+
+    if (root) *root = NULL;
 
     if (!size)
     {
@@ -195,6 +200,10 @@ const struct object_attributes *get_req_object_attributes( const struct security
     {
         set_error( STATUS_OBJECT_NAME_INVALID );
         return NULL;
+    }
+    if (root && attr->rootdir && attr->name_len)
+    {
+        if (!(*root = get_directory_obj( current->process, attr->rootdir, 0 ))) return NULL;
     }
     *sd = attr->sd_len ? (const struct security_descriptor *)(attr + 1) : NULL;
     name->len = attr->name_len;

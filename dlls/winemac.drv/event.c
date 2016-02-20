@@ -45,8 +45,10 @@ static const char *dbgstr_event(int type)
         "MOUSE_MOVED_ABSOLUTE",
         "MOUSE_SCROLL",
         "QUERY_EVENT",
+        "QUERY_EVENT_NO_PREEMPT_WAIT",
         "REASSERT_WINDOW_POSITION",
         "RELEASE_CAPTURE",
+        "SENT_TEXT_INPUT",
         "STATUS_ITEM_MOUSE_BUTTON",
         "STATUS_ITEM_MOUSE_MOVE",
         "WINDOW_BROUGHT_FORWARD",
@@ -116,8 +118,10 @@ static macdrv_event_mask get_event_mask(DWORD mask)
     if (mask & QS_SENDMESSAGE)
     {
         event_mask |= event_mask_for_type(QUERY_EVENT);
+        event_mask |= event_mask_for_type(QUERY_EVENT_NO_PREEMPT_WAIT);
         event_mask |= event_mask_for_type(REASSERT_WINDOW_POSITION);
         event_mask |= event_mask_for_type(RELEASE_CAPTURE);
+        event_mask |= event_mask_for_type(SENT_TEXT_INPUT);
         event_mask |= event_mask_for_type(WINDOW_BROUGHT_FORWARD);
         event_mask |= event_mask_for_type(WINDOW_CLOSE_REQUESTED);
         event_mask |= event_mask_for_type(WINDOW_DRAG_BEGIN);
@@ -135,7 +139,7 @@ static macdrv_event_mask get_event_mask(DWORD mask)
 /***********************************************************************
  *              macdrv_query_event
  *
- * Handler for QUERY_EVENT queries.
+ * Handler for QUERY_EVENT and QUERY_EVENT_NO_PREEMPT_WAIT queries.
  */
 static void macdrv_query_event(HWND hwnd, const macdrv_event *event)
 {
@@ -237,6 +241,7 @@ void macdrv_handle_event(const macdrv_event *event)
         macdrv_mouse_scroll(hwnd, event);
         break;
     case QUERY_EVENT:
+    case QUERY_EVENT_NO_PREEMPT_WAIT:
         macdrv_query_event(hwnd, event);
         break;
     case REASSERT_WINDOW_POSITION:
@@ -244,6 +249,9 @@ void macdrv_handle_event(const macdrv_event *event)
         break;
     case RELEASE_CAPTURE:
         macdrv_release_capture(hwnd, event);
+        break;
+    case SENT_TEXT_INPUT:
+        macdrv_sent_text_input(event);
         break;
     case STATUS_ITEM_MOUSE_BUTTON:
         macdrv_status_item_mouse_button(event);
@@ -336,6 +344,7 @@ DWORD CDECL macdrv_MsgWaitForMultipleObjectsEx(DWORD count, const HANDLE *handle
     }
 
     if (data->current_event && data->current_event->type != QUERY_EVENT &&
+        data->current_event->type != QUERY_EVENT_NO_PREEMPT_WAIT &&
         data->current_event->type != APP_QUIT_REQUESTED &&
         data->current_event->type != WINDOW_DRAG_BEGIN)
         event_mask = 0;  /* don't process nested events */

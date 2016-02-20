@@ -649,7 +649,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         query->ime_char_rect.data = [window imeData];
         query->ime_char_rect.range = CFRangeMake(aRange.location, aRange.length);
 
-        if ([window.queue query:query timeout:1])
+        if ([window.queue query:query timeout:0.3 flags:WineQueryNoPreemptWait])
         {
             aRange = NSMakeRange(query->ime_char_rect.range.location, query->ime_char_rect.range.length);
             ret = NSRectFromCGRect(query->ime_char_rect.rect);
@@ -2657,7 +2657,7 @@ static CVReturn WineDisplayLinkCallback(CVDisplayLinkRef displayLink, const CVTi
         query->drag_drop.op = [sender draggingSourceOperationMask];
         query->drag_drop.pasteboard = (CFTypeRef)[pb retain];
 
-        [self.queue query:query timeout:3 * 60 processEvents:YES];
+        [self.queue query:query timeout:3 * 60 flags:WineQueryProcessEvents];
         ret = query->status;
         macdrv_release_query(query);
 
@@ -3230,11 +3230,11 @@ uint32_t macdrv_window_background_color(void)
 /***********************************************************************
  *              macdrv_send_text_input_event
  */
-int macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, int keyc, void* data)
+void macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, int keyc, void* data, int* done)
 {
-    __block BOOL ret;
-
-    OnMainThread(^{
+    OnMainThreadAsync(^{
+        BOOL ret;
+        macdrv_event* event;
         WineWindow* window = (WineWindow*)[NSApp keyWindow];
         if (![window isKindOfClass:[WineWindow class]])
         {
@@ -3266,7 +3266,11 @@ int macdrv_send_text_input_event(int pressed, unsigned int flags, int repeat, in
         }
         else
             ret = FALSE;
-    });
 
-    return ret;
+        event = macdrv_create_event(SENT_TEXT_INPUT, window);
+        event->sent_text_input.handled = ret;
+        event->sent_text_input.done = done;
+        [[window queue] postEvent:event];
+        macdrv_release_event(event);
+    });
 }

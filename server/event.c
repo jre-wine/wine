@@ -65,6 +65,8 @@ static const struct object_ops event_ops =
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     no_lookup_name,            /* lookup_name */
+    directory_link_name,       /* link_name */
+    default_unlink_name,       /* unlink_name */
     no_open_file,              /* open_file */
     no_close_handle,           /* close_handle */
     no_destroy                 /* destroy */
@@ -96,6 +98,8 @@ static const struct object_ops keyed_event_ops =
     default_get_sd,              /* get_sd */
     default_set_sd,              /* set_sd */
     no_lookup_name,              /* lookup_name */
+    directory_link_name,         /* link_name */
+    default_unlink_name,         /* unlink_name */
     no_open_file,                /* open_file */
     no_close_handle,             /* close_handle */
     no_destroy                   /* destroy */
@@ -280,14 +284,11 @@ DECL_HANDLER(create_event)
 {
     struct event *event;
     struct unicode_str name;
-    struct directory *root = NULL;
+    struct directory *root;
     const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 
     if (!objattr) return;
-
-    if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 )))
-        return;
 
     if ((event = create_event( root, &name, objattr->attributes,
                                req->manual_reset, req->initial_state, sd )))
@@ -306,21 +307,10 @@ DECL_HANDLER(create_event)
 /* open a handle to an event */
 DECL_HANDLER(open_event)
 {
-    struct unicode_str name;
-    struct directory *root = NULL;
-    struct event *event;
+    struct unicode_str name = get_req_unicode_str();
 
-    get_req_unicode_str( &name );
-    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
-        return;
-
-    if ((event = open_object_dir( root, &name, req->attributes, &event_ops )))
-    {
-        reply->handle = alloc_handle( current->process, &event->obj, req->access, req->attributes );
-        release_object( event );
-    }
-
-    if (root) release_object( root );
+    reply->handle = open_object( current->process, req->rootdir, req->access,
+                                 &event_ops, &name, req->attributes );
 }
 
 /* do an event operation */
@@ -365,13 +355,11 @@ DECL_HANDLER(create_keyed_event)
 {
     struct keyed_event *event;
     struct unicode_str name;
-    struct directory *root = NULL;
+    struct directory *root;
     const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 
     if (!objattr) return;
-
-    if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 ))) return;
 
     if ((event = create_keyed_event( root, &name, objattr->attributes, sd )))
     {
@@ -388,17 +376,8 @@ DECL_HANDLER(create_keyed_event)
 /* open a handle to a keyed event */
 DECL_HANDLER(open_keyed_event)
 {
-    struct unicode_str name;
-    struct directory *root = NULL;
-    struct keyed_event *event;
+    struct unicode_str name = get_req_unicode_str();
 
-    get_req_unicode_str( &name );
-    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 ))) return;
-
-    if ((event = open_object_dir( root, &name, req->attributes, &keyed_event_ops )))
-    {
-        reply->handle = alloc_handle( current->process, &event->obj, req->access, req->attributes );
-        release_object( event );
-    }
-    if (root) release_object( root );
+    reply->handle = open_object( current->process, req->rootdir, req->access,
+                                 &keyed_event_ops, &name, req->attributes );
 }

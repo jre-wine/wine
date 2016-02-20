@@ -64,6 +64,8 @@ static const struct object_ops object_type_ops =
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     no_lookup_name,               /* lookup_name */
+    directory_link_name,          /* link_name */
+    default_unlink_name,          /* unlink_name */
     no_open_file,                 /* open_file */
     no_close_handle,              /* close_handle */
     no_destroy                    /* destroy */
@@ -97,6 +99,8 @@ static const struct object_ops directory_ops =
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     directory_lookup_name,        /* lookup_name */
+    directory_link_name,          /* link_name */
+    default_unlink_name,          /* unlink_name */
     no_open_file,                 /* open_file */
     no_close_handle,              /* close_handle */
     directory_destroy             /* destroy */
@@ -173,6 +177,20 @@ static struct object *directory_lookup_name( struct object *obj, struct unicode_
     return NULL;
 }
 
+int directory_link_name( struct object *obj, struct object_name *name, struct object *parent )
+{
+    struct directory *dir = (struct directory *)parent;
+
+    if (parent->ops != &directory_ops)
+    {
+        set_error( STATUS_OBJECT_TYPE_MISMATCH );
+        return 0;
+    }
+    namespace_add( dir->entries, name );
+    name->parent = grab_object( parent );
+    return 1;
+}
+
 static void directory_destroy( struct object *obj )
 {
     struct directory *dir = (struct directory *)obj;
@@ -192,7 +210,7 @@ static struct directory *create_directory( struct directory *root, const struct 
         if (!(dir->entries = create_namespace( hash_size )))
         {
             release_object( dir );
-            dir = NULL;
+            return NULL;
         }
         if (sd) default_set_sd( &dir->obj, sd, OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
                                 DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION );
@@ -305,15 +323,7 @@ void *create_named_object_dir( struct directory *root, const struct unicode_str 
         return obj;
     }
 
-    /* ATM we can't insert objects into anything else but directories */
-    if (obj->ops != &directory_ops)
-        set_error( STATUS_OBJECT_TYPE_MISMATCH );
-    else
-    {
-        struct directory *dir = (struct directory *)obj;
-        if ((new_obj = create_object( dir->entries, ops, &new_name, &dir->obj )))
-            clear_error();
-    }
+    if ((new_obj = create_object( obj, ops, &new_name ))) clear_error();
 
     release_object( obj );
     return new_obj;
@@ -503,12 +513,11 @@ void init_directories(void)
 DECL_HANDLER(create_directory)
 {
     struct unicode_str name;
-    struct directory *dir, *root = NULL;
+    struct directory *dir, *root;
     const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 
     if (!objattr) return;
-    if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 ))) return;
 
     if ((dir = create_directory( root, &name, objattr->attributes, HASH_SIZE, sd )))
     {
@@ -522,20 +531,10 @@ DECL_HANDLER(create_directory)
 /* open a directory object */
 DECL_HANDLER(open_directory)
 {
-    struct unicode_str name;
-    struct directory *dir, *root = NULL;
+    struct unicode_str name = get_req_unicode_str();
 
-    get_req_unicode_str( &name );
-    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
-        return;
-
-    if ((dir = open_object_dir( root, &name, req->attributes, &directory_ops )))
-    {
-        reply->handle = alloc_handle( current->process, &dir->obj, req->access, req->attributes );
-        release_object( dir );
-    }
-
-    if (root) release_object( root );
+    reply->handle = open_object( current->process, req->rootdir, req->access,
+                                 &directory_ops, &name, req->attributes );
 }
 
 /* get a directory entry by index */

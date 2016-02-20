@@ -67,6 +67,8 @@ static const struct object_ops symlink_ops =
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     symlink_lookup_name,          /* lookup_name */
+    directory_link_name,          /* link_name */
+    default_unlink_name,          /* unlink_name */
     no_open_file,                 /* open_file */
     no_close_handle,              /* close_handle */
     symlink_destroy               /* destroy */
@@ -166,16 +168,14 @@ DECL_HANDLER(create_symlink)
 {
     struct symlink *symlink;
     struct unicode_str name, target;
-    struct directory *root = NULL;
+    struct directory *root;
     const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 
     if (!objattr) return;
 
     target.str = get_req_data_after_objattr( objattr, &target.len );
     target.len = (target.len / sizeof(WCHAR)) * sizeof(WCHAR);
-
-    if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 ))) return;
 
     if ((symlink = create_symlink( root, &name, objattr->attributes, &target, sd )))
     {
@@ -189,21 +189,10 @@ DECL_HANDLER(create_symlink)
 /* open a symbolic link object */
 DECL_HANDLER(open_symlink)
 {
-    struct unicode_str name;
-    struct directory *root = NULL;
-    struct symlink *symlink;
+    struct unicode_str name = get_req_unicode_str();
 
-    get_req_unicode_str( &name );
-    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
-        return;
-
-    if ((symlink = open_object_dir( root, &name, req->attributes | OBJ_OPENLINK, &symlink_ops )))
-    {
-        reply->handle = alloc_handle( current->process, &symlink->obj, req->access, req->attributes );
-        release_object( symlink );
-    }
-
-    if (root) release_object( root );
+    reply->handle = open_object( current->process, req->rootdir, req->access,
+                                 &symlink_ops, &name, req->attributes | OBJ_OPENLINK );
 }
 
 /* query a symbolic link object */

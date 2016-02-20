@@ -177,6 +177,11 @@ static const struct dwritescript_properties dwritescripts_properties[Script_Last
 };
 #undef _OT
 
+const char *debugstr_sa_script(UINT16 script)
+{
+    return script < Script_LastId ? debugstr_an((char*)&dwritescripts_properties[script].props.isoScriptCode, 4): "not defined";
+}
+
 struct dwrite_numbersubstitution {
     IDWriteNumberSubstitution IDWriteNumberSubstitution_iface;
     LONG ref;
@@ -326,6 +331,12 @@ static inline void set_break_condition(UINT32 pos, enum BreakConditionLocation l
     }
 }
 
+BOOL lb_is_newline_char(WCHAR ch)
+{
+    short c = get_table_entry(wine_linebreak_table, ch);
+    return c == b_LF || c == b_NL || c == b_CR || c == b_BK;
+}
+
 static HRESULT analyze_linebreaks(const WCHAR *text, UINT32 count, DWRITE_LINE_BREAKPOINT *breakpoints)
 {
     struct linebreaking_state state;
@@ -347,8 +358,8 @@ static HRESULT analyze_linebreaks(const WCHAR *text, UINT32 count, DWRITE_LINE_B
 
         breakpoints[i].breakConditionBefore = DWRITE_BREAK_CONDITION_CAN_BREAK;
         breakpoints[i].breakConditionAfter  = DWRITE_BREAK_CONDITION_CAN_BREAK;
-        breakpoints[i].isWhitespace = break_class[i] == b_BK || break_class[i] == b_ZW || break_class[i] == b_SP || isspaceW(text[i]);
-        breakpoints[i].isSoftHyphen = FALSE;
+        breakpoints[i].isWhitespace = !!isspaceW(text[i]);
+        breakpoints[i].isSoftHyphen = text[i] == 0x00ad /* Unicode Soft Hyphen */;
         breakpoints[i].padding = 0;
 
         /* LB1 - resolve some classes. TODO: use external algorithms for these classes. */
@@ -522,15 +533,19 @@ static HRESULT analyze_linebreaks(const WCHAR *text, UINT32 count, DWRITE_LINE_B
             case b_BB:
                 set_break_condition(i, BreakConditionAfter, DWRITE_BREAK_CONDITION_MAY_NOT_BREAK, &state);
                 break;
-            /* LB21a */
+            /* LB21a, LB21b */
             case b_HL:
-                if (i < count-2)
+                /* LB21a */
+                if (i < count-1)
                     switch (break_class[i+1])
                     {
                     case b_HY:
                     case b_BA:
                         set_break_condition(i+1, BreakConditionAfter, DWRITE_BREAK_CONDITION_MAY_NOT_BREAK, &state);
                     }
+                /* LB21b */
+                if (i > 0 && break_class[i-1] == b_SY)
+                    set_break_condition(i, BreakConditionBefore, DWRITE_BREAK_CONDITION_MAY_NOT_BREAK, &state);
                 break;
             /* LB22 */
             case b_IN:
@@ -540,6 +555,7 @@ static HRESULT analyze_linebreaks(const WCHAR *text, UINT32 count, DWRITE_LINE_B
                     {
                         case b_AL:
                         case b_HL:
+                        case b_EX:
                         case b_ID:
                         case b_IN:
                         case b_NU:

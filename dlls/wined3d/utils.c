@@ -98,11 +98,13 @@ static const struct wined3d_format_channels formats[] =
     {WINED3DFMT_R8G8B8A8_UNORM,             8,  8,  8,  8,   0,  8, 16, 24,    4,   0,     0},
     {WINED3DFMT_R8G8B8A8_UNORM_SRGB,        8,  8,  8,  8,   0,  8, 16, 24,    4,   0,     0},
     {WINED3DFMT_R8G8B8A8_UINT,              8,  8,  8,  8,   0,  8, 16, 24,    4,   0,     0},
+    {WINED3DFMT_R8G8B8A8_SINT,              8,  8,  8,  8,   0,  8, 16, 24,    4,   0,     0},
     {WINED3DFMT_R8G8B8X8_UNORM,             8,  8,  8,  0,   0,  8, 16,  0,    4,   0,     0},
     {WINED3DFMT_R16G16_UNORM,              16, 16,  0,  0,   0, 16,  0,  0,    4,   0,     0},
     {WINED3DFMT_B10G10R10A2_UNORM,         10, 10, 10,  2,  20, 10,  0, 30,    4,   0,     0},
     {WINED3DFMT_R16G16B16A16_UNORM,        16, 16, 16, 16,   0, 16, 32, 48,    8,   0,     0},
     {WINED3DFMT_R8G8_UNORM,                 8,  8,  0,  0,   0,  8,  0,  0,    2,   0,     0},
+    {WINED3DFMT_R16_UNORM,                 16,  0,  0,  0,   0,  0,  0,  0,    2,   0,     0},
     /* Luminance */
     {WINED3DFMT_L8_UNORM,                   0,  0,  0,  0,   0,  0,  0,  0,    1,   0,     0},
     {WINED3DFMT_L8A8_UNORM,                 0,  0,  0,  8,   0,  0,  0,  8,    2,   0,     0},
@@ -192,6 +194,8 @@ static const struct wined3d_format_base_flags format_base_flags[] =
     {WINED3DFMT_R16G16B16A16_FLOAT, WINED3DFMT_FLAG_FLOAT},
     {WINED3DFMT_D32_FLOAT,          WINED3DFMT_FLAG_FLOAT},
     {WINED3DFMT_S8_UINT_D24_FLOAT,  WINED3DFMT_FLAG_FLOAT},
+    {WINED3DFMT_R8G8B8A8_UINT,      WINED3DFMT_FLAG_INTEGER},
+    {WINED3DFMT_R8G8B8A8_SINT,      WINED3DFMT_FLAG_INTEGER},
 };
 
 struct wined3d_format_block_info
@@ -989,6 +993,10 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             GL_RG,                      GL_FLOAT,                         0,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_VTF,
             ARB_TEXTURE_RG,             NULL},
+    {WINED3DFMT_R32G32B32_FLOAT,        GL_RGB32F,                        GL_RGB32F,                              0,
+            GL_RGB,                     GL_FLOAT,                         0,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_RENDERTARGET,
+            ARB_TEXTURE_FLOAT,          NULL},
     {WINED3DFMT_R32G32B32A32_FLOAT,     GL_RGBA32F_ARB,                   GL_RGBA32F_ARB,                         0,
             GL_RGBA,                    GL_FLOAT,                         0,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_VTF,
@@ -1087,6 +1095,14 @@ static const struct wined3d_format_texture_info format_texture_info[] =
             | WINED3DFMT_FLAG_RENDERTARGET |  WINED3DFMT_FLAG_SRGB_READ | WINED3DFMT_FLAG_SRGB_WRITE
             | WINED3DFMT_FLAG_VTF,
             WINED3D_GL_EXT_NONE,        NULL},
+    {WINED3DFMT_R8G8B8A8_UINT,          GL_RGBA8UI,                       GL_RGBA8UI,                             0,
+            GL_RGBA_INTEGER,            GL_UNSIGNED_INT_8_8_8_8_REV,      0,
+            WINED3DFMT_FLAG_TEXTURE,
+            ARB_TEXTURE_RGB10_A2UI,     NULL},
+    {WINED3DFMT_R8G8B8A8_SINT,          GL_RGBA8I,                        GL_RGBA8I,                              0,
+            GL_RGBA_INTEGER,            GL_BYTE,                          0,
+            WINED3DFMT_FLAG_TEXTURE,
+            EXT_TEXTURE_INTEGER,        NULL},
     {WINED3DFMT_R8G8B8X8_UNORM,         GL_RGB8,                          GL_RGB8,                                0,
             GL_RGBA,                    GL_UNSIGNED_INT_8_8_8_8_REV,      0,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
@@ -1113,6 +1129,11 @@ static const struct wined3d_format_texture_info format_texture_info[] =
     {WINED3DFMT_R8G8_UNORM,             GL_RG8,                           GL_RG8,                                 0,
             GL_RG,                      GL_UNSIGNED_BYTE,                 0,
             WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
+            ARB_TEXTURE_RG,             NULL},
+    {WINED3DFMT_R16_UNORM,              GL_R16,                           GL_R16,                                 0,
+            WINED3DFMT_FLAG_TEXTURE | WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING
+            | WINED3DFMT_FLAG_RENDERTARGET,
+            GL_RED,                     GL_UNSIGNED_SHORT,                0,
             ARB_TEXTURE_RG,             NULL},
     /* Luminance */
     {WINED3DFMT_L8_UNORM,               GL_LUMINANCE8,                    GL_SLUMINANCE8_EXT,                     0,
@@ -1809,6 +1830,7 @@ static void check_fbo_compat(struct wined3d_caps_gl_ctx *ctx, struct wined3d_for
         if (status == GL_FRAMEBUFFER_COMPLETE
                 && ((format->flags[type] & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING)
                 || !(gl_info->quirks & WINED3D_QUIRK_LIMITED_TEX_FILTERING))
+                && !(format->flags[type] & WINED3DFMT_FLAG_INTEGER)
                 && format->id != WINED3DFMT_NULL && format->id != WINED3DFMT_P8_UINT
                 && format->glFormat != GL_LUMINANCE && format->glFormat != GL_LUMINANCE_ALPHA
                 && (format->red_size || format->alpha_size))
@@ -2150,10 +2172,11 @@ static void init_format_fbo_compat_info(struct wined3d_caps_gl_ctx *ctx)
 
 static BOOL init_format_texture_info(struct wined3d_adapter *adapter, struct wined3d_gl_info *gl_info)
 {
+    GLint count, multisample_types[MAX_MULTISAMPLE_TYPES];
     struct fragment_caps fragment_caps;
     struct shader_caps shader_caps;
     BOOL srgb_write;
-    unsigned int i;
+    unsigned int i, j, max_log2;
 
     adapter->fragment_pipe->get_caps(gl_info, &fragment_caps);
     adapter->shader_backend->shader_get_caps(gl_info, &shader_caps);
@@ -2269,6 +2292,34 @@ static BOOL init_format_texture_info(struct wined3d_adapter *adapter, struct win
                 format->flags[WINED3D_GL_RES_TYPE_TEX_3D] &= ~WINED3DFMT_FLAG_TEXTURE;
                 format->flags[WINED3D_GL_RES_TYPE_TEX_CUBE] &= ~WINED3DFMT_FLAG_TEXTURE;
                 format->flags[WINED3D_GL_RES_TYPE_TEX_RECT] &= ~WINED3DFMT_FLAG_TEXTURE;
+            }
+        }
+
+        if (format->glInternal && format->flags[WINED3D_GL_RES_TYPE_RB]
+                & (WINED3DFMT_FLAG_RENDERTARGET | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
+        {
+            if (gl_info->supported[ARB_INTERNALFORMAT_QUERY])
+            {
+                GL_EXTCALL(glGetInternalformativ(GL_RENDERBUFFER, format->glInternal,
+                        GL_NUM_SAMPLE_COUNTS, 1, &count));
+                checkGLcall("glGetInternalformativ(GL_NUM_SAMPLE_COUNTS)");
+                count = min(count, MAX_MULTISAMPLE_TYPES);
+                GL_EXTCALL(glGetInternalformativ(GL_RENDERBUFFER, format->glInternal,
+                        GL_SAMPLES, count, multisample_types));
+                checkGLcall("glGetInternalformativ(GL_SAMPLES)");
+                for (j = 0; j < count; ++j)
+                {
+                    if (multisample_types[j] > sizeof(format->multisample_types) * 8)
+                        continue;
+                    format->multisample_types |= 1u << (multisample_types[j] - 1);
+                }
+            }
+            else
+            {
+                max_log2 = wined3d_log2i(min(gl_info->limits.samples,
+                        sizeof(format->multisample_types) * 8));
+                for (j = 1; j <= max_log2; ++j)
+                    format->multisample_types |= 1u << ((1u << j) - 1);
             }
         }
 
@@ -2907,6 +2958,15 @@ UINT wined3d_format_calculate_size(const struct wined3d_format *format, UINT ali
 /*****************************************************************************
  * Trace formatting of useful values
  */
+const char *debug_box(const struct wined3d_box *box)
+{
+    if (!box)
+        return "(null)";
+    return wine_dbg_sprintf("(%u, %u, %u)-(%u, %u, %u)",
+            box->left, box->top, box->front,
+            box->right, box->bottom, box->back);
+}
+
 const char *debug_d3dformat(enum wined3d_format_id format_id)
 {
     switch (format_id)
@@ -3190,14 +3250,13 @@ const char *debug_d3dresourcetype(enum wined3d_resource_type resource_type)
 {
     switch (resource_type)
     {
-#define RES_TO_STR(res) case res: return #res
-        RES_TO_STR(WINED3D_RTYPE_SURFACE);
-        RES_TO_STR(WINED3D_RTYPE_VOLUME);
-        RES_TO_STR(WINED3D_RTYPE_TEXTURE);
-        RES_TO_STR(WINED3D_RTYPE_VOLUME_TEXTURE);
-        RES_TO_STR(WINED3D_RTYPE_CUBE_TEXTURE);
-        RES_TO_STR(WINED3D_RTYPE_BUFFER);
-#undef  RES_TO_STR
+#define WINED3D_TO_STR(x) case x: return #x
+        WINED3D_TO_STR(WINED3D_RTYPE_SURFACE);
+        WINED3D_TO_STR(WINED3D_RTYPE_VOLUME);
+        WINED3D_TO_STR(WINED3D_RTYPE_BUFFER);
+        WINED3D_TO_STR(WINED3D_RTYPE_TEXTURE_2D);
+        WINED3D_TO_STR(WINED3D_RTYPE_TEXTURE_3D);
+#undef WINED3D_TO_STR
         default:
             FIXME("Unrecognized resource type %#x.\n", resource_type);
             return "unrecognized";
@@ -4035,17 +4094,6 @@ void get_fog_start_end(const struct wined3d_context *context, const struct wined
             *start = 0.0f;
             *end = 0.0f;
     }
-}
-
-/* This small helper function is used to convert a bitmask into the number of masked bits */
-unsigned int count_bits(unsigned int mask)
-{
-    unsigned int count;
-    for (count = 0; mask; ++count)
-    {
-        mask &= mask - 1;
-    }
-    return count;
 }
 
 /* Note: It's the caller's responsibility to ensure values can be expressed

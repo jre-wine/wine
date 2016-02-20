@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 Hans Leidekker for CodeWeavers
+ * Copyright 2015, 2016 Hans Leidekker for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -64,9 +64,11 @@ enum writer_state
     WRITER_STATE_STARTELEMENT,
     WRITER_STATE_STARTENDELEMENT,
     WRITER_STATE_STARTATTRIBUTE,
+    WRITER_STATE_STARTCDATA,
     WRITER_STATE_ENDSTARTELEMENT,
     WRITER_STATE_TEXT,
-    WRITER_STATE_ENDELEMENT
+    WRITER_STATE_ENDELEMENT,
+    WRITER_STATE_ENDCDATA
 };
 
 struct writer
@@ -670,6 +672,43 @@ HRESULT WINAPI WsWriteEndStartElement( WS_XML_WRITER *handle, WS_ERROR *error )
     return S_OK;
 }
 
+static HRESULT write_add_attribute( struct writer *writer, const WS_XML_STRING *prefix,
+                                    const WS_XML_STRING *localname, const WS_XML_STRING *ns,
+                                    BOOL single )
+{
+    WS_XML_ATTRIBUTE *attr;
+    WS_XML_ELEMENT_NODE *elem = &writer->current->hdr;
+    HRESULT hr;
+
+    if (!(attr = heap_alloc_zero( sizeof(*attr) ))) return E_OUTOFMEMORY;
+
+    if (!prefix) prefix = elem->prefix;
+
+    attr->singleQuote = !!single;
+    if (prefix && !(attr->prefix = alloc_xml_string( prefix->bytes, prefix->length )))
+    {
+        free_attribute( attr );
+        return E_OUTOFMEMORY;
+    }
+    if (!(attr->localName = alloc_xml_string( localname->bytes, localname->length )))
+    {
+        free_attribute( attr );
+        return E_OUTOFMEMORY;
+    }
+    if (!(attr->ns = alloc_xml_string( ns->bytes, ns->length )))
+    {
+        free_attribute( attr );
+        return E_OUTOFMEMORY;
+    }
+    if ((hr = append_attribute( elem, attr )) != S_OK)
+    {
+        free_attribute( attr );
+        return hr;
+    }
+    writer->state = WRITER_STATE_STARTATTRIBUTE;
+    return S_OK;
+}
+
 /**************************************************************************
  *          WsWriteStartAttribute		[webservices.@]
  */
@@ -678,9 +717,6 @@ HRESULT WINAPI WsWriteStartAttribute( WS_XML_WRITER *handle, const WS_XML_STRING
                                       BOOL single, WS_ERROR *error )
 {
     struct writer *writer = (struct writer *)handle;
-    WS_XML_ELEMENT_NODE *elem;
-    WS_XML_ATTRIBUTE *attr;
-    HRESULT hr = E_OUTOFMEMORY;
 
     TRACE( "%p %s %s %s %d %p\n", handle, debugstr_xmlstr(prefix), debugstr_xmlstr(localname),
            debugstr_xmlstr(ns), single, error );
@@ -689,28 +725,88 @@ HRESULT WINAPI WsWriteStartAttribute( WS_XML_WRITER *handle, const WS_XML_STRING
     if (!writer || !localname || !ns) return E_INVALIDARG;
 
     if (writer->state != WRITER_STATE_STARTELEMENT) return WS_E_INVALID_OPERATION;
-    elem = (WS_XML_ELEMENT_NODE *)writer->current;
 
-    if (!(attr = heap_alloc_zero( sizeof(*attr) ))) return E_OUTOFMEMORY;
-    attr->singleQuote = !!single;
+    return write_add_attribute( writer, prefix, localname, ns, single );
+}
 
-    if (prefix && !(attr->prefix = alloc_xml_string( prefix->bytes, prefix->length )))
-        goto error;
+/**************************************************************************
+ *          WsWriteStartCData		[webservices.@]
+ */
+HRESULT WINAPI WsWriteStartCData( WS_XML_WRITER *handle, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
 
-    if (!(attr->localName = alloc_xml_string( localname->bytes, localname->length )))
-        goto error;
+    TRACE( "%p %p\n", handle, error );
+    if (error) FIXME( "ignoring error parameter\n" );
 
-    if (!(attr->ns = alloc_xml_string( ns->bytes, ns->length )))
-        goto error;
+    if (!writer) return E_INVALIDARG;
 
-    if ((hr = append_attribute( elem, attr )) != S_OK) goto error;
+    /* flush current start element if necessary */
+    if (writer->state == WRITER_STATE_STARTELEMENT && ((hr = write_endstartelement( writer )) != S_OK))
+        return hr;
 
-    writer->state = WRITER_STATE_STARTATTRIBUTE;
+    if ((hr = write_grow_buffer( writer, 9 )) != S_OK) return hr;
+    write_bytes( writer, (const BYTE *)"<![CDATA[", 9 );
+    writer->state = WRITER_STATE_STARTCDATA;
     return S_OK;
+}
 
-error:
-    free_attribute( attr );
-    return hr;
+/**************************************************************************
+ *          WsWriteEndCData		[webservices.@]
+ */
+HRESULT WINAPI WsWriteEndCData( WS_XML_WRITER *handle, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
+
+    TRACE( "%p %p\n", handle, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer) return E_INVALIDARG;
+    if (writer->state != WRITER_STATE_STARTCDATA) return WS_E_INVALID_OPERATION;
+
+    if ((hr = write_grow_buffer( writer, 3 )) != S_OK) return hr;
+    write_bytes( writer, (const BYTE *)"]]>", 3 );
+    writer->state = WRITER_STATE_ENDCDATA;
+    return S_OK;
+}
+
+static HRESULT write_add_element_node( struct writer *writer, const WS_XML_STRING *prefix,
+                                       const WS_XML_STRING *localname, const WS_XML_STRING *ns )
+{
+    struct node *node;
+    WS_XML_ELEMENT_NODE *elem, *current = &writer->current->hdr;
+    HRESULT hr;
+
+    /* flush current start element if necessary */
+    if (writer->state == WRITER_STATE_STARTELEMENT && ((hr = write_endstartelement( writer )) != S_OK))
+        return hr;
+
+    if (!prefix && current->node.nodeType == WS_XML_NODE_TYPE_ELEMENT)
+        prefix = current->prefix;
+
+    if (!(node = alloc_node( WS_XML_NODE_TYPE_ELEMENT ))) return E_OUTOFMEMORY;
+    elem = &node->hdr;
+
+    if (prefix && !(elem->prefix = alloc_xml_string( prefix->bytes, prefix->length )))
+    {
+        free_node( node );
+        return E_OUTOFMEMORY;
+    }
+    if (!(elem->localName = alloc_xml_string( localname->bytes, localname->length )))
+    {
+        free_node( node );
+        return E_OUTOFMEMORY;
+    }
+    if (!(elem->ns = alloc_xml_string( ns->bytes, ns->length )))
+    {
+        free_node( node );
+        return E_OUTOFMEMORY;
+    }
+    write_insert_node( writer, node );
+    writer->state = WRITER_STATE_STARTELEMENT;
+    return S_OK;
 }
 
 /**************************************************************************
@@ -721,9 +817,6 @@ HRESULT WINAPI WsWriteStartElement( WS_XML_WRITER *handle, const WS_XML_STRING *
                                     WS_ERROR *error )
 {
     struct writer *writer = (struct writer *)handle;
-    struct node *node;
-    WS_XML_ELEMENT_NODE *elem;
-    HRESULT hr = E_OUTOFMEMORY;
 
     TRACE( "%p %s %s %s %p\n", handle, debugstr_xmlstr(prefix), debugstr_xmlstr(localname),
            debugstr_xmlstr(ns), error );
@@ -731,33 +824,7 @@ HRESULT WINAPI WsWriteStartElement( WS_XML_WRITER *handle, const WS_XML_STRING *
 
     if (!writer || !localname || !ns) return E_INVALIDARG;
 
-    /* flush current start element */
-    if (writer->state == WRITER_STATE_STARTELEMENT)
-    {
-        if ((hr = write_startelement( writer )) != S_OK) return hr;
-        if ((hr = write_grow_buffer( writer, 1 )) != S_OK) return hr;
-        write_char( writer, '>' );
-    }
-
-    if (!(node = alloc_node( WS_XML_NODE_TYPE_ELEMENT ))) return E_OUTOFMEMORY;
-    elem = (WS_XML_ELEMENT_NODE *)node;
-
-    if (prefix && !(elem->prefix = alloc_xml_string( prefix->bytes, prefix->length )))
-        goto error;
-
-    if (!(elem->localName = alloc_xml_string( localname->bytes, localname->length )))
-        goto error;
-
-    if (!(elem->ns = alloc_xml_string( ns->bytes, ns->length )))
-        goto error;
-
-    write_insert_node( writer, node );
-    writer->state = WRITER_STATE_STARTELEMENT;
-    return S_OK;
-
-error:
-    free_node( node );
-    return hr;
+    return write_add_element_node( writer, prefix, localname, ns );
 }
 
 static inline void write_set_attribute_value( struct writer *writer, WS_XML_TEXT *text )
@@ -772,27 +839,32 @@ static inline void write_set_attribute_value( struct writer *writer, WS_XML_TEXT
 HRESULT WINAPI WsWriteText( WS_XML_WRITER *handle, const WS_XML_TEXT *text, WS_ERROR *error )
 {
     struct writer *writer = (struct writer *)handle;
-    WS_XML_UTF8_TEXT *src, *dst;
+    WS_XML_UTF8_TEXT *dst, *src = (WS_XML_UTF8_TEXT *)text;
+    HRESULT hr;
 
     TRACE( "%p %p %p\n", handle, text, error );
 
     if (!writer || !text) return E_INVALIDARG;
 
-    if (writer->state != WRITER_STATE_STARTATTRIBUTE)
-    {
-        FIXME( "can't handle writer state %u\n", writer->state );
-        return E_NOTIMPL;
-    }
     if (text->textType != WS_XML_TEXT_TYPE_UTF8)
     {
         FIXME( "text type %u not supported\n", text->textType );
         return E_NOTIMPL;
     }
-    src = (WS_XML_UTF8_TEXT *)text;
-    if (!(dst = alloc_utf8_text( src->value.bytes, src->value.length )))
-        return E_OUTOFMEMORY;
 
-    write_set_attribute_value( writer, &dst->text );
+    if (writer->state == WRITER_STATE_STARTATTRIBUTE)
+    {
+        if (!(dst = alloc_utf8_text( src->value.bytes, src->value.length )))
+            return E_OUTOFMEMORY;
+
+        write_set_attribute_value( writer, &dst->text );
+    }
+    else
+    {
+        if ((hr = write_grow_buffer( writer, src->value.length )) != S_OK) return hr;
+        write_bytes( writer, src->value.bytes, src->value.length );
+    }
+
     return S_OK;
 }
 
@@ -1113,12 +1185,153 @@ static HRESULT write_type_wsz( struct writer *writer, WS_TYPE_MAPPING mapping,
     return hr;
 }
 
+static HRESULT write_type_struct( struct writer *, WS_TYPE_MAPPING, const WS_STRUCT_DESCRIPTION *,
+                                  const void * );
+
+static HRESULT write_type_struct_field( struct writer *writer, WS_TYPE_MAPPING mapping,
+                                        const WS_FIELD_DESCRIPTION *desc, const void *value )
+{
+    HRESULT hr;
+
+    if (desc->options && desc->options != WS_FIELD_POINTER &&
+        desc->options != WS_FIELD_OPTIONAL &&
+        desc->options != (WS_FIELD_POINTER | WS_FIELD_OPTIONAL))
+    {
+        FIXME( "options 0x%x not supported\n", desc->options );
+        return E_NOTIMPL;
+    }
+
+    switch (desc->mapping)
+    {
+    case WS_ATTRIBUTE_FIELD_MAPPING:
+        if ((hr = write_add_attribute( writer, NULL, desc->localName, desc->ns, FALSE )) != S_OK)
+            return hr;
+        break;
+
+    case WS_TEXT_FIELD_MAPPING:
+        break;
+
+    default:
+        FIXME( "field mapping %u not supported\n", desc->mapping );
+        return E_NOTIMPL;
+    }
+
+    switch (desc->type)
+    {
+    case WS_STRUCT_TYPE:
+    {
+        const void * const *ptr = value;
+        if ((hr = write_type_struct( writer, mapping, desc->typeDescription, *ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_BOOL_TYPE:
+    {
+        const BOOL *ptr = value;
+        if ((hr = write_type_bool( writer, mapping, desc->typeDescription, ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_INT8_TYPE:
+    {
+        const INT8 *ptr = value;
+        if ((hr = write_type_int8( writer, mapping, desc->typeDescription, ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_INT16_TYPE:
+    {
+        const INT16 *ptr = value;
+        if ((hr = write_type_int16( writer, mapping, desc->typeDescription, ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_INT32_TYPE:
+    {
+        const INT32 *ptr = value;
+        if ((hr = write_type_int32( writer, mapping, desc->typeDescription, ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_INT64_TYPE:
+    {
+        const INT64 *ptr = value;
+        if ((hr = write_type_int64( writer, mapping, desc->typeDescription, ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_UINT8_TYPE:
+    {
+        const UINT8 *ptr = value;
+        if ((hr = write_type_uint8( writer, mapping, desc->typeDescription, ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_UINT16_TYPE:
+    {
+        const UINT16 *ptr = value;
+        if ((hr = write_type_uint16( writer, mapping, desc->typeDescription, ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_UINT32_TYPE:
+    {
+        const UINT32 *ptr = value;
+        if ((hr = write_type_uint32( writer, mapping, desc->typeDescription, ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_UINT64_TYPE:
+    {
+        const UINT64 *ptr = value;
+        if ((hr = write_type_uint64( writer, mapping, desc->typeDescription, ptr )) != S_OK) return hr;
+        break;
+    }
+    case WS_WSZ_TYPE:
+    {
+        const WCHAR * const *ptr = value;
+        if ((hr = write_type_wsz( writer, mapping, desc->typeDescription, *ptr )) != S_OK) return hr;
+        break;
+    }
+    default:
+        FIXME( "type %u not implemented\n", desc->type );
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
+}
+
+static HRESULT write_type_struct( struct writer *writer, WS_TYPE_MAPPING mapping,
+                                  const WS_STRUCT_DESCRIPTION *desc, const void *value )
+{
+    ULONG i;
+    HRESULT hr;
+    const char *ptr;
+
+    if (!desc) return E_INVALIDARG;
+
+    if (desc->structOptions)
+    {
+        FIXME( "struct options 0x%x not supported\n", desc->structOptions );
+        return E_NOTIMPL;
+    }
+
+    for (i = 0; i < desc->fieldCount; i++)
+    {
+        ptr = (const char *)value + desc->fields[i]->offset;
+        if ((hr = write_type_struct_field( writer, mapping, desc->fields[i], ptr )) != S_OK)
+            return hr;
+    }
+
+    return S_OK;
+}
+
 static HRESULT write_type( struct writer *writer, WS_TYPE_MAPPING mapping, WS_TYPE type,
                            const void *desc, WS_WRITE_OPTION option, const void *value,
                            ULONG size )
 {
     switch (type)
     {
+    case WS_STRUCT_TYPE:
+    {
+        const void * const *ptr = value;
+
+        if (!desc || option != WS_WRITE_REQUIRED_POINTER || size != sizeof(*ptr))
+            return E_INVALIDARG;
+
+        return write_type_struct( writer, mapping, desc, *ptr );
+    }
     case WS_BOOL_TYPE:
     {
         const BOOL *ptr = value;
@@ -1186,6 +1399,59 @@ static HRESULT write_type( struct writer *writer, WS_TYPE_MAPPING mapping, WS_TY
 }
 
 /**************************************************************************
+ *          WsWriteAttribute		[webservices.@]
+ */
+HRESULT WINAPI WsWriteAttribute( WS_XML_WRITER *handle, const WS_ATTRIBUTE_DESCRIPTION *desc,
+                                 WS_WRITE_OPTION option, const void *value, ULONG size,
+                                 WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
+
+    TRACE( "%p %p %u %p %u %p\n", handle, desc, option, value, size, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer || !desc || !desc->attributeLocalName || !desc->attributeNs || !value)
+        return E_INVALIDARG;
+
+    if (writer->state != WRITER_STATE_STARTELEMENT) return WS_E_INVALID_OPERATION;
+
+    if ((hr = write_add_attribute( writer, NULL, desc->attributeLocalName, desc->attributeNs,
+                                   FALSE )) != S_OK) return hr;
+
+    if ((hr = write_type( writer, WS_ATTRIBUTE_TYPE_MAPPING, desc->type, desc->typeDescription,
+                          option, value, size )) != S_OK) return hr;
+
+    writer->state = WRITER_STATE_STARTELEMENT;
+    return S_OK;
+}
+
+/**************************************************************************
+ *          WsWriteElement		[webservices.@]
+ */
+HRESULT WINAPI WsWriteElement( WS_XML_WRITER *handle, const WS_ELEMENT_DESCRIPTION *desc,
+                               WS_WRITE_OPTION option, const void *value, ULONG size,
+                               WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    HRESULT hr;
+
+    TRACE( "%p %p %u %p %u %p\n", handle, desc, option, value, size, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer || !desc || !desc->elementLocalName || !desc->elementNs || !value)
+        return E_INVALIDARG;
+
+    if ((hr = write_add_element_node( writer, NULL, desc->elementLocalName, desc->elementNs )) != S_OK)
+        return hr;
+
+    if ((hr = write_type( writer, WS_ANY_ELEMENT_TYPE_MAPPING, desc->type, desc->typeDescription,
+                          option, value, size )) != S_OK) return hr;
+
+    return write_close_element( writer );
+}
+
+/**************************************************************************
  *          WsWriteType		[webservices.@]
  */
 HRESULT WINAPI WsWriteType( WS_XML_WRITER *handle, WS_TYPE_MAPPING mapping, WS_TYPE type,
@@ -1224,6 +1490,63 @@ HRESULT WINAPI WsWriteType( WS_XML_WRITER *handle, WS_TYPE_MAPPING mapping, WS_T
     }
 
     return hr;
+}
+
+static WS_TYPE map_value_type( WS_VALUE_TYPE type )
+{
+    switch (type)
+    {
+    case WS_BOOL_VALUE_TYPE:     return WS_BOOL_TYPE;
+    case WS_INT8_VALUE_TYPE:     return WS_INT8_TYPE;
+    case WS_INT16_VALUE_TYPE:    return WS_INT16_TYPE;
+    case WS_INT32_VALUE_TYPE:    return WS_INT32_TYPE;
+    case WS_INT64_VALUE_TYPE:    return WS_INT64_TYPE;
+    case WS_UINT8_VALUE_TYPE:    return WS_UINT8_TYPE;
+    case WS_UINT16_VALUE_TYPE:   return WS_UINT16_TYPE;
+    case WS_UINT32_VALUE_TYPE:   return WS_UINT32_TYPE;
+    case WS_UINT64_VALUE_TYPE:   return WS_UINT64_TYPE;
+    case WS_FLOAT_VALUE_TYPE:    return WS_FLOAT_TYPE;
+    case WS_DOUBLE_VALUE_TYPE:   return WS_DOUBLE_TYPE;
+    case WS_DECIMAL_VALUE_TYPE:  return WS_DECIMAL_TYPE;
+    case WS_DATETIME_VALUE_TYPE: return WS_DATETIME_TYPE;
+    case WS_TIMESPAN_VALUE_TYPE: return WS_TIMESPAN_TYPE;
+    case WS_GUID_VALUE_TYPE:     return WS_GUID_TYPE;
+    default:
+        FIXME( "unhandled type %u\n", type );
+        return ~0u;
+    }
+}
+
+/**************************************************************************
+ *          WsWriteValue		[webservices.@]
+ */
+HRESULT WINAPI WsWriteValue( WS_XML_WRITER *handle, WS_VALUE_TYPE value_type, const void *value,
+                             ULONG size, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+    WS_TYPE_MAPPING mapping;
+    WS_TYPE type;
+
+    TRACE( "%p %u %p %u %p\n", handle, value_type, value, size, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer || !value || (type = map_value_type( value_type )) == ~0u) return E_INVALIDARG;
+
+    switch (writer->state)
+    {
+    case WRITER_STATE_STARTATTRIBUTE:
+        mapping = WS_ATTRIBUTE_TYPE_MAPPING;
+        break;
+
+    case WRITER_STATE_STARTELEMENT:
+        mapping = WS_ELEMENT_TYPE_MAPPING;
+        break;
+
+    default:
+        return WS_E_INVALID_FORMAT;
+    }
+
+    return write_type( writer, mapping, type, NULL, WS_WRITE_REQUIRED_VALUE, value, size );
 }
 
 /**************************************************************************

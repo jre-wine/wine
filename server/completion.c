@@ -72,6 +72,8 @@ static const struct object_ops completion_ops =
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     no_lookup_name,            /* lookup_name */
+    directory_link_name,       /* link_name */
+    default_unlink_name,       /* unlink_name */
     no_open_file,              /* open_file */
     no_close_handle,           /* close_handle */
     completion_destroy         /* destroy */
@@ -177,12 +179,11 @@ DECL_HANDLER(create_completion)
 {
     struct completion *completion;
     struct unicode_str name;
-    struct directory *root = NULL;
+    struct directory *root;
     const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 
     if (!objattr) return;
-    if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 ))) return;
 
     if ((completion = create_completion( root, &name, objattr->attributes, req->concurrent, sd )))
     {
@@ -196,23 +197,10 @@ DECL_HANDLER(create_completion)
 /* open a completion */
 DECL_HANDLER(open_completion)
 {
-    struct completion *completion;
-    struct unicode_str name;
-    struct directory *root = NULL;
+    struct unicode_str name = get_req_unicode_str();
 
-    reply->handle = 0;
-
-    get_req_unicode_str( &name );
-    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
-        return;
-
-    if ( (completion = open_object_dir( root, &name, req->attributes, &completion_ops )) != NULL )
-    {
-        reply->handle = alloc_handle( current->process, completion, req->access, req->attributes );
-        release_object( completion );
-    }
-
-    if (root) release_object( root );
+    reply->handle = open_object( current->process, req->rootdir, req->access,
+                                 &completion_ops, &name, req->attributes );
 }
 
 

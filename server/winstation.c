@@ -50,6 +50,7 @@ static void winstation_destroy( struct object *obj );
 static unsigned int winstation_map_access( struct object *obj, unsigned int access );
 static void desktop_dump( struct object *obj, int verbose );
 static struct object_type *desktop_get_type( struct object *obj );
+static int desktop_link_name( struct object *obj, struct object_name *name, struct object *parent );
 static int desktop_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
 static void desktop_destroy( struct object *obj );
 static unsigned int desktop_map_access( struct object *obj, unsigned int access );
@@ -69,6 +70,8 @@ static const struct object_ops winstation_ops =
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     no_lookup_name,               /* lookup_name */
+    directory_link_name,          /* link_name */
+    default_unlink_name,          /* unlink_name */
     no_open_file,                 /* open_file */
     winstation_close_handle,      /* close_handle */
     winstation_destroy            /* destroy */
@@ -90,6 +93,8 @@ static const struct object_ops desktop_ops =
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     no_lookup_name,               /* lookup_name */
+    desktop_link_name,            /* link_name */
+    default_unlink_name,          /* unlink_name */
     no_open_file,                 /* open_file */
     desktop_close_handle,         /* close_handle */
     desktop_destroy               /* destroy */
@@ -125,6 +130,7 @@ static struct winstation *create_winstation( struct directory *root, const struc
                 return NULL;
             }
         }
+        else clear_error();
     }
     return winstation;
 }
@@ -189,13 +195,7 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
 {
     struct desktop *desktop;
 
-    if (memchrW( name->str, '\\', name->len / sizeof(WCHAR) ))  /* no backslash allowed in name */
-    {
-        set_error( STATUS_INVALID_PARAMETER );
-        return NULL;
-    }
-
-    if ((desktop = create_named_object( winstation->desktop_names, &desktop_ops, name, attr )))
+    if ((desktop = create_named_object( &winstation->obj, winstation->desktop_names, &desktop_ops, name, attr )))
     {
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
@@ -213,6 +213,7 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
             list_add_tail( &winstation->desktops, &desktop->entry );
             list_init( &desktop->hotkeys );
         }
+        else clear_error();
     }
     return desktop;
 }
@@ -230,6 +231,24 @@ static struct object_type *desktop_get_type( struct object *obj )
     static const WCHAR name[] = {'D','e','s','k','t','o','p'};
     static const struct unicode_str str = { name, sizeof(name) };
     return get_object_type( &str );
+}
+
+static int desktop_link_name( struct object *obj, struct object_name *name, struct object *parent )
+{
+    struct winstation *winstation = (struct winstation *)parent;
+
+    if (parent->ops != &winstation_ops)
+    {
+        set_error( STATUS_OBJECT_TYPE_MISMATCH );
+        return 0;
+    }
+    if (memchrW( name->name, '\\', name->len / sizeof(WCHAR) ))  /* no backslash allowed in name */
+    {
+        set_error( STATUS_OBJECT_PATH_SYNTAX_BAD );
+        return 0;
+    }
+    namespace_add( winstation->desktop_names, name );
+    return 1;
 }
 
 static int desktop_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
@@ -253,7 +272,6 @@ static void desktop_destroy( struct object *obj )
     if (desktop->global_hooks) release_object( desktop->global_hooks );
     if (desktop->close_timeout) remove_timeout_user( desktop->close_timeout );
     list_remove( &desktop->entry );
-    unlink_named_object( obj );
     release_object( desktop->winstation );
 }
 
@@ -401,11 +419,10 @@ void close_thread_desktop( struct thread *thread )
 DECL_HANDLER(create_winstation)
 {
     struct winstation *winstation;
-    struct unicode_str name;
+    struct unicode_str name = get_req_unicode_str();
     struct directory *root = NULL;
 
     reply->handle = 0;
-    get_req_unicode_str( &name );
     if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 ))) return;
 
     if ((winstation = create_winstation( root, &name, req->attributes, req->flags )))
@@ -419,19 +436,10 @@ DECL_HANDLER(create_winstation)
 /* open a handle to a window station */
 DECL_HANDLER(open_winstation)
 {
-    struct winstation *winstation;
-    struct unicode_str name;
-    struct directory *root = NULL;
+    struct unicode_str name = get_req_unicode_str();
 
-    get_req_unicode_str( &name );
-    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 ))) return;
-
-    if ((winstation = open_object_dir( root, &name, req->attributes, &winstation_ops )))
-    {
-        reply->handle = alloc_handle( current->process, &winstation->obj, req->access, req->attributes );
-        release_object( winstation );
-    }
-    if (root) release_object( root );
+    reply->handle = open_object( current->process, req->rootdir, req->access,
+                                 &winstation_ops, &name, req->attributes );
 }
 
 
@@ -475,10 +483,9 @@ DECL_HANDLER(create_desktop)
 {
     struct desktop *desktop;
     struct winstation *winstation;
-    struct unicode_str name;
+    struct unicode_str name = get_req_unicode_str();
 
     reply->handle = 0;
-    get_req_unicode_str( &name );
     if ((winstation = get_process_winstation( current->process, WINSTA_CREATEDESKTOP )))
     {
         if ((desktop = create_desktop( &name, req->attributes, req->flags, winstation )))
@@ -494,9 +501,8 @@ DECL_HANDLER(create_desktop)
 DECL_HANDLER(open_desktop)
 {
     struct winstation *winstation;
-    struct unicode_str name;
-
-    get_req_unicode_str( &name );
+    struct object *obj;
+    struct unicode_str name = get_req_unicode_str();
 
     /* FIXME: check access rights */
     if (!req->winsta)
@@ -504,12 +510,17 @@ DECL_HANDLER(open_desktop)
     else
         winstation = (struct winstation *)get_handle_obj( current->process, req->winsta, 0, &winstation_ops );
 
-    if (winstation)
+    if (!winstation) return;
+
+    if ((obj = find_object( winstation->desktop_names, &name, req->attributes )))
     {
-        reply->handle = open_object( winstation->desktop_names, &name, &desktop_ops,
-                                     req->access, req->attributes );
-        release_object( winstation );
+        assert( obj->ops == &desktop_ops );
+        reply->handle = alloc_handle( current->process, obj, req->access, req->attributes );
+        release_object( obj );
     }
+    else set_error( STATUS_OBJECT_NAME_NOT_FOUND );
+
+    release_object( winstation );
 }
 
 /* open a handle to current input desktop */

@@ -323,7 +323,7 @@ static HRESULT query_typelib_path( REFGUID guid, WORD wMaj, WORD wMin,
             WCHAR *nameW;
             DWORD len;
 
-            if (tlib->major_version != wMaj || tlib->minor_version < wMin)
+            if ((wMaj != 0xffff || wMin != 0xffff) && (tlib->major_version != wMaj || tlib->minor_version < wMin))
                 return TYPE_E_LIBNOTREGISTERED;
 
             nameW = (WCHAR*)((BYTE*)data.lpSectionBase + tlib->name_offset);
@@ -536,7 +536,7 @@ HRESULT WINAPI LoadRegTypeLib(
         res= LoadTypeLib(bstr, ppTLib);
         SysFreeString(bstr);
 
-        if (*ppTLib)
+        if ((wVerMajor!=0xffff || wVerMinor!=0xffff) && *ppTLib)
         {
             TLIBATTR *attr;
 
@@ -9280,7 +9280,7 @@ static DWORD WMSFT_compile_custdata(struct list *custdata_list, WMSFT_TLBFile *f
 {
     WMSFT_SegContents *cdguids_seg = &file->cdguids_seg;
     DWORD ret = cdguids_seg->len, offs;
-    MSFT_CDGuid *cdguid = cdguids_seg->data;
+    MSFT_CDGuid *cdguid;
     TLBCustData *cd;
 
     if(list_empty(custdata_list))
@@ -9289,8 +9289,10 @@ static DWORD WMSFT_compile_custdata(struct list *custdata_list, WMSFT_TLBFile *f
     cdguids_seg->len += sizeof(MSFT_CDGuid) * list_count(custdata_list);
     if(!cdguids_seg->data){
         cdguid = cdguids_seg->data = heap_alloc(cdguids_seg->len);
-    }else
+    }else {
         cdguids_seg->data = heap_realloc(cdguids_seg->data, cdguids_seg->len);
+        cdguid = (MSFT_CDGuid*)((char*)cdguids_seg->data + ret);
+    }
 
     offs = ret + sizeof(MSFT_CDGuid);
     LIST_FOR_EACH_ENTRY(cd, custdata_list, TLBCustData, entry){
@@ -9982,7 +9984,7 @@ static HRESULT WINAPI ICreateTypeLib2_fnSaveAllChanges(ICreateTypeLib2 *iface)
     else
         file.header.NameOffset = -1;
 
-    file.header.CustomDataOffset = -1; /* TODO SetCustData not impl yet */
+    file.header.CustomDataOffset = WMSFT_compile_custdata(&This->custdata_list, &file);
 
     if(This->guid)
         file.header.posguid = This->guid->offset;
@@ -10132,8 +10134,16 @@ static HRESULT WINAPI ICreateTypeLib2_fnSetCustData(ICreateTypeLib2 *iface,
         REFGUID guid, VARIANT *varVal)
 {
     ITypeLibImpl *This = impl_from_ICreateTypeLib2(iface);
-    FIXME("%p %s %p - stub\n", This, debugstr_guid(guid), varVal);
-    return E_NOTIMPL;
+    TLBGuid *tlbguid;
+
+    TRACE("%p %s %p\n", This, debugstr_guid(guid), varVal);
+
+    if (!guid || !varVal)
+        return E_INVALIDARG;
+
+    tlbguid = TLB_append_guid(&This->guid_list, guid, -1);
+
+    return TLB_set_custdata(&This->custdata_list, tlbguid, varVal);
 }
 
 static HRESULT WINAPI ICreateTypeLib2_fnSetHelpStringContext(ICreateTypeLib2 *iface,

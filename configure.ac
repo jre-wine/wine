@@ -2551,6 +2551,15 @@ then
     AC_DEFINE(HAVE___BUILTIN_CLZ, 1, [Define to 1 if you have the `__builtin_clz' built-in function.])
 fi
 
+dnl Check for __builtin_popcount
+AC_CACHE_CHECK([for __builtin_popcount], ac_cv_have___builtin_popcount,
+               AC_LINK_IFELSE([AC_LANG_PROGRAM(,[[return __builtin_popcount(1)]])],
+               [ac_cv_have___builtin_popcount="yes"], [ac_cv_have___builtin_popcount="no"]))
+if test "$ac_cv_have___builtin_popcount" = "yes"
+then
+    AC_DEFINE(HAVE___BUILTIN_POPCOUNT, 1, [Define to 1 if you have the `__builtin_popcount' built-in function.])
+fi
+
 dnl *** check for the need to define platform-specific symbols
 
 case $host_cpu in
@@ -3036,6 +3045,7 @@ WINE_CONFIG_DLL(msdaps,,[clean])
 WINE_CONFIG_DLL(msdelta)
 WINE_CONFIG_DLL(msdmo,,[implib])
 WINE_CONFIG_TEST(dlls/msdmo/tests)
+WINE_CONFIG_DLL(msdrm)
 WINE_CONFIG_DLL(msftedit)
 WINE_CONFIG_DLL(msg711.acm)
 WINE_CONFIG_DLL(msgsm32.acm)
@@ -3148,7 +3158,7 @@ WINE_CONFIG_DLL(oledb32,,[clean])
 WINE_CONFIG_TEST(dlls/oledb32/tests,[clean])
 WINE_CONFIG_DLL(oledlg,,[implib,po])
 WINE_CONFIG_TEST(dlls/oledlg/tests)
-WINE_CONFIG_DLL(olepro32,,[implib])
+WINE_CONFIG_DLL(olepro32,,[clean,implib])
 WINE_CONFIG_DLL(olesvr.dll16,enable_win16)
 WINE_CONFIG_DLL(olesvr32,,[implib])
 WINE_CONFIG_DLL(olethk32)

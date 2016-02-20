@@ -47,7 +47,8 @@ extern void fatal_error( const char *err, ... );
 extern const char *get_config_dir(void);
 extern void *set_reply_data_size( data_size_t size );
 extern const struct object_attributes *get_req_object_attributes( const struct security_descriptor **sd,
-                                                                  struct unicode_str *name );
+                                                                  struct unicode_str *name,
+                                                                  struct directory **root );
 extern const void *get_req_data_after_objattr( const struct object_attributes *attr, data_size_t *len );
 extern int receive_fd( struct process *process );
 extern int send_client_fd( struct process *process, int fd, obj_handle_t handle );
@@ -77,10 +78,12 @@ static inline data_size_t get_req_data_size(void)
 }
 
 /* get the request vararg as unicode string */
-static inline void get_req_unicode_str( struct unicode_str *str )
+static inline struct unicode_str get_req_unicode_str(void)
 {
-    str->str = get_req_data();
-    str->len = (get_req_data_size() / sizeof(WCHAR)) * sizeof(WCHAR);
+    struct unicode_str ret;
+    ret.str = get_req_data();
+    ret.len = (get_req_data_size() / sizeof(WCHAR)) * sizeof(WCHAR);
+    return ret;
 }
 
 /* get the reply maximum vararg size */
@@ -374,6 +377,7 @@ DECL_HANDLER(update_rawinput_devices);
 DECL_HANDLER(get_suspend_context);
 DECL_HANDLER(set_suspend_context);
 DECL_HANDLER(create_job);
+DECL_HANDLER(open_job);
 DECL_HANDLER(assign_job);
 DECL_HANDLER(process_in_job);
 DECL_HANDLER(set_job_limits);
@@ -650,6 +654,7 @@ static const req_handler req_handlers[REQ_NB_REQUESTS] =
     (req_handler)req_get_suspend_context,
     (req_handler)req_set_suspend_context,
     (req_handler)req_create_job,
+    (req_handler)req_open_job,
     (req_handler)req_assign_job,
     (req_handler)req_process_in_job,
     (req_handler)req_set_job_limits,
@@ -2265,6 +2270,12 @@ C_ASSERT( FIELD_OFFSET(struct create_job_request, access) == 12 );
 C_ASSERT( sizeof(struct create_job_request) == 16 );
 C_ASSERT( FIELD_OFFSET(struct create_job_reply, handle) == 8 );
 C_ASSERT( sizeof(struct create_job_reply) == 16 );
+C_ASSERT( FIELD_OFFSET(struct open_job_request, access) == 12 );
+C_ASSERT( FIELD_OFFSET(struct open_job_request, attributes) == 16 );
+C_ASSERT( FIELD_OFFSET(struct open_job_request, rootdir) == 20 );
+C_ASSERT( sizeof(struct open_job_request) == 24 );
+C_ASSERT( FIELD_OFFSET(struct open_job_reply, handle) == 8 );
+C_ASSERT( sizeof(struct open_job_reply) == 16 );
 C_ASSERT( FIELD_OFFSET(struct assign_job_request, job) == 12 );
 C_ASSERT( FIELD_OFFSET(struct assign_job_request, process) == 16 );
 C_ASSERT( sizeof(struct assign_job_request) == 24 );
