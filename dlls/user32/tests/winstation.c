@@ -225,7 +225,6 @@ static void test_handles(void)
     SetLastError( 0xdeadbeef );
     w2 = CreateWindowStationA( "foo\\bar", 0, WINSTA_ALL_ACCESS, NULL );
     ok( !w2, "create station succeeded\n" );
-    todo_wine
     ok( GetLastError() == ERROR_PATH_NOT_FOUND || GetLastError() == ERROR_ACCESS_DENIED,
         "wrong error %u\n", GetLastError() );
 
@@ -278,7 +277,6 @@ static void test_handles(void)
     SetLastError( 0xdeadbeef );
     d2 = OpenDesktopA( "", 0, TRUE, DESKTOP_ALL_ACCESS );
     ok( !d2, "open mepty desktop succeeded\n" );
-    todo_wine
     ok( GetLastError() == ERROR_INVALID_HANDLE, "wrong error %u\n", GetLastError() );
 
     SetLastError( 0xdeadbeef );
@@ -289,7 +287,6 @@ static void test_handles(void)
     SetLastError( 0xdeadbeef );
     d2 = OpenDesktopA( "foo\\bar", 0, TRUE, DESKTOP_ALL_ACCESS );
     ok( !d2, "open desktop succeeded\n" );
-    todo_wine
     ok( GetLastError() == ERROR_BAD_PATHNAME, "wrong error %u\n", GetLastError() );
 
     d2 = CreateDesktopA( "foobar", NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
@@ -945,10 +942,8 @@ static void test_foregroundwindow(void)
                     if (input_desk_id == thread_desk_id)
                     {
                         ok(ret, "SetForegroundWindow failed!\n");
-                        if (hwnd)
+                        todo_wine_if (!hwnd)
                             ok(hwnd == hwnd_test , "unexpected foreground window %p\n", hwnd);
-                        else
-                            todo_wine ok(hwnd == hwnd_test , "unexpected foreground window %p\n", hwnd);
                     }
                     else
                     {
@@ -961,18 +956,14 @@ static void test_foregroundwindow(void)
                     if (input_desk_id == thread_desk_id)
                     {
                         ok(!ret, "SetForegroundWindow should fail!\n");
-                        if (hwnd)
+                        todo_wine_if (!hwnd)
                             ok(hwnd == partners[input_desk_id] , "unexpected foreground window %p\n", hwnd);
-                        else
-                            todo_wine ok(hwnd == partners[input_desk_id] , "unexpected foreground window %p\n", hwnd);
                     }
                     else
                     {
                         todo_wine ok(!ret, "SetForegroundWindow should fail!\n");
-                        if (!hwnd)
+                        todo_wine_if (hwnd)
                             ok(hwnd == 0, "unexpected foreground window %p\n", hwnd);
-                        else
-                            todo_wine ok(hwnd == 0, "unexpected foreground window %p\n", hwnd);
                     }
                 }
             }

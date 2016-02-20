@@ -405,6 +405,12 @@ static inline struct object *get_magic_handle( obj_handle_t handle )
 {
     switch(handle)
     {
+        case 0xfffffffa:  /* current thread impersonation token pseudo-handle */
+            return (struct object *)thread_get_impersonation_token( current );
+        case 0xfffffffb:  /* current thread token pseudo-handle */
+            return (struct object *)current->token;
+        case 0xfffffffc:  /* current process token pseudo-handle */
+            return (struct object *)current->process->token;
         case 0xfffffffe:  /* current thread pseudo-handle */
             return &current->obj;
         case 0x7fffffff:  /* current process pseudo-handle */
@@ -578,8 +584,7 @@ obj_handle_t open_object( struct process *process, obj_handle_t parent, unsigned
                           unsigned int attributes )
 {
     obj_handle_t handle = 0;
-    struct directory *root = NULL;
-    struct object *obj;
+    struct object *obj, *root = NULL;
 
     if (name->len >= 65534)
     {
@@ -587,9 +592,16 @@ obj_handle_t open_object( struct process *process, obj_handle_t parent, unsigned
         return 0;
     }
 
-    if (parent && !(root = get_directory_obj( process, parent, 0 ))) return 0;
+    if (parent)
+    {
+        if (name->len)
+            root = get_directory_obj( process, parent );
+        else  /* opening the object itself can work for non-directories too */
+            root = get_handle_obj( process, parent, 0, NULL );
+        if (!root) return 0;
+    }
 
-    if ((obj = open_object_dir( root, name, attributes, ops )))
+    if ((obj = open_named_object( root, ops, name, attributes )))
     {
         handle = alloc_handle( process, obj, access, attributes );
         release_object( obj );

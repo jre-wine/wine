@@ -403,32 +403,28 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
             }
         }
 
-        if (!gl_info->supported[ARB_FRAMEBUFFER_SRGB]
-                && device->state.render_states[WINED3D_RS_SRGBWRITEENABLE])
+        if (!gl_info->supported[ARB_FRAMEBUFFER_SRGB] && needs_srgb_write(context, &device->state, fb))
         {
-            if (fb->render_targets[0]->format_flags & WINED3DFMT_FLAG_SRGB_WRITE)
-            {
-                if (rt_count > 1)
-                    WARN("Clearing multiple sRGB render targets with no GL_ARB_framebuffer_sRGB "
-                            "support, this might cause graphical issues.\n");
+            if (rt_count > 1)
+                WARN("Clearing multiple sRGB render targets with no GL_ARB_framebuffer_sRGB "
+                        "support, this might cause graphical issues.\n");
 
-                corrected_color.r = color->r < wined3d_srgb_const1[0]
-                        ? color->r * wined3d_srgb_const0[3]
-                        : pow(color->r, wined3d_srgb_const0[0]) * wined3d_srgb_const0[1]
-                        - wined3d_srgb_const0[2];
-                corrected_color.r = min(max(corrected_color.r, 0.0f), 1.0f);
-                corrected_color.g = color->g < wined3d_srgb_const1[0]
-                        ? color->g * wined3d_srgb_const0[3]
-                        : pow(color->g, wined3d_srgb_const0[0]) * wined3d_srgb_const0[1]
-                        - wined3d_srgb_const0[2];
-                corrected_color.g = min(max(corrected_color.g, 0.0f), 1.0f);
-                corrected_color.b = color->b < wined3d_srgb_const1[0]
-                        ? color->b * wined3d_srgb_const0[3]
-                        : pow(color->b, wined3d_srgb_const0[0]) * wined3d_srgb_const0[1]
-                        - wined3d_srgb_const0[2];
-                corrected_color.b = min(max(corrected_color.b, 0.0f), 1.0f);
-                color = &corrected_color;
-            }
+            corrected_color.r = color->r < wined3d_srgb_const1[0]
+                    ? color->r * wined3d_srgb_const0[3]
+                    : pow(color->r, wined3d_srgb_const0[0]) * wined3d_srgb_const0[1]
+                    - wined3d_srgb_const0[2];
+            corrected_color.r = min(max(corrected_color.r, 0.0f), 1.0f);
+            corrected_color.g = color->g < wined3d_srgb_const1[0]
+                    ? color->g * wined3d_srgb_const0[3]
+                    : pow(color->g, wined3d_srgb_const0[0]) * wined3d_srgb_const0[1]
+                    - wined3d_srgb_const0[2];
+            corrected_color.g = min(max(corrected_color.g, 0.0f), 1.0f);
+            corrected_color.b = color->b < wined3d_srgb_const1[0]
+                    ? color->b * wined3d_srgb_const0[3]
+                    : pow(color->b, wined3d_srgb_const0[0]) * wined3d_srgb_const0[1]
+                    - wined3d_srgb_const0[2];
+            corrected_color.b = min(max(corrected_color.b, 0.0f), 1.0f);
+            color = &corrected_color;
         }
 
         gl_info->gl_ops.gl.p_glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -792,10 +788,6 @@ static void create_default_sampler(struct wined3d_device *device)
         checkGLcall("glGenSamplers");
         GL_EXTCALL(glSamplerParameteri(device->default_sampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
         GL_EXTCALL(glSamplerParameteri(device->default_sampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST));
-        if (gl_info->supported[EXT_TEXTURE_SRGB_DECODE])
-        {
-            GL_EXTCALL(glSamplerParameteri(device->default_sampler, GL_TEXTURE_SRGB_DECODE_EXT, GL_SKIP_DECODE_EXT));
-        }
         checkGLcall("glSamplerParamteri");
     }
     else
@@ -2021,20 +2013,26 @@ void CDECL wined3d_device_get_viewport(const struct wined3d_device *device, stru
 
 static void resolve_depth_buffer(struct wined3d_state *state)
 {
-    struct wined3d_texture *texture = state->textures[0];
-    struct wined3d_surface *depth_stencil, *surface;
+    struct wined3d_texture *dst_texture = state->textures[0];
+    struct wined3d_rendertarget_view *src_view;
     RECT src_rect, dst_rect;
 
-    if (!texture || texture->resource.type != WINED3D_RTYPE_TEXTURE_2D
-            || !(texture->resource.format_flags & WINED3DFMT_FLAG_DEPTH))
-        return;
-    surface = surface_from_resource(texture->sub_resources[0]);
-    if (!(depth_stencil = wined3d_rendertarget_view_get_surface(state->fb->depth_stencil)))
+    if (!dst_texture || dst_texture->resource.type != WINED3D_RTYPE_TEXTURE_2D
+            || !(dst_texture->resource.format_flags & WINED3DFMT_FLAG_DEPTH))
         return;
 
-    SetRect(&dst_rect, 0, 0, surface->resource.width, surface->resource.height);
-    SetRect(&src_rect, 0, 0, depth_stencil->resource.width, depth_stencil->resource.height);
-    wined3d_surface_blt(surface, &dst_rect, depth_stencil, &src_rect, 0, NULL, WINED3D_TEXF_POINT);
+    if (!(src_view = state->fb->depth_stencil))
+        return;
+    if (src_view->resource->type == WINED3D_RTYPE_BUFFER)
+    {
+        FIXME("Not supported on buffer resources.\n");
+        return;
+    }
+
+    SetRect(&dst_rect, 0, 0, dst_texture->resource.width, dst_texture->resource.height);
+    SetRect(&src_rect, 0, 0, src_view->width, src_view->height);
+    wined3d_texture_blt(dst_texture, 0, &dst_rect, wined3d_texture_from_resource(src_view->resource),
+            src_view->sub_resource_idx, &src_rect, 0, NULL, WINED3D_TEXF_POINT);
 }
 
 void CDECL wined3d_device_set_render_state(struct wined3d_device *device,
@@ -3684,7 +3682,7 @@ HRESULT CDECL wined3d_device_update_texture(struct wined3d_device *device,
                             i * src_levels + j + src_skip_levels));
                     dst_surface = surface_from_resource(wined3d_texture_get_sub_resource(dst_texture,
                             i * dst_levels + j));
-                    if (FAILED(hr = wined3d_device_update_surface(device, src_surface, NULL, dst_surface, NULL)))
+                    if (FAILED(hr = surface_upload_from_surface(dst_surface, NULL, src_surface, NULL)))
                     {
                         WARN("Failed to update surface, hr %#x.\n", hr);
                         return hr;
@@ -3856,26 +3854,6 @@ float CDECL wined3d_device_get_npatch_mode(const struct wined3d_device *device)
     }
 
     return 0.0f;
-}
-
-/* FIXME: Callers should probably use wined3d_device_update_sub_resource()
- * instead. */
-HRESULT CDECL wined3d_device_update_surface(struct wined3d_device *device,
-        struct wined3d_surface *src_surface, const RECT *src_rect,
-        struct wined3d_surface *dst_surface, const POINT *dst_point)
-{
-    TRACE("device %p, src_surface %p, src_rect %s, dst_surface %p, dst_point %s.\n",
-            device, src_surface, wine_dbgstr_rect(src_rect),
-            dst_surface, wine_dbgstr_point(dst_point));
-
-    if (src_surface->resource.pool != WINED3D_POOL_SYSTEM_MEM || dst_surface->resource.pool != WINED3D_POOL_DEFAULT)
-    {
-        WARN("source %p must be SYSTEMMEM and dest %p must be DEFAULT, returning WINED3DERR_INVALIDCALL\n",
-                src_surface, dst_surface);
-        return WINED3DERR_INVALIDCALL;
-    }
-
-    return surface_upload_from_surface(dst_surface, dst_point, src_surface, src_rect);
 }
 
 void CDECL wined3d_device_copy_resource(struct wined3d_device *device,
@@ -5066,32 +5044,6 @@ void device_resource_released(struct wined3d_device *device, struct wined3d_reso
     device_resource_remove(device, resource);
 
     TRACE("Resource released.\n");
-}
-
-struct wined3d_surface * CDECL wined3d_device_get_surface_from_dc(const struct wined3d_device *device, HDC dc)
-{
-    struct wined3d_resource *resource;
-
-    TRACE("device %p, dc %p.\n", device, dc);
-
-    if (!dc)
-        return NULL;
-
-    LIST_FOR_EACH_ENTRY(resource, &device->resources, struct wined3d_resource, resource_list_entry)
-    {
-        if (resource->type == WINED3D_RTYPE_SURFACE)
-        {
-            struct wined3d_surface *s = surface_from_resource(resource);
-
-            if (s->hDC == dc)
-            {
-                TRACE("Found surface %p for dc %p.\n", s, dc);
-                return s;
-            }
-        }
-    }
-
-    return NULL;
 }
 
 static int wined3d_sampler_compare(const void *key, const struct wine_rb_entry *entry)

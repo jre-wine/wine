@@ -470,7 +470,7 @@ enum TT_NAME_MAC_LANGUAGE_ID
     TT_NAME_MAC_LANGID_LAO,
     TT_NAME_MAC_LANGID_VIETNAMESE,
     TT_NAME_MAC_LANGID_INDONESIAN,
-    TT_NAME_MAC_LANGID_TAGALONG,
+    TT_NAME_MAC_LANGID_TAGALOG,
     TT_NAME_MAC_LANGID_MALAY_ROMAN,
     TT_NAME_MAC_LANGID_MALAY_ARABIC,
     TT_NAME_MAC_LANGID_AMHARIC,
@@ -483,11 +483,11 @@ enum TT_NAME_MAC_LANGUAGE_ID
     TT_NAME_MAC_LANGID_NYANJA,
     TT_NAME_MAC_LANGID_MALAGASY,
     TT_NAME_MAC_LANGID_ESPERANTO,
-    TT_NAME_MAC_LANGID_WELSH,
+    TT_NAME_MAC_LANGID_WELSH = 128,
     TT_NAME_MAC_LANGID_BASQUE,
     TT_NAME_MAC_LANGID_CATALAN,
     TT_NAME_MAC_LANGID_LATIN,
-    TT_NAME_MAC_LANGID_QUENCHUA,
+    TT_NAME_MAC_LANGID_QUECHUA,
     TT_NAME_MAC_LANGID_GUARANI,
     TT_NAME_MAC_LANGID_AYMARA,
     TT_NAME_MAC_LANGID_TATAR,
@@ -605,6 +605,39 @@ static const char name_mac_langid_to_locale[][10] = {
     "",
     "",
     "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
     "cy-GB",
     "eu-ES",
     "ca-ES",
@@ -707,6 +740,29 @@ struct CPAL_ColorRecord
     BYTE alpha;
 };
 
+/* COLR table */
+struct COLR_Header
+{
+    USHORT version;
+    USHORT numBaseGlyphRecords;
+    ULONG  offsetBaseGlyphRecord;
+    ULONG  offsetLayerRecord;
+    USHORT numLayerRecords;
+};
+
+struct COLR_BaseGlyphRecord
+{
+    USHORT GID;
+    USHORT firstLayerIndex;
+    USHORT numLayers;
+};
+
+struct COLR_LayerRecord
+{
+    USHORT GID;
+    USHORT paletteIndex;
+};
+
 BOOL is_face_type_supported(DWRITE_FONT_FACE_TYPE type)
 {
     return (type == DWRITE_FONT_FACE_TYPE_CFF) ||
@@ -788,6 +844,16 @@ static HRESULT opentype_otf_analyzer(IDWriteFontFileStream *stream, UINT32 *font
 static HRESULT opentype_type1_analyzer(IDWriteFontFileStream *stream, UINT32 *font_count, DWRITE_FONT_FILE_TYPE *file_type,
     DWRITE_FONT_FACE_TYPE *face_type)
 {
+#include "pshpack1.h"
+    /* Specified in Adobe TechNote #5178 */
+    struct pfm_header {
+        WORD  dfVersion;
+        DWORD dfSize;
+        char  data0[95];
+        DWORD dfDevice;
+        char  data1[12];
+    };
+#include "poppack.h"
     struct type1_header {
         WORD tag;
         char data[14];
@@ -810,6 +876,44 @@ static HRESULT opentype_type1_analyzer(IDWriteFontFileStream *stream, UINT32 *fo
     }
 
     IDWriteFontFileStream_ReleaseFileFragment(stream, context);
+
+    /* let's see if it's a .pfm metrics file */
+    if (*file_type == DWRITE_FONT_FILE_TYPE_UNKNOWN) {
+        const struct pfm_header *pfm_header;
+        UINT64 filesize;
+        DWORD offset;
+        BOOL header_checked;
+
+        hr = IDWriteFontFileStream_GetFileSize(stream, &filesize);
+        if (FAILED(hr))
+            return hr;
+
+        hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&pfm_header, 0, sizeof(*pfm_header), &context);
+        if (FAILED(hr))
+            return hr;
+
+        offset = pfm_header->dfDevice;
+        header_checked = pfm_header->dfVersion == 0x100 && pfm_header->dfSize == filesize;
+        IDWriteFontFileStream_ReleaseFileFragment(stream, context);
+
+        /* as a last test check static string in PostScript information section */
+        if (header_checked) {
+            static const char postscript[] = "PostScript";
+            char *devtype_name;
+
+            hr = IDWriteFontFileStream_ReadFileFragment(stream, (const void**)&devtype_name, offset, sizeof(postscript), &context);
+            if (FAILED(hr))
+                return hr;
+
+            if (!memcmp(devtype_name, postscript, sizeof(postscript))) {
+                *font_count = 1;
+                *file_type = DWRITE_FONT_FILE_TYPE_TYPE1_PFM;
+                *face_type = DWRITE_FONT_FACE_TYPE_TYPE1;
+            }
+
+            IDWriteFontFileStream_ReleaseFileFragment(stream, context);
+        }
+    }
 
     return *file_type != DWRITE_FONT_FILE_TYPE_UNKNOWN ? S_OK : S_FALSE;
 }
@@ -1263,7 +1367,7 @@ static void get_name_record_locale(enum OPENTYPE_PLATFORM_ID platform, USHORT la
         const char *locale_name = NULL;
 
         if (lang_id > TT_NAME_MAC_LANGID_AZER_ROMAN)
-            ERR("invalid mac lang id %d\n", lang_id);
+            WARN("invalid mac lang id %d\n", lang_id);
         else if (!name_mac_langid_to_locale[lang_id][0])
             FIXME("failed to map mac lang id %d to locale name\n", lang_id);
         else
@@ -1281,9 +1385,58 @@ static void get_name_record_locale(enum OPENTYPE_PLATFORM_ID platform, USHORT la
             strcpyW(locale, enusW);
         }
         break;
+    case OPENTYPE_PLATFORM_UNICODE:
+        strcpyW(locale, enusW);
+        break;
     default:
         FIXME("unknown platform %d\n", platform);
     }
+}
+
+static BOOL opentype_decode_namerecord(const TT_NAME_V0 *header, BYTE *storage_area, USHORT recid, IDWriteLocalizedStrings *strings)
+{
+    const TT_NameRecord *record = &header->nameRecord[recid];
+    USHORT lang_id, length, offset, encoding, platform;
+    BOOL ret = FALSE;
+
+    platform = GET_BE_WORD(record->platformID);
+    lang_id = GET_BE_WORD(record->languageID);
+    length = GET_BE_WORD(record->length);
+    offset = GET_BE_WORD(record->offset);
+    encoding = GET_BE_WORD(record->encodingID);
+
+    if (lang_id < 0x8000) {
+        WCHAR locale[LOCALE_NAME_MAX_LENGTH];
+        WCHAR *name_string;
+        UINT codepage;
+
+        codepage = get_name_record_codepage(platform, encoding);
+        get_name_record_locale(platform, lang_id, locale, sizeof(locale)/sizeof(WCHAR));
+
+        if (codepage) {
+            DWORD len = MultiByteToWideChar(codepage, 0, (LPSTR)(storage_area + offset), length, NULL, 0);
+            name_string = heap_alloc(sizeof(WCHAR) * (len+1));
+            MultiByteToWideChar(codepage, 0, (LPSTR)(storage_area + offset), length, name_string, len);
+            name_string[len] = 0;
+        }
+        else {
+            int i;
+
+            length /= sizeof(WCHAR);
+            name_string = heap_strdupnW((LPWSTR)(storage_area + offset), length);
+            for (i = 0; i < length; i++)
+                name_string[i] = GET_BE_WORD(name_string[i]);
+        }
+
+        TRACE("string %s for locale %s found\n", debugstr_w(name_string), debugstr_w(locale));
+        add_localizedstring(strings, locale, name_string);
+        heap_free(name_string);
+        ret = TRUE;
+    }
+    else
+        FIXME("handle NAME format 1\n");
+
+    return ret;
 }
 
 static HRESULT opentype_get_font_strings_from_id(const void *table_data, enum OPENTYPE_STRING_ID id, IDWriteLocalizedStrings **strings)
@@ -1291,10 +1444,10 @@ static HRESULT opentype_get_font_strings_from_id(const void *table_data, enum OP
     const TT_NAME_V0 *header;
     BYTE *storage_area = 0;
     USHORT count = 0;
+    int i, candidate;
     WORD format;
     BOOL exists;
     HRESULT hr;
-    int i;
 
     if (!table_data)
         return E_FAIL;
@@ -1313,19 +1466,17 @@ static HRESULT opentype_get_font_strings_from_id(const void *table_data, enum OP
         FIXME("unsupported NAME format %d\n", format);
     }
 
-
     storage_area = (LPBYTE)table_data + GET_BE_WORD(header->stringOffset);
     count = GET_BE_WORD(header->count);
 
     exists = FALSE;
+    candidate = -1;
     for (i = 0; i < count; i++) {
         const TT_NameRecord *record = &header->nameRecord[i];
-        USHORT lang_id, length, offset, encoding, platform;
+        USHORT platform;
 
         if (GET_BE_WORD(record->nameID) != id)
             continue;
-
-        exists = TRUE;
 
         /* Right now only accept unicode and windows encoded fonts */
         platform = GET_BE_WORD(record->platformID);
@@ -1337,53 +1488,25 @@ static HRESULT opentype_get_font_strings_from_id(const void *table_data, enum OP
             continue;
         }
 
-        /* Skip such entries for now, as it's not clear which locale is implied when
-           unicode platform is used. Also fonts tend to duplicate those strings as
-           WIN platform entries. */
-        if (platform == OPENTYPE_PLATFORM_UNICODE)
-            continue;
-
-        lang_id = GET_BE_WORD(record->languageID);
-        length = GET_BE_WORD(record->length);
-        offset = GET_BE_WORD(record->offset);
-        encoding = GET_BE_WORD(record->encodingID);
-
-        if (lang_id < 0x8000) {
-            WCHAR locale[LOCALE_NAME_MAX_LENGTH];
-            WCHAR *name_string;
-            UINT codepage;
-
-            codepage = get_name_record_codepage(platform, encoding);
-            get_name_record_locale(platform, lang_id, locale, sizeof(locale)/sizeof(WCHAR));
-
-            if (codepage) {
-                DWORD len = MultiByteToWideChar(codepage, 0, (LPSTR)(storage_area + offset), length, NULL, 0);
-                name_string = heap_alloc(sizeof(WCHAR) * (len+1));
-                MultiByteToWideChar(codepage, 0, (LPSTR)(storage_area + offset), length, name_string, len);
-                name_string[len] = 0;
-            }
-            else {
-                int i;
-
-                length /= sizeof(WCHAR);
-                name_string = heap_strdupnW((LPWSTR)(storage_area + offset), length);
-                for (i = 0; i < length; i++)
-                    name_string[i] = GET_BE_WORD(name_string[i]);
-            }
-
-            TRACE("string %s for locale %s found\n", debugstr_w(name_string), debugstr_w(locale));
-            add_localizedstring(*strings, locale, name_string);
-            heap_free(name_string);
-        }
-        else {
-            FIXME("handle NAME format 1\n");
+        /* Skip such entries for now, fonts tend to duplicate those strings as
+           WIN platform entries. If font does not have WIN or MAC entry for this id, we will
+           use this Unicode platform entry while assuming en-US locale. */
+        if (platform == OPENTYPE_PLATFORM_UNICODE) {
+            candidate = i;
             continue;
         }
+
+        if (!(exists = opentype_decode_namerecord(header, storage_area, i, *strings)))
+            continue;
     }
 
     if (!exists) {
-        IDWriteLocalizedStrings_Release(*strings);
-        *strings = NULL;
+        if (candidate != -1)
+            exists = opentype_decode_namerecord(header, storage_area, candidate, *strings);
+        else {
+            IDWriteLocalizedStrings_Release(*strings);
+            *strings = NULL;
+        }
     }
 
     return exists ? S_OK : E_FAIL;
@@ -1672,4 +1795,65 @@ HRESULT opentype_get_cpal_entries(const void *cpal, UINT32 palette, UINT32 first
     }
 
     return S_OK;
+}
+
+static int colr_compare_gid(const void *g, const void *r)
+{
+    const struct COLR_BaseGlyphRecord *record = r;
+    UINT16 glyph = *(UINT16*)g, GID = GET_BE_WORD(record->GID);
+    int ret = 0;
+
+    if (glyph > GID)
+        ret = 1;
+    else if (glyph < GID)
+        ret = -1;
+
+    return ret;
+}
+
+HRESULT opentype_get_colr_glyph(const void *colr, UINT16 glyph, struct dwrite_colorglyph *ret)
+{
+    const struct COLR_BaseGlyphRecord *record;
+    const struct COLR_Header *header = colr;
+    const struct COLR_LayerRecord *layer;
+    DWORD layerrecordoffset = GET_BE_DWORD(header->offsetLayerRecord);
+    DWORD baserecordoffset = GET_BE_DWORD(header->offsetBaseGlyphRecord);
+    WORD numbaserecords = GET_BE_WORD(header->numBaseGlyphRecords);
+
+    record = bsearch(&glyph, (BYTE*)colr + baserecordoffset, numbaserecords, sizeof(struct COLR_BaseGlyphRecord),
+        colr_compare_gid);
+    if (!record) {
+        ret->layer = 0;
+        ret->first_layer = 0;
+        ret->num_layers = 0;
+        ret->glyph = glyph;
+        ret->palette_index = 0xffff;
+        return S_FALSE;
+    }
+
+    ret->layer = 0;
+    ret->first_layer = GET_BE_WORD(record->firstLayerIndex);
+    ret->num_layers = GET_BE_WORD(record->numLayers);
+
+    layer = (struct COLR_LayerRecord*)((BYTE*)colr + layerrecordoffset) + ret->first_layer + ret->layer;
+    ret->glyph = GET_BE_WORD(layer->GID);
+    ret->palette_index = GET_BE_WORD(layer->paletteIndex);
+
+    return S_OK;
+}
+
+void opentype_colr_next_glyph(const void *colr, struct dwrite_colorglyph *glyph)
+{
+    const struct COLR_Header *header = colr;
+    const struct COLR_LayerRecord *layer;
+    DWORD layerrecordoffset = GET_BE_DWORD(header->offsetLayerRecord);
+
+    /* iterated all the way through */
+    if (glyph->layer == glyph->num_layers)
+        return;
+
+    glyph->layer++;
+    layer = (struct COLR_LayerRecord*)((BYTE*)colr + layerrecordoffset) + glyph->first_layer + glyph->layer;
+    glyph->glyph = GET_BE_WORD(layer->GID);
+    glyph->palette_index = GET_BE_WORD(layer->paletteIndex);
 }

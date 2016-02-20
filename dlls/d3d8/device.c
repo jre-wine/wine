@@ -723,7 +723,6 @@ static HRESULT WINAPI d3d8_device_GetBackBuffer(IDirect3DDevice8 *iface,
 {
     struct d3d8_device *device = impl_from_IDirect3DDevice8(iface);
     struct wined3d_swapchain *wined3d_swapchain;
-    struct wined3d_resource *wined3d_resource;
     struct wined3d_texture *wined3d_texture;
     struct d3d8_surface *surface_impl;
 
@@ -743,8 +742,7 @@ static HRESULT WINAPI d3d8_device_GetBackBuffer(IDirect3DDevice8 *iface,
         return D3DERR_INVALIDCALL;
     }
 
-    wined3d_resource = wined3d_texture_get_sub_resource(wined3d_texture, 0);
-    surface_impl = wined3d_resource_get_parent(wined3d_resource);
+    surface_impl = wined3d_texture_get_sub_resource_parent(wined3d_texture, 0);
     *backbuffer = &surface_impl->IDirect3DSurface8_iface;
     IDirect3DSurface8_AddRef(*backbuffer);
 
@@ -939,7 +937,6 @@ static HRESULT d3d8_device_create_surface(struct d3d8_device *device, UINT width
         D3DFORMAT format, DWORD flags, IDirect3DSurface8 **surface, UINT usage, D3DPOOL pool,
         D3DMULTISAMPLE_TYPE multisample_type, DWORD multisample_quality)
 {
-    struct wined3d_resource *sub_resource;
     struct wined3d_resource_desc desc;
     struct d3d8_surface *surface_impl;
     struct wined3d_texture *texture;
@@ -971,8 +968,7 @@ static HRESULT d3d8_device_create_surface(struct d3d8_device *device, UINT width
         return hr;
     }
 
-    sub_resource = wined3d_texture_get_sub_resource(texture, 0);
-    surface_impl = wined3d_resource_get_parent(sub_resource);
+    surface_impl = wined3d_texture_get_sub_resource_parent(texture, 0);
     surface_impl->parent_device = &device->IDirect3DDevice8_iface;
     *surface = &surface_impl->IDirect3DSurface8_iface;
     IDirect3DSurface8_AddRef(*surface);
@@ -2992,13 +2988,13 @@ static void CDECL device_parent_activate(struct wined3d_device_parent *device_pa
 }
 
 static HRESULT CDECL device_parent_surface_created(struct wined3d_device_parent *device_parent,
-        struct wined3d_texture *wined3d_texture, unsigned int sub_resource_idx, struct wined3d_surface *surface, void **parent,
-        const struct wined3d_parent_ops **parent_ops)
+        struct wined3d_texture *wined3d_texture, unsigned int sub_resource_idx,
+        void **parent, const struct wined3d_parent_ops **parent_ops)
 {
     struct d3d8_surface *d3d_surface;
 
-    TRACE("device_parent %p, wined3d_texture %p, sub_resource_idx %u, surface %p, parent %p, parent_ops %p.\n",
-            device_parent, wined3d_texture, sub_resource_idx, surface, parent, parent_ops);
+    TRACE("device_parent %p, wined3d_texture %p, sub_resource_idx %u, parent %p, parent_ops %p.\n",
+            device_parent, wined3d_texture, sub_resource_idx, parent, parent_ops);
 
     if (!(d3d_surface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*d3d_surface))))
         return E_OUTOFMEMORY;
@@ -3046,7 +3042,7 @@ static HRESULT CDECL device_parent_create_swapchain_texture(struct wined3d_devic
         return hr;
     }
 
-    d3d_surface = wined3d_resource_get_parent(wined3d_texture_get_sub_resource(*texture, 0));
+    d3d_surface = wined3d_texture_get_sub_resource_parent(*texture, 0);
     d3d_surface->parent_device = &device->IDirect3DDevice8_iface;
 
     return hr;

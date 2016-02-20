@@ -44,7 +44,6 @@ struct wait_queue_entry;
 struct async;
 struct async_queue;
 struct winstation;
-struct directory;
 struct object_type;
 
 
@@ -132,10 +131,13 @@ extern void namespace_add( struct namespace *namespace, struct object_name *ptr 
 extern const WCHAR *get_object_name( struct object *obj, data_size_t *len );
 extern WCHAR *get_object_full_name( struct object *obj, data_size_t *ret_len );
 extern void dump_object_name( struct object *obj );
-extern void *create_object( struct object *parent, const struct object_ops *ops,
-                            const struct unicode_str *name );
-extern void *create_named_object( struct object *parent, struct namespace *namespace, const struct object_ops *ops,
-                                  const struct unicode_str *name, unsigned int attributes );
+extern struct object *lookup_named_object( struct object *root, const struct unicode_str *name,
+                                           unsigned int attr, struct unicode_str *name_left );
+extern void *create_named_object( struct object *parent, const struct object_ops *ops,
+                                  const struct unicode_str *name, unsigned int attributes,
+                                  const struct security_descriptor *sd );
+extern void *open_named_object( struct object *parent, const struct object_ops *ops,
+                                const struct unicode_str *name, unsigned int attributes );
 extern void unlink_named_object( struct object *obj );
 extern void make_object_static( struct object *obj );
 extern struct namespace *create_namespace( unsigned int hash_size );
@@ -173,10 +175,10 @@ extern void close_objects(void);
 struct event;
 struct keyed_event;
 
-extern struct event *create_event( struct directory *root, const struct unicode_str *name,
+extern struct event *create_event( struct object *root, const struct unicode_str *name,
                                    unsigned int attr, int manual_reset, int initial_state,
                                    const struct security_descriptor *sd );
-extern struct keyed_event *create_keyed_event( struct directory *root, const struct unicode_str *name,
+extern struct keyed_event *create_keyed_event( struct object *root, const struct unicode_str *name,
                                                unsigned int attr, const struct security_descriptor *sd );
 extern struct event *get_event_obj( struct process *process, obj_handle_t handle, unsigned int access );
 extern struct keyed_event *get_keyed_event_obj( struct process *process, obj_handle_t handle, unsigned int access );
@@ -225,20 +227,15 @@ extern void release_global_atom( struct winstation *winstation, atom_t atom );
 
 /* directory functions */
 
-extern struct directory *get_directory_obj( struct process *process, obj_handle_t handle, unsigned int access );
-extern struct object *find_object_dir( struct directory *root, const struct unicode_str *name,
-                                       unsigned int attr, struct unicode_str *name_left );
-extern void *create_named_object_dir( struct directory *root, const struct unicode_str *name,
-                                      unsigned int attr, const struct object_ops *ops );
-extern void *open_object_dir( struct directory *root, const struct unicode_str *name,
-                              unsigned int attr, const struct object_ops *ops );
+extern struct object *get_root_directory(void);
+extern struct object *get_directory_obj( struct process *process, obj_handle_t handle );
 extern struct object_type *get_object_type( const struct unicode_str *name );
 extern int directory_link_name( struct object *obj, struct object_name *name, struct object *parent );
 extern void init_directories(void);
 
 /* symbolic link functions */
 
-extern struct symlink *create_symlink( struct directory *root, const struct unicode_str *name,
+extern struct symlink *create_symlink( struct object *root, const struct unicode_str *name,
                                        unsigned int attr, const struct unicode_str *target,
                                        const struct security_descriptor *sd );
 

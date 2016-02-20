@@ -10367,12 +10367,12 @@ msgstr ""
 msgid "Are you sure?"
 msgstr "您確定嗎？"
 
-#: cmd.rc:354 xcopy.rc:43
+#: cmd.rc:354 reg.rc:45 xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr "Y"
 
-#: cmd.rc:355 xcopy.rc:44
+#: cmd.rc:355 reg.rc:46 xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr "N"
@@ -10510,7 +10510,7 @@ msgstr "位於儲存裝置 %1!c! 的卷冊為 %2\n"
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr "位於儲存裝置 %1!c! 的卷冊沒有任何標貼。\n"
 
-#: cmd.rc:390
+#: cmd.rc:390 reg.rc:44
 #, fuzzy
 msgid " (Yes|No)"
 msgstr " (是|否)"
@@ -11712,29 +11712,80 @@ msgid "The operation completed successfully\n"
 msgstr "作業已成功完成\n"
 
 #: reg.rc:35
-msgid "Error: Invalid key name\n"
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "reg: Invalid key name\n"
 msgstr "錯誤：無效的索引鍵名稱\n"
 
 #: reg.rc:36
-msgid "Error: Invalid command line parameters\n"
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "reg: Invalid command line parameters\n"
 msgstr "錯誤：無效的命令列參數\n"
 
 #: reg.rc:37
 #, fuzzy
 #| msgid "Error: Unable to add keys to remote machine\n"
-msgid "Error: Unable to access remote machine\n"
+msgid "reg: Unable to access remote machine\n"
 msgstr "錯誤：無法加入索引鍵到遠端機器\n"
 
 #: reg.rc:38
+#, fuzzy
+#| msgid ""
+#| "Error: The system was unable to find the specified registry key or value\n"
 msgid ""
-"Error: The system was unable to find the specified registry key or value\n"
+"reg: The system was unable to find the specified registry key or value\n"
 msgstr "錯誤：系統無法找到指定的註冊表索引鍵或值\n"
 
 #: reg.rc:39
 #, fuzzy
 #| msgid "Unsupported type.\n"
-msgid "Error: Unsupported type\n"
+msgid "reg: Unsupported registry data type [%1]\n"
 msgstr "不受支援的型態。\n"
+
+#: reg.rc:40
+msgid "reg: The option [/d] must be followed by a valid integer\n"
+msgstr ""
+
+#: reg.rc:41
+msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
+msgstr ""
+
+#: reg.rc:42
+msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
+msgstr ""
+
+#: reg.rc:43
+#, fuzzy
+#| msgid "The specified file already exists. Do you want to replace it?"
+msgid "The registry value '%1' already exists. Do you want to overwrite it?"
+msgstr "檔案已經存在。您要取代嗎？"
+
+#: reg.rc:47
+msgid "The registry operation was cancelled\n"
+msgstr ""
+
+#: reg.rc:48 regedit.rc:204
+msgid "(Default)"
+msgstr "(預設)"
+
+#: reg.rc:49
+#, fuzzy
+#| msgid "Are you sure you want to delete these values?"
+msgid "Are you sure you want to delete the registry value '%1'?"
+msgstr "您確認要刪除這些數值嗎？"
+
+#: reg.rc:50
+#, fuzzy
+#| msgid "Are you sure you want to delete value '%s'?"
+msgid "Are you sure you want to delete all registry values in '%1'?"
+msgstr "您確認要刪除這個數值 %s 嗎？"
+
+#: reg.rc:51
+#, fuzzy
+#| msgid "Are you sure you want to delete '%1'?"
+msgid "Are you sure you want to delete the registry key '%1'?"
+msgstr "確定要刪除 %1？"
 
 #: regedit.rc:34
 msgid "&Registry"
@@ -11936,10 +11987,6 @@ msgstr "註冊表檔案 (*.reg)"
 #: regedit.rc:197
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
 msgstr "Win9x/NT4 註冊表檔案 (REGEDIT4)"
-
-#: regedit.rc:204
-msgid "(Default)"
-msgstr "(預設)"
 
 #: regedit.rc:205
 msgid "(value not set)"

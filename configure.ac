@@ -1478,9 +1478,11 @@ then
                                                  [[static int a[sizeof(gint64) > 4 ? 1 : -1]; if (a[0]) return 0;]])],
                 [AC_MSG_RESULT([yes])
                  AC_CHECK_LIB(gstreamer-1.0,gst_pad_new,[:],,[$GSTREAMER_LIBS])],
-                [AC_MSG_RESULT([no])])])])
+                [AC_MSG_RESULT([no])
+                 ac_glib2_broken=yes
+                 WINE_NOTICE([glib-2.0 pkgconfig configuration is for the wrong architecture, winegstreamer won't be built.])])])])
 fi
-WINE_NOTICE_WITH(gstreamer,[test "x$ac_cv_lib_gstreamer_1_0_gst_pad_new" != xyes -a "x$ac_cv_header_QuickTime_ImageCompression_h" != xyes],
+WINE_NOTICE_WITH(gstreamer,[test "x$ac_glib2_broken" != xyes -a "x$ac_cv_lib_gstreamer_1_0_gst_pad_new" != xyes -a "x$ac_cv_header_QuickTime_ImageCompression_h" != xyes ],
                  [gstreamer-1.0 base plugins ${notice_platform}development files not found, gstreamer support disabled])
 test "x$ac_cv_lib_gstreamer_1_0_gst_pad_new" = xyes || enable_winegstreamer=${enable_winegstreamer:-no}
 
@@ -1708,7 +1710,8 @@ WINE_CHECK_SONAME(odbc,SQLConnect,,[AC_DEFINE_UNQUOTED(SONAME_LIBODBC,["libodbc.
 dnl **** Check for libnetapi ****
 if test "x$with_netapi" != "xno"
 then
-    WINE_CHECK_SONAME(netapi,libnetapi_init,,[AC_DEFINE_UNQUOTED(SONAME_LIBNETAPI,["libnetapi.$LIBEXT"])])
+    WINE_PACKAGE_FLAGS(NETAPI,[netapi],,,,
+      [WINE_CHECK_SONAME(netapi,libnetapi_init,,[AC_DEFINE_UNQUOTED(SONAME_LIBNETAPI,["libnetapi.$LIBEXT"])],[$NETAPI_LIBS])])
 fi
 
 dnl **** Check for any sound system ****
@@ -2634,11 +2637,13 @@ WINE_CONFIG_TEST(dlls/advpack/tests)
 WINE_CONFIG_DLL(amstream,,[clean])
 WINE_CONFIG_TEST(dlls/amstream/tests)
 WINE_CONFIG_DLL(api-ms-win-core-com-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-core-com-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-console-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-datetime-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-datetime-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-debug-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-debug-l1-1-1)
+WINE_CONFIG_DLL(api-ms-win-core-delayload-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-errorhandling-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-errorhandling-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-errorhandling-l1-1-2)
@@ -2656,8 +2661,11 @@ WINE_CONFIG_DLL(api-ms-win-core-interlocked-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-interlocked-l1-2-0)
 WINE_CONFIG_DLL(api-ms-win-core-io-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-kernel32-legacy-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-core-kernel32-legacy-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-libraryloader-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-libraryloader-l1-1-1)
+WINE_CONFIG_DLL(api-ms-win-core-libraryloader-l1-2-0)
+WINE_CONFIG_DLL(api-ms-win-core-localization-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-localization-l1-2-0)
 WINE_CONFIG_DLL(api-ms-win-core-localization-l1-2-1)
 WINE_CONFIG_DLL(api-ms-win-core-localization-obsolete-l1-1-0)
@@ -2685,6 +2693,7 @@ WINE_CONFIG_DLL(api-ms-win-core-synch-l1-2-0)
 WINE_CONFIG_DLL(api-ms-win-core-sysinfo-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-sysinfo-l1-2-0)
 WINE_CONFIG_DLL(api-ms-win-core-sysinfo-l1-2-1)
+WINE_CONFIG_DLL(api-ms-win-core-threadpool-l1-2-0)
 WINE_CONFIG_DLL(api-ms-win-core-threadpool-legacy-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-timezone-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-url-l1-1-0)
@@ -2692,7 +2701,9 @@ WINE_CONFIG_DLL(api-ms-win-core-util-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-winrt-error-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-winrt-error-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-winrt-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-core-winrt-registration-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-winrt-string-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-core-wow64-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-xstate-l2-1-0)
 WINE_CONFIG_DLL(api-ms-win-crt-conio-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-crt-convert-l1-1-0)
@@ -2718,6 +2729,7 @@ WINE_CONFIG_DLL(api-ms-win-downlevel-shlwapi-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-downlevel-shlwapi-l2-1-0)
 WINE_CONFIG_DLL(api-ms-win-downlevel-user32-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-downlevel-version-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-eventing-classicprovider-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-eventing-provider-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-ntuser-dc-access-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-security-base-l1-1-0)
@@ -3449,6 +3461,7 @@ WINE_CONFIG_PROGRAM(extrac32,,[install])
 WINE_CONFIG_PROGRAM(findstr,,[install])
 WINE_CONFIG_PROGRAM(hh,,[install])
 WINE_CONFIG_PROGRAM(hostname,,[install,po])
+WINE_CONFIG_PROGRAM(icacls,,[install])
 WINE_CONFIG_PROGRAM(icinfo,,[install])
 WINE_CONFIG_PROGRAM(iexplore,,[install])
 WINE_CONFIG_PROGRAM(ipconfig,,[install,po])

@@ -40,30 +40,6 @@ BOOL volume_prepare_system_memory(struct wined3d_volume *volume)
     return TRUE;
 }
 
-void wined3d_volume_get_pitch(const struct wined3d_volume *volume, UINT *row_pitch, UINT *slice_pitch)
-{
-    const struct wined3d_format *format = volume->resource.format;
-
-    if (volume->container->resource.format_flags & WINED3DFMT_FLAG_BLOCKS)
-    {
-        /* Since compressed formats are block based, pitch means the amount of
-         * bytes to the next row of block rather than the next row of pixels. */
-        UINT row_block_count = (volume->resource.width + format->block_width - 1) / format->block_width;
-        UINT slice_block_count = (volume->resource.height + format->block_height - 1) / format->block_height;
-        *row_pitch = row_block_count * format->block_byte_count;
-        *slice_pitch = *row_pitch * slice_block_count;
-    }
-    else
-    {
-        unsigned char alignment = volume->resource.device->surface_alignment;
-        *row_pitch = format->byte_count * volume->resource.width;  /* Bytes / row */
-        *row_pitch = (*row_pitch + alignment - 1) & ~(alignment - 1);
-        *slice_pitch = *row_pitch * volume->resource.height;
-    }
-
-    TRACE("Returning row pitch %u, slice pitch %u.\n", *row_pitch, *slice_pitch);
-}
-
 /* This call just uploads data, the caller is responsible for binding the
  * correct texture. */
 /* Context activation is done by the caller. */
@@ -95,7 +71,7 @@ void wined3d_volume_upload_data(struct wined3d_volume *volume, const struct wine
         dst_row_pitch = width * format->conv_byte_count;
         dst_slice_pitch = dst_row_pitch * height;
 
-        wined3d_volume_get_pitch(volume, &src_row_pitch, &src_slice_pitch);
+        wined3d_texture_get_pitch(volume->container, volume->texture_level, &src_row_pitch, &src_slice_pitch);
 
         converted_mem = HeapAlloc(GetProcessHeap(), 0, dst_slice_pitch * depth);
         format->convert(data->addr, converted_mem, src_row_pitch, src_slice_pitch,
@@ -457,34 +433,6 @@ static void volume_unload(struct wined3d_resource *resource)
     resource_unload(resource);
 }
 
-static BOOL volume_check_block_align(const struct wined3d_volume *volume,
-        const struct wined3d_box *box)
-{
-    UINT width_mask, height_mask;
-    const struct wined3d_format *format = volume->resource.format;
-
-    if (!box)
-        return TRUE;
-
-    /* This assumes power of two block sizes, but NPOT block sizes would be
-     * silly anyway.
-     *
-     * This also assumes that the format's block depth is 1. */
-    width_mask = format->block_width - 1;
-    height_mask = format->block_height - 1;
-
-    if (box->left & width_mask)
-        return FALSE;
-    if (box->top & height_mask)
-        return FALSE;
-    if (box->right & width_mask && box->right != volume->resource.width)
-        return FALSE;
-    if (box->bottom & height_mask && box->bottom != volume->resource.height)
-        return FALSE;
-
-    return TRUE;
-}
-
 static BOOL wined3d_volume_check_box_dimensions(const struct wined3d_volume *volume,
         const struct wined3d_box *box)
 {
@@ -536,7 +484,8 @@ HRESULT wined3d_volume_map(struct wined3d_volume *volume,
         WARN("Map box is invalid.\n");
         return WINED3DERR_INVALIDCALL;
     }
-    if ((fmt_flags & WINED3DFMT_FLAG_BLOCKS) && !volume_check_block_align(volume, box))
+    if ((fmt_flags & WINED3DFMT_FLAG_BLOCKS) && box
+            && !wined3d_texture_check_block_align(volume->container, volume->texture_level, box))
     {
         WARN("Map box %s is misaligned for %ux%u blocks.\n",
                 debug_box(box), format->block_width, format->block_height);
@@ -607,7 +556,8 @@ HRESULT wined3d_volume_map(struct wined3d_volume *volume,
     }
     else
     {
-        wined3d_volume_get_pitch(volume, &map_desc->row_pitch, &map_desc->slice_pitch);
+        wined3d_texture_get_pitch(volume->container, volume->texture_level,
+                &map_desc->row_pitch, &map_desc->slice_pitch);
     }
 
     if (!box)

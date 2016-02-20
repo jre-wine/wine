@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "dwrite_2.h"
+#include "dwrite_3.h"
 #include "d2d1.h"
 
 #include "wine/debug.h"
@@ -115,8 +115,9 @@ extern HRESULT convert_fontface_to_logfont(IDWriteFontFace*, LOGFONTW*) DECLSPEC
 extern HRESULT create_numbersubstitution(DWRITE_NUMBER_SUBSTITUTION_METHOD,const WCHAR *locale,BOOL,IDWriteNumberSubstitution**) DECLSPEC_HIDDEN;
 extern HRESULT create_textformat(const WCHAR*,IDWriteFontCollection*,DWRITE_FONT_WEIGHT,DWRITE_FONT_STYLE,DWRITE_FONT_STRETCH,
                                  FLOAT,const WCHAR*,IDWriteTextFormat**) DECLSPEC_HIDDEN;
-extern HRESULT create_textlayout(const WCHAR*,UINT32,IDWriteTextFormat*,FLOAT,FLOAT,IDWriteTextLayout**) DECLSPEC_HIDDEN;
-extern HRESULT create_gdicompat_textlayout(const WCHAR*,UINT32,IDWriteTextFormat*,FLOAT,FLOAT,FLOAT,const DWRITE_MATRIX*,BOOL,IDWriteTextLayout**) DECLSPEC_HIDDEN;
+extern HRESULT create_textlayout(IDWriteFactory2*,const WCHAR*,UINT32,IDWriteTextFormat*,FLOAT,FLOAT,IDWriteTextLayout**) DECLSPEC_HIDDEN;
+extern HRESULT create_gdicompat_textlayout(IDWriteFactory2*,const WCHAR*,UINT32,IDWriteTextFormat*,FLOAT,FLOAT,FLOAT,
+    const DWRITE_MATRIX*,BOOL,IDWriteTextLayout**) DECLSPEC_HIDDEN;
 extern HRESULT create_trimmingsign(IDWriteFactory2*,IDWriteTextFormat*,IDWriteInlineObject**) DECLSPEC_HIDDEN;
 extern HRESULT create_typography(IDWriteTypography**) DECLSPEC_HIDDEN;
 extern HRESULT create_gdiinterop(IDWriteFactory2*,IDWriteGdiInterop**) DECLSPEC_HIDDEN;
@@ -142,6 +143,10 @@ extern HRESULT get_family_names_from_stream(IDWriteFontFileStream*,UINT32,DWRITE
 extern HRESULT create_colorglyphenum(FLOAT,FLOAT,const DWRITE_GLYPH_RUN*,const DWRITE_GLYPH_RUN_DESCRIPTION*,DWRITE_MEASURING_MODE,
     const DWRITE_MATRIX*,UINT32,IDWriteColorGlyphRunEnumerator**) DECLSPEC_HIDDEN;
 extern BOOL lb_is_newline_char(WCHAR) DECLSPEC_HIDDEN;
+extern HRESULT create_system_fontfallback(IDWriteFactory2*,IDWriteFontFallback**) DECLSPEC_HIDDEN;
+extern void    release_system_fontfallback(IDWriteFontFallback*) DECLSPEC_HIDDEN;
+extern HRESULT create_matching_font(IDWriteFontCollection*,const WCHAR*,DWRITE_FONT_WEIGHT,DWRITE_FONT_STYLE,DWRITE_FONT_STRETCH,
+    IDWriteFont**) DECLSPEC_HIDDEN;
 
 /* Opentype font table functions */
 struct dwrite_font_props {
@@ -164,6 +169,19 @@ extern BOOL opentype_get_vdmx_size(const void*,INT,UINT16*,UINT16*) DECLSPEC_HID
 extern UINT32 opentype_get_cpal_palettecount(const void*) DECLSPEC_HIDDEN;
 extern UINT32 opentype_get_cpal_paletteentrycount(const void*) DECLSPEC_HIDDEN;
 extern HRESULT opentype_get_cpal_entries(const void*,UINT32,UINT32,UINT32,DWRITE_COLOR_F*) DECLSPEC_HIDDEN;
+
+struct dwrite_colorglyph {
+    USHORT layer; /* [0, num_layers) index indicating current layer */
+    /* base glyph record data, set once on initialization */
+    USHORT first_layer;
+    USHORT num_layers;
+    /* current layer record data, updated every time glyph is switched to next layer */
+    UINT16 glyph;
+    UINT16 palette_index;
+};
+
+extern HRESULT opentype_get_colr_glyph(const void*,UINT16,struct dwrite_colorglyph*) DECLSPEC_HIDDEN;
+extern void opentype_colr_next_glyph(const void*,struct dwrite_colorglyph*) DECLSPEC_HIDDEN;
 
 enum gasp_flags {
     GASP_GRIDFIT             = 0x0001,
@@ -199,7 +217,7 @@ extern BOOL freetype_is_monospaced(IDWriteFontFace2*) DECLSPEC_HIDDEN;
 extern HRESULT freetype_get_glyphrun_outline(IDWriteFontFace2*,FLOAT,UINT16 const*,FLOAT const*, DWRITE_GLYPH_OFFSET const*,
     UINT32,BOOL,IDWriteGeometrySink*) DECLSPEC_HIDDEN;
 extern UINT16 freetype_get_glyphcount(IDWriteFontFace2*) DECLSPEC_HIDDEN;
-extern UINT16 freetype_get_glyphindex(IDWriteFontFace2*,UINT32,INT) DECLSPEC_HIDDEN;
+extern void freetype_get_glyphs(IDWriteFontFace2*,INT,UINT32 const*,UINT32,UINT16*) DECLSPEC_HIDDEN;
 extern BOOL freetype_has_kerning_pairs(IDWriteFontFace2*) DECLSPEC_HIDDEN;
 extern INT32 freetype_get_kerning_pair_adjustment(IDWriteFontFace2*,UINT16,UINT16) DECLSPEC_HIDDEN;
 extern void freetype_get_glyph_bbox(struct dwrite_glyphbitmap*) DECLSPEC_HIDDEN;

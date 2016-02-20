@@ -374,7 +374,7 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
     } else  if(*p == '+')
         p++;
 
-    while(isdigitW(*p)) {
+    while(*p>='0' && *p<='9') {
         found_digit = TRUE;
         hlp = d*10+*(p++)-'0';
         if(d>MSVCRT_UI64_MAX/10 || hlp<d) {
@@ -383,14 +383,14 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
         } else
             d = hlp;
     }
-    while(isdigitW(*p)) {
+    while(*p>='0' && *p<='9') {
         exp++;
         p++;
     }
     if(*p == *locinfo->lconv->decimal_point)
         p++;
 
-    while(isdigitW(*p)) {
+    while(*p>='0' && *p<='9') {
         found_digit = TRUE;
         hlp = d*10+*(p++)-'0';
         if(d>MSVCRT_UI64_MAX/10 || hlp<d)
@@ -399,7 +399,7 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
         d = hlp;
         exp--;
     }
-    while(isdigitW(*p))
+    while(*p>='0' && *p<='9')
         p++;
 
     if(!found_digit) {
@@ -418,8 +418,8 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
         } else if(*p == '+')
             p++;
 
-        if(isdigitW(*p)) {
-            while(isdigitW(*p)) {
+        if(*p>='0' && *p<='9') {
+            while(*p>='0' && *p<='9') {
                 if(e>INT_MAX/10 || (e=e*10+*p-'0')<0)
                     e = INT_MAX;
                 p++;
@@ -644,6 +644,22 @@ double CDECL MSVCRT__wtof(const MSVCRT_wchar_t *str)
 double CDECL MSVCRT__wtof_l(const MSVCRT_wchar_t *str, MSVCRT__locale_t locale)
 {
     return MSVCRT__wcstod_l(str, NULL, locale);
+}
+
+/*********************************************************************
+ *              _wcstof_l  (MSVCR120.@)
+ */
+float CDECL MSVCRT__wcstof_l( const MSVCRT_wchar_t *str, MSVCRT_wchar_t **end, MSVCRT__locale_t locale )
+{
+    return MSVCRT__wcstod_l(str, end, locale);
+}
+
+/*********************************************************************
+ *              wcstof  (MSVCR120.@)
+ */
+float CDECL MSVCRT_wcstof( const MSVCRT_wchar_t *str, MSVCRT_wchar_t **end )
+{
+    return MSVCRT__wcstof_l(str, end, NULL);
 }
 
 /*********************************************************************
@@ -1974,7 +1990,7 @@ __int64 CDECL MSVCRT__wcstoi64_l(const MSVCRT_wchar_t *nptr,
         MSVCRT_wchar_t cur = tolowerW(*nptr);
         int v;
 
-        if(isdigitW(cur)) {
+        if(cur>='0' && cur<='9') {
             if(cur >= '0'+base)
                 break;
             v = cur-'0';
@@ -2083,6 +2099,22 @@ MSVCRT_long __cdecl MSVCRT__wtol(const MSVCRT_wchar_t *str)
 }
 
 /*********************************************************************
+ *  _wtoll_l (MSVCR120.@)
+ */
+MSVCRT_longlong __cdecl MSVCRT__wtoll_l(const MSVCRT_wchar_t *str, MSVCRT__locale_t locale)
+{
+    return MSVCRT__wcstoi64_l(str, NULL, 10, locale);
+}
+
+/*********************************************************************
+ *  _wtoll (MSVCR120.@)
+ */
+MSVCRT_longlong __cdecl MSVCRT__wtoll(const MSVCRT_wchar_t *str)
+{
+    return MSVCRT__wtoll_l(str, NULL);
+}
+
+/*********************************************************************
  *  _wcstoui64_l (MSVCRT.@)
  *
  * FIXME: locale parameter is ignored
@@ -2123,7 +2155,7 @@ unsigned __int64 CDECL MSVCRT__wcstoui64_l(const MSVCRT_wchar_t *nptr,
         MSVCRT_wchar_t cur = tolowerW(*nptr);
         int v;
 
-        if(isdigitW(cur)) {
+        if(cur>='0' && cur<='9') {
             if(cur >= '0'+base)
                 break;
             v = *nptr-'0';

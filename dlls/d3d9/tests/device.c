@@ -668,11 +668,7 @@ static void test_fvf_decl_conversion(void)
         hr = IDirect3DDevice9_GetFVF(device, &fvf);
         ok(SUCCEEDED(hr), "Test %u: Failed to get FVF, hr %#x.\n", i, hr);
 
-        if (decl_to_fvf_tests[i].todo)
-            todo_wine ok(fvf == decl_to_fvf_tests[i].fvf,
-                    "Test %u: Got unexpected FVF %#x, expected %#x.\n",
-                    i, fvf, decl_to_fvf_tests[i].fvf);
-        else
+        todo_wine_if (decl_to_fvf_tests[i].todo)
             ok(fvf == decl_to_fvf_tests[i].fvf,
                     "Test %u: Got unexpected FVF %#x, expected %#x.\n",
                     i, fvf, decl_to_fvf_tests[i].fvf);
@@ -3681,10 +3677,8 @@ static void test_wndproc(void)
          * But sometimes focus-follows-mouse WMs also temporarily drop window focus, which makes
          * mark the device lost, then not reset, causing the test to succeed for the wrong reason. */
         hr = IDirect3DDevice9_TestCooperativeLevel(device);
-        if (hr == D3DERR_DEVICENOTRESET)
+        todo_wine_if (hr != D3DERR_DEVICENOTRESET)
             ok(hr == D3DERR_DEVICENOTRESET, "Got unexpected hr %#x.\n", hr);
-        else
-            todo_wine ok(hr == D3DERR_DEVICENOTRESET, "Got unexpected hr %#x.\n", hr);
 
         expect_messages = tests[i].focus_loss_messages;
         /* SetForegroundWindow is a poor replacement for the user pressing alt-tab or
@@ -4483,18 +4477,12 @@ static void test_window_style(void)
 
         style = GetWindowLongA(device_window, GWL_STYLE);
         expected_style = device_style | tests[i].style;
-        if (tests[i].device_flags & CREATE_DEVICE_NOWINDOWCHANGES)
-            todo_wine ok(style == expected_style, "Expected device window style %#x, got %#x, i=%u.\n",
-                    expected_style, style, i);
-        else
+        todo_wine_if (tests[i].device_flags & CREATE_DEVICE_NOWINDOWCHANGES)
             ok(style == expected_style, "Expected device window style %#x, got %#x, i=%u.\n",
                     expected_style, style, i);
         style = GetWindowLongA(device_window, GWL_EXSTYLE);
         expected_style = device_exstyle | tests[i].exstyle;
-        if (tests[i].device_flags & CREATE_DEVICE_NOWINDOWCHANGES)
-            todo_wine ok(style == expected_style, "Expected device window extended style %#x, got %#x, i=%u.\n",
-                    expected_style, style, i);
-        else
+        todo_wine_if (tests[i].device_flags & CREATE_DEVICE_NOWINDOWCHANGES)
             ok(style == expected_style, "Expected device window extended style %#x, got %#x, i=%u.\n",
                     expected_style, style, i);
 
@@ -8873,9 +8861,7 @@ static void test_update_volumetexture(void)
         ok(SUCCEEDED(hr), "Failed to create volume texture, hr %#x, case %u.\n", hr, i);
 
         hr = IDirect3DDevice9_UpdateTexture(device, (IDirect3DBaseTexture9 *)src, (IDirect3DBaseTexture9 *)dst);
-        if (FAILED(hr))
-            todo_wine ok(SUCCEEDED(hr), "Failed to update texture, hr %#x, case %u.\n", hr, i);
-        else
+        todo_wine_if (FAILED(hr))
             ok(SUCCEEDED(hr), "Failed to update texture, hr %#x, case %u.\n", hr, i);
 
         IDirect3DVolumeTexture9_Release(src);
@@ -10743,6 +10729,32 @@ static void test_swapchain_parameters(void)
     DestroyWindow(window);
 }
 
+static void test_check_device_format(void)
+{
+    IDirect3D9 *d3d;
+    HRESULT hr;
+
+    d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+
+    if (IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, D3DUSAGE_QUERY_SRGBWRITE, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8) != D3D_OK)
+    {
+        skip("D3DFMT_A8R8G8B8 textures with SRGBWRITE not supported.\n");
+    }
+    else
+    {
+        hr = IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL,
+                D3DFMT_X8R8G8B8, D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_SRGBWRITE, D3DRTYPE_SURFACE, D3DFMT_A8R8G8B8);
+        ok(hr == D3D_OK, "Got unexpected hr %#x.\n", hr);
+        hr = IDirect3D9_CheckDeviceFormat(d3d, 0, D3DDEVTYPE_HAL,
+                D3DFMT_X8R8G8B8, D3DUSAGE_QUERY_SRGBWRITE, D3DRTYPE_SURFACE, D3DFMT_A8R8G8B8);
+        ok(FAILED(hr), "Got unexpected hr %#x.\n", hr);
+    }
+
+    IDirect3D9_Release(d3d);
+}
+
 START_TEST(device)
 {
     WNDCLASSA wc = {0};
@@ -10856,6 +10868,7 @@ START_TEST(device)
     test_lost_device();
     test_resource_priority();
     test_swapchain_parameters();
+    test_check_device_format();
 
     UnregisterClassA("d3d9_test_wc", GetModuleHandleA(NULL));
 }

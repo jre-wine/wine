@@ -46,6 +46,8 @@ static struct list winstation_list = LIST_INIT(winstation_list);
 static void winstation_dump( struct object *obj, int verbose );
 static struct object_type *winstation_get_type( struct object *obj );
 static int winstation_close_handle( struct object *obj, struct process *process, obj_handle_t handle );
+static struct object *winstation_lookup_name( struct object *obj, struct unicode_str *name,
+                                              unsigned int attr );
 static void winstation_destroy( struct object *obj );
 static unsigned int winstation_map_access( struct object *obj, unsigned int access );
 static void desktop_dump( struct object *obj, int verbose );
@@ -69,7 +71,7 @@ static const struct object_ops winstation_ops =
     winstation_map_access,        /* map_access */
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
-    no_lookup_name,               /* lookup_name */
+    winstation_lookup_name,       /* lookup_name */
     directory_link_name,          /* link_name */
     default_unlink_name,          /* unlink_name */
     no_open_file,                 /* open_file */
@@ -103,18 +105,12 @@ static const struct object_ops desktop_ops =
 #define DESKTOP_ALL_ACCESS 0x01ff
 
 /* create a winstation object */
-static struct winstation *create_winstation( struct directory *root, const struct unicode_str *name,
+static struct winstation *create_winstation( struct object *root, const struct unicode_str *name,
                                              unsigned int attr, unsigned int flags )
 {
     struct winstation *winstation;
 
-    if (memchrW( name->str, '\\', name->len / sizeof(WCHAR) ))  /* no backslash allowed in name */
-    {
-        set_error( STATUS_INVALID_PARAMETER );
-        return NULL;
-    }
-
-    if ((winstation = create_named_object_dir( root, name, attr, &winstation_ops )))
+    if ((winstation = create_named_object( root, &winstation_ops, name, attr, NULL )))
     {
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
@@ -153,6 +149,28 @@ static struct object_type *winstation_get_type( struct object *obj )
 static int winstation_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
 {
     return (process->winstation != handle);
+}
+
+static struct object *winstation_lookup_name( struct object *obj, struct unicode_str *name,
+                                              unsigned int attr )
+{
+    struct winstation *winstation = (struct winstation *)obj;
+    struct object *found;
+
+    assert( obj->ops == &winstation_ops );
+
+    if (!name) return NULL;  /* open the winstation itself */
+
+    if (memchrW( name->str, '\\', name->len / sizeof(WCHAR) ))  /* no backslash allowed in name */
+    {
+        set_error( STATUS_OBJECT_PATH_SYNTAX_BAD );
+        return NULL;
+    }
+
+    if ((found = find_object( winstation->desktop_names, name, attr )))
+        name->len = 0;
+
+    return found;
 }
 
 static void winstation_destroy( struct object *obj )
@@ -195,7 +213,7 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
 {
     struct desktop *desktop;
 
-    if ((desktop = create_named_object( &winstation->obj, winstation->desktop_names, &desktop_ops, name, attr )))
+    if ((desktop = create_named_object( &winstation->obj, &desktop_ops, name, attr, NULL )))
     {
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
@@ -420,10 +438,10 @@ DECL_HANDLER(create_winstation)
 {
     struct winstation *winstation;
     struct unicode_str name = get_req_unicode_str();
-    struct directory *root = NULL;
+    struct object *root = NULL;
 
     reply->handle = 0;
-    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 ))) return;
+    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir ))) return;
 
     if ((winstation = create_winstation( root, &name, req->attributes, req->flags )))
     {
@@ -512,13 +530,11 @@ DECL_HANDLER(open_desktop)
 
     if (!winstation) return;
 
-    if ((obj = find_object( winstation->desktop_names, &name, req->attributes )))
+    if ((obj = open_named_object( &winstation->obj, &desktop_ops, &name, req->attributes )))
     {
-        assert( obj->ops == &desktop_ops );
         reply->handle = alloc_handle( current->process, obj, req->access, req->attributes );
         release_object( obj );
     }
-    else set_error( STATUS_OBJECT_NAME_NOT_FOUND );
 
     release_object( winstation );
 }

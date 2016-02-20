@@ -10053,12 +10053,12 @@ msgstr ""
 msgid "Are you sure?"
 msgstr ""
 
-#: cmd.rc:354 xcopy.rc:43
+#: cmd.rc:354 reg.rc:45 xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr ""
 
-#: cmd.rc:355 xcopy.rc:44
+#: cmd.rc:355 reg.rc:46 xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr ""
@@ -10196,7 +10196,7 @@ msgstr ""
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr ""
 
-#: cmd.rc:390
+#: cmd.rc:390 reg.rc:44
 msgid " (Yes|No)"
 msgstr ""
 
@@ -11429,25 +11429,72 @@ msgid "The operation completed successfully\n"
 msgstr ""
 
 #: reg.rc:35
-msgid "Error: Invalid key name\n"
-msgstr ""
+#, fuzzy
+msgid "reg: Invalid key name\n"
+msgstr "Невалидни знаци в пътя.\n"
 
 #: reg.rc:36
-msgid "Error: Invalid command line parameters\n"
-msgstr ""
+#, fuzzy
+msgid "reg: Invalid command line parameters\n"
+msgstr "Невалидни знаци в пътя.\n"
 
 #: reg.rc:37
-msgid "Error: Unable to access remote machine\n"
+msgid "reg: Unable to access remote machine\n"
 msgstr ""
 
 #: reg.rc:38
 msgid ""
-"Error: The system was unable to find the specified registry key or value\n"
+"reg: The system was unable to find the specified registry key or value\n"
 msgstr ""
 
 #: reg.rc:39
-msgid "Error: Unsupported type\n"
+msgid "reg: Unsupported registry data type [%1]\n"
 msgstr ""
+
+#: reg.rc:40
+msgid "reg: The option [/d] must be followed by a valid integer\n"
+msgstr ""
+
+#: reg.rc:41
+msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
+msgstr ""
+
+#: reg.rc:42
+msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
+msgstr ""
+
+#: reg.rc:43
+#, fuzzy
+msgid "The registry value '%1' already exists. Do you want to overwrite it?"
+msgstr ""
+"Файлът вече съществува.\n"
+"Искате ли да го замените?"
+
+#: reg.rc:47
+msgid "The registry operation was cancelled\n"
+msgstr ""
+
+#: reg.rc:48 regedit.rc:204
+msgid "(Default)"
+msgstr ""
+
+#: reg.rc:49
+#, fuzzy
+#| msgid "Are you sure you want to delete value '%s'?"
+msgid "Are you sure you want to delete the registry value '%1'?"
+msgstr "Наистина ли искате да изтриете стойността '%s'?"
+
+#: reg.rc:50
+#, fuzzy
+#| msgid "Are you sure you want to delete value '%s'?"
+msgid "Are you sure you want to delete all registry values in '%1'?"
+msgstr "Наистина ли искате да изтриете стойността '%s'?"
+
+#: reg.rc:51
+#, fuzzy
+#| msgid "Are you sure you want to delete '%1'?"
+msgid "Are you sure you want to delete the registry key '%1'?"
+msgstr "Наистина ли искате да изтриете '%1'?"
 
 #: regedit.rc:34
 msgid "&Registry"
@@ -11656,10 +11703,6 @@ msgstr "&Вмъкни файл в регистъра..."
 
 #: regedit.rc:197
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
-msgstr ""
-
-#: regedit.rc:204
-msgid "(Default)"
 msgstr ""
 
 #: regedit.rc:205

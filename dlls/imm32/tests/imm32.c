@@ -184,7 +184,7 @@ static LRESULT WINAPI wndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             return TRUE;
     }
 
-    return DefWindowProcA(hwnd,msg,wParam,lParam);
+    return DefWindowProcA(hWnd,msg,wParam,lParam);
 }
 
 static BOOL init(void) {
@@ -639,8 +639,11 @@ static void test_ImmThreads(void)
     ImmReleaseContext(threadinfo.hwnd,otherHimc);
     ImmReleaseContext(hwnd,himc);
 
-    DestroyWindow(threadinfo.hwnd);
-    TerminateThread(hThread, 1);
+    SendMessageA(threadinfo.hwnd, WM_CLOSE, 0, 0);
+    rc = PostThreadMessageA(dwThreadId, WM_QUIT, 1, 0);
+    ok(rc == 1, "PostThreadMessage should succeed\n");
+    WaitForSingleObject(hThread, INFINITE);
+    CloseHandle(hThread);
 
     himc = ImmGetContext(GetDesktopWindow());
     ok(himc == NULL, "Should not be able to get himc from other process window\n");
@@ -842,6 +845,7 @@ static void test_ImmDefaultHwnd(void)
     WaitForSingleObject(thread, INFINITE);
     ok(thread_ime_wnd != def1, "thread_ime_wnd == def1\n");
     ok(!IsWindow(thread_ime_wnd), "thread_ime_wnd was not destroyed\n");
+    CloseHandle(thread);
 
     ImmReleaseContext(hwnd, imc1);
     ImmReleaseContext(hwnd, imc3);

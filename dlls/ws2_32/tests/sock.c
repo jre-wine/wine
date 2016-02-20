@@ -1328,6 +1328,7 @@ static void test_set_getsockopt(void)
     WSAPROTOCOL_INFOA infoA;
     WSAPROTOCOL_INFOW infoW;
     char providername[WSAPROTOCOL_LEN + 1];
+    DWORD value;
     struct _prottest
     {
         int family, type, proto;
@@ -1371,6 +1372,27 @@ static void test_set_getsockopt(void)
         err = getsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char *) &timeout, &size); 
     ok( !err, "get/setsockopt(SO_SNDTIMEO) failed error: %d\n", WSAGetLastError());
     ok( timeout == SOCKTIMEOUT2, "getsockopt(SO_SNDTIMEO) returned wrong value %d\n", timeout);
+
+    /* SO_SNDBUF */
+    value = 4096;
+    size = sizeof(value);
+    err = setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char *)&value, size);
+    ok( !err, "setsockopt(SO_SNDBUF) failed error: %u\n", WSAGetLastError() );
+    value = 0xdeadbeef;
+    err = getsockopt(s, SOL_SOCKET, SO_SNDBUF, (char *)&value, &size);
+    ok( !err, "getsockopt(SO_SNDBUF) failed error: %u\n", WSAGetLastError() );
+    todo_wine ok( value == 4096, "expected 4096, got %u\n", value );
+
+    /* SO_RCVBUF */
+    value = 4096;
+    size = sizeof(value);
+    err = setsockopt(s, SOL_SOCKET, SO_RCVBUF, (char *)&value, size);
+    ok( !err, "setsockopt(SO_RCVBUF) failed error: %u\n", WSAGetLastError() );
+    value = 0xdeadbeef;
+    err = getsockopt(s, SOL_SOCKET, SO_RCVBUF, (char *)&value, &size);
+    ok( !err, "getsockopt(SO_RCVBUF) failed error: %u\n", WSAGetLastError() );
+    todo_wine ok( value == 4096, "expected 4096, got %u\n", value );
+
     /* SO_LINGER */
     for( i = 0; i < sizeof(linger_testvals)/sizeof(LINGER);i++) {
         size =  sizeof(lingval);
@@ -1569,17 +1591,10 @@ todo_wine
            "SO_PROTOCOL_INFO[A/W] comparison failed\n");
 
         /* Remove IF when WSAEnumProtocols support IPV6 data */
-        if (prottest[i].family == AF_INET6)
-        {
-            todo_wine
+        todo_wine_if (prottest[i].family == AF_INET6)
             ok(infoA.iAddressFamily == prottest[i].family, "socket family invalid, expected %d received %d\n",
                prottest[i].family, infoA.iAddressFamily);
-        }
-        else
-        {
-            ok(infoA.iAddressFamily == prottest[i].family, "socket family invalid, expected %d received %d\n",
-               prottest[i].family, infoA.iAddressFamily);
-        }        ok(infoA.iSocketType == prottest[i].type, "socket type invalid, expected %d received %d\n",
+        ok(infoA.iSocketType == prottest[i].type, "socket type invalid, expected %d received %d\n",
            prottest[i].type, infoA.iSocketType);
         ok(infoA.iProtocol == prottest[i].proto, "socket protocol invalid, expected %d received %d\n",
            prottest[i].proto, infoA.iProtocol);
@@ -2776,27 +2791,15 @@ static void test_WSAEnumNetworkEvents(void)
                     "Test[%d]: WSAEnumNetworkEvents failed\n", i);
                 if (i >= 1 && j == 0) /* FD_WRITE is SET on first try for UDP and connected TCP */
                 {
-                    if (i == 0) /* Remove when fixed */
-                    {
-                        todo_wine
+                    todo_wine_if (i == 0) /* Remove when fixed */
                         ok (net_events.lNetworkEvents == FD_WRITE, "Test[%d]: expected 2, got %d\n",
                             i, net_events.lNetworkEvents);
-                    }
-                    else
-                    ok (net_events.lNetworkEvents == FD_WRITE, "Test[%d]: expected 2, got %d\n",
-                        i, net_events.lNetworkEvents);
                 }
                 else
                 {
-                    if (i != 0) /* Remove when fixed */
-                    {
-                        todo_wine
+                    todo_wine_if (i != 0) /* Remove when fixed */
                         ok (net_events.lNetworkEvents == 0, "Test[%d]: expected 0, got %d\n",
                             i, net_events.lNetworkEvents);
-                    }
-                    else
-                    ok (net_events.lNetworkEvents == 0, "Test[%d]: expected 0, got %d\n",
-                        i, net_events.lNetworkEvents);
                 }
                 for (k = 0; k < FD_MAX_EVENTS; k++)
                 {

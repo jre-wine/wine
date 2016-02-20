@@ -146,6 +146,7 @@ static char* getChildString(const char* sect, const char* key)
  *
  ***/
 
+#define CHILD_DDE_TIMEOUT 2500
 static DWORD ddeInst;
 static HSZ hszTopic;
 static char ddeExec[MAX_PATH], ddeApplication[MAX_PATH];
@@ -270,7 +271,7 @@ static void doChild(int argc, char** argv)
             hdde = DdeNameService(ddeInst, hszApplication, 0, DNS_REGISTER | DNS_FILTEROFF);
             ok(hdde != NULL, "DdeNameService() failed le=%u\n", GetLastError());
 
-            timer = SetTimer(NULL, 0, 2500, childTimeout);
+            timer = SetTimer(NULL, 0, CHILD_DDE_TIMEOUT, childTimeout);
 
             dde_ready = OpenEventA(EVENT_MODIFY_STATE, FALSE, "winetest_shlexec_dde_ready");
             SetEvent(dde_ready);
@@ -348,30 +349,22 @@ static void dump_child_(const char* file, int line)
  ***/
 
 static char shell_call[2048];
-static char assoc_desc[2048];
-static int shell_call_traced;
 static void WINETEST_PRINTF_ATTR(2,3) _okShell(int condition, const char *msg, ...)
 {
     va_list valist;
+    char buffer[2048];
 
-    /* Note: if winetest_debug > 1 the ShellExecute() command has already been
-     * traced.
-     */
-    if (!condition && winetest_debug <= 1 && !shell_call_traced)
-    {
-        printf("Called %s\n", shell_call);
-        if (*assoc_desc)
-            printf("%s\n", assoc_desc);
-        shell_call_traced=1;
-    }
-
+    strcpy(buffer, shell_call);
+    strcat(buffer, " ");
     va_start(valist, msg);
-    winetest_vok(condition, msg, valist);
+    vsprintf(buffer+strlen(buffer), msg, valist);
     va_end(valist);
+    winetest_ok(condition, "%s", buffer);
 }
 #define okShell_(file, line) (winetest_set_location(file, line), 0) ? (void)0 : _okShell
 #define okShell okShell_(__FILE__, __LINE__)
 
+static char assoc_desc[2048];
 void reset_association_description(void)
 {
     *assoc_desc = '\0';
@@ -433,13 +426,29 @@ static int StrCmpPath(const char* s1, const char* s2)
 static void okChildPath_(const char* file, int line, const char* key, const char* expected)
 {
     char* result;
+    int equal, shortequal;
     result=getChildString("Child", key);
     if (!result)
     {
         okShell_(file,line)(FALSE, "%s expected '%s', but key not found or empty\n", key, expected);
         return;
     }
-    okShell_(file,line)(StrCmpPath(result, expected) == 0,
+    shortequal = FALSE;
+    equal = (StrCmpPath(result, expected) == 0);
+    if (!equal)
+    {
+        char altpath[MAX_PATH];
+        DWORD rc = GetLongPathNameA(expected, altpath, sizeof(altpath));
+        if (0 < rc && rc < sizeof(altpath))
+            equal = (StrCmpPath(result, altpath) == 0);
+        if (!equal)
+        {
+            rc = GetShortPathNameA(expected, altpath, sizeof(altpath));
+            if (0 < rc && rc < sizeof(altpath))
+                shortequal = (StrCmpPath(result, altpath) == 0);
+        }
+    }
+    okShell_(file,line)(equal || broken(shortequal) /* XP SP1 */,
                         "%s expected '%s', got '%s'\n", key, expected, result);
 }
 #define okChildPath(key, expected) okChildPath_(__FILE__, __LINE__, (key), (expected))
@@ -494,20 +503,15 @@ static INT_PTR shell_execute_(const char* file, int line, LPCSTR verb, LPCSTR fi
     if(!verb)
         rcEmpty = shell_execute_(file, line, "", filename, parameters, directory);
 
-    shell_call_traced=0;
     strcpy(shell_call, "ShellExecute(");
     strcat_param(shell_call, "verb", verb);
     strcat_param(shell_call, "file", filename);
     strcat_param(shell_call, "params", parameters);
     strcat_param(shell_call, "dir", directory);
     strcat(shell_call, ")");
+    strcat(shell_call, assoc_desc);
     if (winetest_debug > 1)
-    {
         trace_(file, line)("Called %s\n", shell_call);
-        if (*assoc_desc)
-            trace_(file, line)("%s\n", assoc_desc);
-        shell_call_traced=1;
-    }
 
     DeleteFileA(child_file);
     SetLastError(0xcafebabe);
@@ -535,10 +539,7 @@ static INT_PTR shell_execute_(const char* file, int line, LPCSTR verb, LPCSTR fi
                 rc = SE_ERR_NOASSOC;
             }
         }
-        if (!_todo_wait)
-            okShell_(file, line)(wait_rc==WAIT_OBJECT_0 || rc <= 32,
-                                 "WaitForSingleObject returned %d\n", wait_rc);
-        else todo_wine
+        todo_wine_if(_todo_wait)
             okShell_(file, line)(wait_rc==WAIT_OBJECT_0 || rc <= 32,
                                  "WaitForSingleObject returned %d\n", wait_rc);
     }
@@ -584,7 +585,6 @@ static INT_PTR shell_execute_ex_(const char* file, int line,
     /* Add some flags so we can wait for the child process */
     mask |= SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE;
 
-    shell_call_traced=0;
     strcpy(shell_call, "ShellExecuteEx(");
     sprintf(smask, "0x%x", mask);
     strcat_param(shell_call, "mask", smask);
@@ -594,13 +594,9 @@ static INT_PTR shell_execute_ex_(const char* file, int line,
     strcat_param(shell_call, "dir", directory);
     strcat_param(shell_call, "class", class);
     strcat(shell_call, ")");
+    strcat(shell_call, assoc_desc);
     if (winetest_debug > 1)
-    {
         trace_(file, line)("Called %s\n", shell_call);
-        if (*assoc_desc)
-            trace_(file, line)("%s\n", assoc_desc);
-        shell_call_traced=1;
-    }
 
     sei.cbSize=sizeof(sei);
     sei.fMask=mask;
@@ -637,17 +633,12 @@ static INT_PTR shell_execute_ex_(const char* file, int line,
                                  wait_rc);
             wait_rc = GetExitCodeProcess(sei.hProcess, &rc);
             okShell_(file, line)(wait_rc, "GetExitCodeProcess() failed le=%u\n", GetLastError());
-            if (!_todo_wait)
-                okShell_(file, line)(rc == 0, "child returned %u\n", rc);
-            else todo_wine
+            todo_wine_if(_todo_wait)
                 okShell_(file, line)(rc == 0, "child returned %u\n", rc);
             CloseHandle(sei.hProcess);
         }
         wait_rc=WaitForSingleObject(hEvent, 5000);
-        if (!_todo_wait)
-            okShell_(file, line)(wait_rc==WAIT_OBJECT_0,
-                                 "WaitForSingleObject returned %d\n", wait_rc);
-        else todo_wine
+        todo_wine_if(_todo_wait)
             okShell_(file, line)(wait_rc==WAIT_OBJECT_0,
                                  "WaitForSingleObject returned %d\n", wait_rc);
     }
@@ -666,8 +657,19 @@ static INT_PTR shell_execute_ex_(const char* file, int line,
         c = GetPrivateProfileIntA("Child", "Failures", -1, child_file);
         if (c > 0)
             winetest_add_failures(c);
-        okChildInt_(file, line, "ShlexecVarLE", 0);
-        okChildString_(file, line, "ShlexecVar", "Present", "Present");
+        /* When NOZONECHECKS is specified the environment variables are not
+         * inherited if the process does not have elevated privileges.
+         */
+        if ((mask & SEE_MASK_NOZONECHECKS) && skip_shlexec_tests)
+        {
+            okChildInt_(file, line, "ShlexecVarLE", 203);
+            okChildString_(file, line, "ShlexecVar", "", "");
+        }
+        else
+        {
+            okChildInt_(file, line, "ShlexecVarLE", 0);
+            okChildString_(file, line, "ShlexecVar", "Present", "Present");
+        }
     }
 
     return rc;
@@ -800,7 +802,7 @@ static void create_test_verb_dde(const char* extension, const char* verb,
     char* cmd;
     LONG rc;
 
-    strcpy(assoc_desc, "Assoc ");
+    strcpy(assoc_desc, " Assoc ");
     strcat_param(assoc_desc, "ext", extension);
     strcat_param(assoc_desc, "verb", verb);
     sprintf(shell, "%d", rawcmd);
@@ -1309,9 +1311,7 @@ static BOOL test_one_cmdline(const cmdline_tests_t* test)
     count = 0;
     while (test->args[count])
         count++;
-    if ((test->todo & 0x1) == 0)
-        ok(cl2a_count == count, "%s: expected %d arguments, but got %d\n", test->cmd, count, cl2a_count);
-    else todo_wine
+    todo_wine_if(test->todo & 0x1)
         ok(cl2a_count == count, "%s: expected %d arguments, but got %d\n", test->cmd, count, cl2a_count);
 
     for (i = 0; i < cl2a_count; i++)
@@ -1319,14 +1319,10 @@ static BOOL test_one_cmdline(const cmdline_tests_t* test)
         if (i < count)
         {
             MultiByteToWideChar(CP_ACP, 0, test->args[i], -1, argW, sizeof(argW)/sizeof(*argW));
-            if ((test->todo & (1 << (i+4))) == 0)
-                ok(!lstrcmpW(*argsW, argW), "%s: arg[%d] expected %s but got %s\n", test->cmd, i, wine_dbgstr_w(argW), wine_dbgstr_w(*argsW));
-            else todo_wine
+            todo_wine_if(test->todo & (1 << (i+4)))
                 ok(!lstrcmpW(*argsW, argW), "%s: arg[%d] expected %s but got %s\n", test->cmd, i, wine_dbgstr_w(argW), wine_dbgstr_w(*argsW));
         }
-        else if ((test->todo & 0x1) == 0)
-            ok(0, "%s: got extra arg[%d]=%s\n", test->cmd, i, wine_dbgstr_w(*argsW));
-        else todo_wine
+        else todo_wine_if(test->todo & 0x1)
             ok(0, "%s: got extra arg[%d]=%s\n", test->cmd, i, wine_dbgstr_w(*argsW));
         argsW++;
     }
@@ -1556,6 +1552,18 @@ static void test_argify(void)
     const char* cmd;
     unsigned i, count;
 
+    /* Test with a long parameter */
+    for (rc = 0; rc < MAX_PATH; rc++)
+        fileA[rc] = 'a' + rc % 26;
+    fileA[MAX_PATH-1] = '\0';
+    sprintf(params, "shlexec \"%s\" %s", child_file, fileA);
+
+    /* We need NOZONECHECKS on Win2003 to block a dialog */
+    rc=shell_execute_ex(SEE_MASK_NOZONECHECKS, NULL, argv0, params, NULL, NULL);
+    okShell(rc > 32, "failed: rc=%lu\n", rc);
+    okChildInt("argcA", 4);
+    okChildPath("argvA3", fileA);
+
     if (skip_shlexec_tests)
     {
         skip("No argify tests due to lack of .shlexec association\n");
@@ -1584,12 +1592,10 @@ static void test_argify(void)
         count = 0;
         while (test->cmd.args[count])
             count++;
-        if ((test->todo & 0x1) == 0)
-            /* +4 for the shlexec arguments, -1 because of the added ""
-             * argument for the CommandLineToArgvW() tests.
-             */
-            okChildInt("argcA", 4 + count - 1);
-        else todo_wine
+        /* +4 for the shlexec arguments, -1 because of the added ""
+         * argument for the CommandLineToArgvW() tests.
+         */
+        todo_wine_if(test->todo & 0x1)
             okChildInt("argcA", 4 + count - 1);
 
         cmd = getChildString("Child", "cmdlineA");
@@ -1599,10 +1605,7 @@ static void test_argify(void)
         if (cmd) cmd = strstr(cmd, test->verb);
         if (cmd) cmd += strlen(test->verb);
         if (!cmd) cmd = "(null)";
-        if ((test->todo & 0x2) == 0)
-            okShell(!strcmp(cmd, test->cmd.cmd) || broken(!strcmp(cmd, bad->cmd)),
-                    "the cmdline is '%s' instead of '%s'\n", cmd, test->cmd.cmd);
-        else todo_wine
+        todo_wine_if(test->todo & 0x2)
             okShell(!strcmp(cmd, test->cmd.cmd) || broken(!strcmp(cmd, bad->cmd)),
                     "the cmdline is '%s' instead of '%s'\n", cmd, test->cmd.cmd);
 
@@ -1610,9 +1613,7 @@ static void test_argify(void)
         {
             char argname[18];
             sprintf(argname, "argvA%d", 4 + i);
-            if ((test->todo & (1 << (i+4))) == 0)
-                okChildStringBroken(argname, test->cmd.args[i+1], bad->args[i+1]);
-            else todo_wine
+            todo_wine_if(test->todo & (1 << (i+4)))
                 okChildStringBroken(argname, test->cmd.args[i+1], bad->args[i+1]);
         }
 
@@ -1620,18 +1621,6 @@ static void test_argify(void)
             has_cl2a = test_one_cmdline(&(test->cmd));
         test++;
     }
-
-    /* Test with a long parameter */
-    for (rc = 0; rc < MAX_PATH; rc++)
-        fileA[rc] = 'a' + rc % 26;
-    fileA[MAX_PATH-1] = '\0';
-    sprintf(params, "shlexec \"%s\" %s", child_file, fileA);
-
-    /* We need NOZONECHECKS on Win2003 to block a dialog */
-    rc=shell_execute_ex(SEE_MASK_NOZONECHECKS, NULL, argv0, params, NULL, NULL);
-    okShell(rc > 32, "failed: rc=%lu\n", rc);
-    okChildInt("argcA", 4);
-    okChildPath("argvA3", fileA);
 }
 
 static void test_filename(void)
@@ -1690,31 +1679,13 @@ static void test_filename(void)
         if (rc == 33)
         {
             const char* verb;
-            if ((test->todo & 0x2)==0)
-            {
+            todo_wine_if(test->todo & 0x2)
                 okChildInt("argcA", 5);
-            }
-            else todo_wine
-            {
-                okChildInt("argcA", 5);
-            }
             verb=(test->verb ? test->verb : "Open");
-            if ((test->todo & 0x4)==0)
-            {
+            todo_wine_if(test->todo & 0x4)
                 okChildString("argvA3", verb);
-            }
-            else todo_wine
-            {
-                okChildString("argvA3", verb);
-            }
-            if ((test->todo & 0x8)==0)
-            {
+            todo_wine_if(test->todo & 0x8)
                 okChildPath("argvA4", filename);
-            }
-            else todo_wine
-            {
-                okChildPath("argvA4", filename);
-            }
         }
         test++;
     }
@@ -1726,14 +1697,8 @@ static void test_filename(void)
         rc=shell_execute(test->verb, filename, NULL, NULL);
         if (rc > 32)
             rc=33;
-        if ((test->todo & 0x1)==0)
-        {
+        todo_wine_if(test->todo & 0x1)
             okShell(rc==test->rc, "failed: rc=%ld err=%u\n", rc, GetLastError());
-        }
-        else todo_wine
-        {
-            okShell(rc==test->rc, "failed: rc=%ld err=%u\n", rc, GetLastError());
-        }
         if (rc==0)
         {
             int count;
@@ -1741,14 +1706,8 @@ static void test_filename(void)
             char* str;
 
             verb=(test->verb ? test->verb : "Open");
-            if ((test->todo & 0x4)==0)
-            {
+            todo_wine_if(test->todo & 0x4)
                 okChildString("argvA3", verb);
-            }
-            else todo_wine
-            {
-                okChildString("argvA3", verb);
-            }
 
             count=4;
             str=filename;
@@ -1760,27 +1719,15 @@ static void test_filename(void)
                 if (space)
                     *space='\0';
                 sprintf(attrib, "argvA%d", count);
-                if ((test->todo & 0x8)==0)
-                {
+                todo_wine_if(test->todo & 0x8)
                     okChildPath(attrib, str);
-                }
-                else todo_wine
-                {
-                    okChildPath(attrib, str);
-                }
                 count++;
                 if (!space)
                     break;
                 str=space+1;
             }
-            if ((test->todo & 0x2)==0)
-            {
+            todo_wine_if(test->todo & 0x2)
                 okChildInt("argcA", count);
-            }
-            else todo_wine
-            {
-                okChildInt("argcA", count);
-            }
         }
         test++;
     }
@@ -1862,7 +1809,8 @@ static void test_fileurls(void)
         return;
     }
 
-    rc = (INT_PTR)ShellExecuteA(NULL, NULL, "file:///nosuchfile.shlexec", NULL, NULL, SW_SHOWNORMAL);
+    rc = shell_execute_ex(SEE_MASK_FLAG_NO_UI, NULL,
+                          "file:///nosuchfile.shlexec", NULL, NULL, NULL);
     if (rc > 32)
     {
         win_skip("shell32 is too old (likely < 4.72). Skipping the file URL tests\n");
@@ -1905,37 +1853,23 @@ static void test_fileurls(void)
         }
         if (test->flags & URL_SUCCESS)
         {
-            if ((test->todo & 0x1) == 0)
-                okShell(rc > 32, "failed: bad rc=%lu\n", rc);
-            else todo_wine
+            todo_wine_if(test->todo & 0x1)
                 okShell(rc > 32, "failed: bad rc=%lu\n", rc);
         }
         else
         {
-            if ((test->todo & 0x1) == 0)
-                okShell(rc == SE_ERR_FNF || rc == SE_ERR_PNF ||
-                   broken(rc == SE_ERR_ACCESSDENIED) /* win2000 */,
-                   "failed: bad rc=%lu\n", rc);
-            else todo_wine
+            todo_wine_if(test->todo & 0x1)
                 okShell(rc == SE_ERR_FNF || rc == SE_ERR_PNF ||
                         broken(rc == SE_ERR_ACCESSDENIED) /* win2000 */,
                         "failed: bad rc=%lu\n", rc);
         }
         if (rc == 33)
         {
-            if ((test->todo & 0x2) == 0)
+            todo_wine_if(test->todo & 0x2)
                 okChildInt("argcA", 5);
-            else todo_wine
-                okChildInt("argcA", 5);
-
-            if ((test->todo & 0x4) == 0)
+            todo_wine_if(test->todo & 0x4)
                 okChildString("argvA3", "Open");
-            else todo_wine
-                okChildString("argvA3", "Open");
-
-            if ((test->todo & 0x8) == 0)
-                okChildPath("argvA4", filename);
-            else todo_wine
+            todo_wine_if(test->todo & 0x8)
                 okChildPath("argvA4", filename);
         }
         test++;
@@ -2058,30 +1992,17 @@ static void test_find_executable(void)
         rc=(INT_PTR)FindExecutableA(filename, NULL, command);
         if (rc > 32)
             rc=33;
-        if ((test->todo & 0x10)==0)
-        {
+        todo_wine_if(test->todo & 0x10)
             ok(rc==test->rc, "FindExecutable(%s) failed: rc=%ld\n", filename, rc);
-        }
-        else todo_wine
-        {
-            ok(rc==test->rc, "FindExecutable(%s) failed: rc=%ld\n", filename, rc);
-        }
         if (rc > 32)
         {
             BOOL equal;
             equal=strcmp(command, argv0) == 0 ||
                 /* NT4 returns an extra 0x8 character! */
                 (strlen(command) == strlen(argv0)+1 && strncmp(command, argv0, strlen(argv0)) == 0);
-            if ((test->todo & 0x20)==0)
-            {
+            todo_wine_if(test->todo & 0x20)
                 ok(equal, "FindExecutable(%s) returned command='%s' instead of '%s'\n",
                    filename, command, argv0);
-            }
-            else todo_wine
-            {
-                ok(equal, "FindExecutable(%s) returned command='%s' instead of '%s'\n",
-                   filename, command, argv0);
-            }
         }
         test++;
     }
@@ -2141,12 +2062,15 @@ static void test_lnks(void)
     okChildInt("argcA", 4);
     okChildString("argvA3", "Lnk");
 
-    /* An explicit class overrides lnk's ContextMenuHandler */
-    rc=shell_execute_ex(SEE_MASK_CLASSNAME | SEE_MASK_NOZONECHECKS, NULL, filename, NULL, NULL, "shlexec.shlexec");
-    okShell(rc > 32, "failed: rc=%lu err=%u\n", rc, GetLastError());
-    okChildInt("argcA", 5);
-    okChildString("argvA3", "Open");
-    okChildPath("argvA4", filename);
+    if (!skip_shlexec_tests)
+    {
+        /* An explicit class overrides lnk's ContextMenuHandler */
+        rc=shell_execute_ex(SEE_MASK_CLASSNAME | SEE_MASK_NOZONECHECKS, NULL, filename, NULL, NULL, "shlexec.shlexec");
+        okShell(rc > 32, "failed: rc=%lu err=%u\n", rc, GetLastError());
+        okChildInt("argcA", 5);
+        okChildString("argvA3", "Open");
+        okChildPath("argvA4", filename);
+    }
 
     if (dllver.dwMajorVersion>=6)
     {
@@ -2179,41 +2103,16 @@ static void test_lnks(void)
                             NULL, NULL);
         if (rc > 32)
             rc=33;
-        if ((test->todo & 0x1)==0)
-        {
+        todo_wine_if(test->todo & 0x1)
             okShell(rc==test->rc, "failed: rc=%lu err=%u\n", rc, GetLastError());
-        }
-        else todo_wine
-        {
-            okShell(rc==test->rc, "failed: rc=%lu err=%u\n", rc, GetLastError());
-        }
         if (rc==0)
         {
-            if ((test->todo & 0x2)==0)
-            {
+            todo_wine_if(test->todo & 0x2)
                 okChildInt("argcA", 5);
-            }
-            else
-            {
-                okChildInt("argcA", 5);
-            }
-            if ((test->todo & 0x4)==0)
-            {
+            todo_wine_if(test->todo & 0x4)
                 okChildString("argvA3", "Lnk");
-            }
-            else todo_wine
-            {
-                okChildString("argvA3", "Lnk");
-            }
             sprintf(params, test->basename, tmpdir);
-            if ((test->todo & 0x8)==0)
-            {
-                okChildPath("argvA4", params);
-            }
-            else
-            {
-                okChildPath("argvA4", params);
-            }
+            okChildPath("argvA4", params);
         }
         test++;
     }
@@ -2265,14 +2164,17 @@ static void test_exes(void)
                                     "notaverb", argv0, NULL, NULL, NULL);
     todo_wine okShell(rc == SE_ERR_NOASSOC, "returned %lu\n", rc);
 
-    /* A class overrides the normal handling of executables too */
-    /* FIXME SEE_MASK_FLAG_NO_UI is only needed due to Wine's bug */
-    rc = shell_execute_ex(SEE_MASK_CLASSNAME | SEE_MASK_FLAG_NO_UI,
-                          NULL, argv0, NULL, NULL, ".shlexec");
-    todo_wine okShell(rc > 32, "returned %lu\n", rc);
-    okChildInt("argcA", 5);
-    todo_wine okChildString("argvA3", "Open");
-    todo_wine okChildPath("argvA4", argv0);
+    if (!skip_shlexec_tests)
+    {
+        /* A class overrides the normal handling of executables too */
+        /* FIXME SEE_MASK_FLAG_NO_UI is only needed due to Wine's bug */
+        rc = shell_execute_ex(SEE_MASK_CLASSNAME | SEE_MASK_FLAG_NO_UI,
+                              NULL, argv0, NULL, NULL, ".shlexec");
+        todo_wine okShell(rc > 32, "returned %lu\n", rc);
+        okChildInt("argcA", 5);
+        todo_wine okChildString("argvA3", "Open");
+        todo_wine okChildPath("argvA4", argv0);
+    }
 }
 
 typedef struct
@@ -2315,10 +2217,13 @@ static dde_tests_t dde_tests[] =
     {NULL}
 };
 
+static int waitforinputidle_count;
 static DWORD WINAPI hooked_WaitForInputIdle(HANDLE process, DWORD timeout)
 {
+    waitforinputidle_count++;
     if (winetest_debug > 1)
-        trace("WaitForInputIdle() waiting for dde event\n");
+        trace("WaitForInputIdle() waiting for dde event timeout=min(%u,5s)\n", timeout);
+    timeout = timeout < 5000 ? timeout : 5000;
     return WaitForSingleObject(dde_ready_event, timeout);
 }
 
@@ -2400,6 +2305,7 @@ static void test_dde(void)
     INT_PTR rc;
     HANDLE map;
     char *shared_block;
+    DWORD ddeflags;
 
     hook_WaitForInputIdle(hooked_WaitForInputIdle);
 
@@ -2413,6 +2319,7 @@ static void test_dde(void)
                              4096, "winetest_shlexec_dde_map");
     shared_block = MapViewOfFile(map, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 4096);
 
+    ddeflags = SEE_MASK_FLAG_DDEWAIT | SEE_MASK_FLAG_NO_UI;
     test = dde_tests;
     while (test->command)
     {
@@ -2436,10 +2343,33 @@ static void test_dde(void)
         }
         ddeExec[0] = 0;
 
-        dde_ready_event = CreateEventA(NULL, FALSE, FALSE, "winetest_shlexec_dde_ready");
-        rc = shell_execute_ex(SEE_MASK_FLAG_DDEWAIT | SEE_MASK_FLAG_NO_UI, NULL, filename, NULL, NULL, NULL);
+        waitforinputidle_count = 0;
+        dde_ready_event = CreateEventA(NULL, TRUE, FALSE, "winetest_shlexec_dde_ready");
+        rc = shell_execute_ex(ddeflags, NULL, filename, NULL, NULL, NULL);
         CloseHandle(dde_ready_event);
+        if (!(ddeflags & SEE_MASK_WAITFORINPUTIDLE) && rc == SE_ERR_DDEFAIL &&
+            GetLastError() == ERROR_FILE_NOT_FOUND &&
+            strcmp(winetest_platform, "windows") == 0)
+        {
+            /* Windows 10 does not call WaitForInputIdle() for DDE which creates
+             * a race condition as the DDE server may not have time to start up.
+             * When that happens the test fails with the above results and we
+             * compensate by forcing the WaitForInputIdle() call.
+             */
+            trace("Adding SEE_MASK_WAITFORINPUTIDLE for Windows 10\n");
+            ddeflags |= SEE_MASK_WAITFORINPUTIDLE;
+            delete_test_association(".sde");
+            Sleep(CHILD_DDE_TIMEOUT);
+            continue;
+        }
         okShell(32 < rc, "failed: rc=%lu err=%u\n", rc, GetLastError());
+        if (test->ddeexec)
+            okShell(waitforinputidle_count == 1 ||
+                    broken(waitforinputidle_count == 0) /* Win10 race */,
+                    "WaitForInputIdle() was called %u times\n",
+                    waitforinputidle_count);
+        else
+            okShell(waitforinputidle_count == 0, "WaitForInputIdle() was called %u times for a non-DDE case\n", waitforinputidle_count);
 
         if (32 < rc)
         {
@@ -2464,7 +2394,7 @@ static void test_dde(void)
     hook_WaitForInputIdle((void *) WaitForInputIdle);
 }
 
-#define DDE_DEFAULT_APP_VARIANTS 2
+#define DDE_DEFAULT_APP_VARIANTS 3
 typedef struct
 {
     const char* command;
@@ -2475,42 +2405,44 @@ typedef struct
 
 static dde_default_app_tests_t dde_default_app_tests[] =
 {
-    /* Windows XP and 98 handle default DDE app names in different ways.
-     * The application name we see in the first test determines the pattern
-     * of application names and return codes we will look for. */
+    /* There are three possible sets of results: Windows <= 2000, XP SP1 and
+     * >= XP SP2. Use the first two tests to determine which results to expect.
+     */
 
     /* Test unquoted existing filename with a space */
-    {"%s\\test file.exe", {"test file", "test"}, 0x0, {33, 33}},
-    {"%s\\test file.exe param", {"test file", "test"}, 0x0, {33, 33}},
+    {"%s\\test file.exe", {"test file", "test file", "test"}, 0x0, {33, 33, 33}},
+    {"%s\\test2 file.exe", {"test2", "", "test2"}, 0x0, {33, 5, 33}},
+
+    /* Test unquoted existing filename with a space */
+    {"%s\\test file.exe param", {"test file", "test file", "test"}, 0x0, {33, 33, 33}},
 
     /* Test quoted existing filename with a space */
-    {"\"%s\\test file.exe\"", {"test file", "test file"}, 0x0, {33, 33}},
-    {"\"%s\\test file.exe\" param", {"test file", "test file"}, 0x0, {33, 33}},
+    {"\"%s\\test file.exe\"", {"test file", "test file", "test file"}, 0x0, {33, 33, 33}},
+    {"\"%s\\test file.exe\" param", {"test file", "test file", "test file"}, 0x0, {33, 33, 33}},
 
     /* Test unquoted filename with a space that doesn't exist, but
      * test2.exe does */
-    {"%s\\test2 file.exe", {"test2", "test2"}, 0x0, {33, 33}},
-    {"%s\\test2 file.exe param", {"test2", "test2"}, 0x0, {33, 33}},
+    {"%s\\test2 file.exe param", {"test2", "", "test2"}, 0x0, {33, 5, 33}},
 
     /* Test quoted filename with a space that does not exist */
-    {"\"%s\\test2 file.exe\"", {"", "test2 file"}, 0x0, {5, 33}},
-    {"\"%s\\test2 file.exe\" param", {"", "test2 file"}, 0x0, {5, 33}},
+    {"\"%s\\test2 file.exe\"", {"", "", "test2 file"}, 0x0, {5, 2, 33}},
+    {"\"%s\\test2 file.exe\" param", {"", "", "test2 file"}, 0x0, {5, 2, 33}},
 
     /* Test filename supplied without the extension */
-    {"%s\\test2", {"test2", "test2"}, 0x0, {33, 33}},
-    {"%s\\test2 param", {"test2", "test2"}, 0x0, {33, 33}},
+    {"%s\\test2", {"test2", "", "test2"}, 0x0, {33, 5, 33}},
+    {"%s\\test2 param", {"test2", "", "test2"}, 0x0, {33, 5, 33}},
 
     /* Test an unquoted nonexistent filename */
-    {"%s\\notexist.exe", {"", "notexist"}, 0x0, {5, 33}},
-    {"%s\\notexist.exe param", {"", "notexist"}, 0x0, {5, 33}},
+    {"%s\\notexist.exe", {"", "", "notexist"}, 0x0, {5, 2, 33}},
+    {"%s\\notexist.exe param", {"", "", "notexist"}, 0x0, {5, 2, 33}},
 
     /* Test an application that will be found on the path */
-    {"cmd", {"cmd", "cmd"}, 0x0, {33, 33}},
-    {"cmd param", {"cmd", "cmd"}, 0x0, {33, 33}},
+    {"cmd", {"cmd", "cmd", "cmd"}, 0x0, {33, 33, 33}},
+    {"cmd param", {"cmd", "cmd", "cmd"}, 0x0, {33, 33, 33}},
 
     /* Test an application that will not be found on the path */
-    {"xyzwxyzwxyz", {"", "xyzwxyzwxyz"}, 0x0, {5, 33}},
-    {"xyzwxyzwxyz param", {"", "xyzwxyzwxyz"}, 0x0, {5, 33}},
+    {"xyzwxyzwxyz", {"", "", "xyzwxyzwxyz"}, 0x0, {5, 2, 33}},
+    {"xyzwxyzwxyz param", {"", "", "xyzwxyzwxyz"}, 0x0, {5, 2, 33}},
 
     {NULL, {NULL}, 0, {0}}
 };
@@ -2587,46 +2519,34 @@ static void test_dde_default_app(void)
         while (GetMessageA(&msg, NULL, 0, 0)) DispatchMessageA(&msg);
         rc = msg.wParam > 32 ? 33 : msg.wParam;
 
-        /* First test, find which set of test data we expect to see */
-        if (test == dde_default_app_tests)
+        /* The first two tests determine which set of results to expect.
+         * First check the platform as only the first set of results is
+         * acceptable for Wine.
+         */
+        if (strcmp(winetest_platform, "wine"))
         {
-            int i;
-            for (i=0; i<DDE_DEFAULT_APP_VARIANTS; i++)
+            if (test == dde_default_app_tests)
             {
-                if (!strcmp(ddeApplication, test->expectedDdeApplication[i]))
-                {
-                    which = i;
-                    break;
-                }
+                if (strcmp(ddeApplication, test->expectedDdeApplication[0]))
+                    which = 2;
             }
-            if (i == DDE_DEFAULT_APP_VARIANTS)
-                skip("Default DDE application test does not match any available results, using first expected data set.\n");
+            else if (test == dde_default_app_tests + 1)
+            {
+                if (which == 0 && rc == test->rc[1])
+                    which = 1;
+                trace("DDE result variant %d\n", which);
+            }
         }
 
-        if ((test->todo & 0x1)==0)
-        {
+        todo_wine_if(test->todo & 0x1)
             okShell(rc==test->rc[which], "failed: rc=%lu err=%u\n",
                     rc, GetLastError());
-        }
-        else todo_wine
-        {
-            okShell(rc==test->rc[which], "failed: rc=%lu err=%u\n",
-                    rc, GetLastError());
-        }
         if (rc == 33)
         {
-            if ((test->todo & 0x2)==0)
-            {
+            todo_wine_if(test->todo & 0x2)
                 ok(!strcmp(ddeApplication, test->expectedDdeApplication[which]),
                    "Expected application '%s', got '%s'\n",
                    test->expectedDdeApplication[which], ddeApplication);
-            }
-            else todo_wine
-            {
-                ok(!strcmp(ddeApplication, test->expectedDdeApplication[which]),
-                   "Expected application '%s', got '%s'\n",
-                   test->expectedDdeApplication[which], ddeApplication);
-            }
         }
         reset_association_description();
 

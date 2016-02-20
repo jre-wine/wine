@@ -147,8 +147,8 @@ static void test_VirtualAllocEx(void)
     b = pVirtualFreeEx(hProcess, addr1, 0, MEM_RELEASE);
     ok(b != 0, "VirtualFreeEx, error %u\n", GetLastError());
 
-    VirtualFree( src, 0, MEM_FREE );
-    VirtualFree( dst, 0, MEM_FREE );
+    VirtualFree( src, 0, MEM_RELEASE );
+    VirtualFree( dst, 0, MEM_RELEASE );
 
     /*
      * The following tests parallel those in test_VirtualAlloc()
@@ -369,6 +369,11 @@ static void test_VirtualAlloc(void)
     ok(GetLastError() == ERROR_INVALID_PARAMETER,
         "got %d, expected ERROR_INVALID_PARAMETER\n", GetLastError());
 
+    SetLastError(0xdeadbeef);
+    ok(!VirtualFree(addr1, 0, MEM_FREE), "VirtualFree should fail with type MEM_FREE\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER,
+        "got %d, expected ERROR_INVALID_PARAMETER\n", GetLastError());
+
     ok(VirtualFree(addr1, 0x10000, MEM_DECOMMIT), "VirtualFree failed\n");
 
     /* if the type is MEM_RELEASE, size must be 0 */
@@ -378,9 +383,13 @@ static void test_VirtualAlloc(void)
 
     ok(VirtualFree(addr1, 0, MEM_RELEASE), "VirtualFree failed\n");
 
-    addr1 = VirtualAlloc(0, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    /* memory returned by VirtualAlloc should be aligned to 64k */
+    addr1 = VirtualAlloc(0, 0x2000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
     ok(addr1 != NULL, "VirtualAlloc failed\n");
     ok(!((ULONG_PTR)addr1 & 0xffff), "returned memory %p is not aligned to 64k\n", addr1);
+    ok(VirtualFree(addr1, 0, MEM_RELEASE), "VirtualFree failed\n");
+    addr2 = VirtualAlloc(addr1, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    ok(addr2 == addr1, "VirtualAlloc returned %p, expected %p\n", addr2, addr1);
 
     /* allocation conflicts because of 64k align */
     size = 0x1000;
@@ -1746,11 +1755,11 @@ static void test_write_watch(void)
         ok( !ret, "ResetWriteWatch failed %u\n", ret );
     }
 
-    VirtualFree( base, 0, MEM_FREE );
+    VirtualFree( base, 0, MEM_RELEASE );
 
     base = VirtualAlloc( 0, size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_READWRITE );
     ok( base != NULL, "VirtualAlloc failed %u\n", GetLastError() );
-    VirtualFree( base, 0, MEM_FREE );
+    VirtualFree( base, 0, MEM_RELEASE );
 
     base = VirtualAlloc( 0, size, MEM_WRITE_WATCH, PAGE_READWRITE );
     ok( !base, "VirtualAlloc succeeded\n" );
@@ -1794,7 +1803,7 @@ static void test_write_watch(void)
         "wrong count %lu\n", count );
     if (count) ok( results[0] == base + 5*pagesize, "wrong result %p\n", results[0] );
 
-    VirtualFree( base, 0, MEM_FREE );
+    VirtualFree( base, 0, MEM_RELEASE );
 }
 
 #ifdef __i386__
@@ -1939,7 +1948,7 @@ static void test_guard_page(void)
         ok( success, "VirtualUnlock failed %u\n", GetLastError() );
     }
 
-    VirtualFree( base, 0, MEM_FREE );
+    VirtualFree( base, 0, MEM_RELEASE );
 
     /* combined guard page / write watch tests */
     if (!pGetWriteWatch || !pResetWriteWatch)
@@ -2045,7 +2054,7 @@ static void test_guard_page(void)
     todo_wine
     ok( results[0] == base || broken(results[0] == (void *)0xdeadbeef) /* Windows 8 */, "wrong result %p\n", results[0] );
 
-    VirtualFree( base, 0, MEM_FREE );
+    VirtualFree( base, 0, MEM_RELEASE );
 }
 
 static DWORD WINAPI stack_commit_func( void *arg )
@@ -2119,8 +2128,8 @@ static void test_stack_commit(void)
     pNtCurrentTeb()->Tib.StackBase      = old_stack_base;
     pNtCurrentTeb()->Tib.StackLimit     = old_stack_limit;
 
-    VirtualFree( new_stack, 0, MEM_FREE );
-    VirtualFree( call_on_stack, 0, MEM_FREE );
+    VirtualFree( new_stack, 0, MEM_RELEASE );
+    VirtualFree( call_on_stack, 0, MEM_RELEASE );
 }
 
 DWORD num_execute_fault_calls;
@@ -2555,7 +2564,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     success = UnregisterClassA( cls_name, GetModuleHandleA(0) );
     ok( success, "UnregisterClass failed %u\n", GetLastError() );
 
-    VirtualFree( base, 0, MEM_FREE );
+    VirtualFree( base, 0, MEM_RELEASE );
 
     /* Repeat the tests from above with MEM_WRITE_WATCH protected memory. */
 
@@ -2744,7 +2753,7 @@ static void test_atl_thunk_emulation( ULONG dep_flags )
     success = UnregisterClassA( cls_name, GetModuleHandleA(0) );
     ok( success, "UnregisterClass failed %u\n", GetLastError() );
 
-    VirtualFree( base, 0, MEM_FREE );
+    VirtualFree( base, 0, MEM_RELEASE );
 
 out:
     if (restore_flags)
@@ -2934,7 +2943,7 @@ static void test_VirtualProtect(void)
         exec_prot = 1 << (i + 4);
     }
 
-    VirtualFree(base, 0, MEM_FREE);
+    VirtualFree(base, 0, MEM_RELEASE);
 }
 
 static BOOL is_mem_writable(DWORD prot)
@@ -3035,7 +3044,7 @@ static void test_VirtualAlloc_protection(void)
             ptr = VirtualAlloc(base, si.dwPageSize, MEM_COMMIT, td[i].prot);
             ok(ptr == base, "%d: VirtualAlloc failed %d\n", i, GetLastError());
 
-            VirtualFree(base, 0, MEM_FREE);
+            VirtualFree(base, 0, MEM_RELEASE);
         }
         else
         {
@@ -3163,11 +3172,8 @@ static void test_CreateFileMapping_protection(void)
             ptr = VirtualAlloc(base, si.dwPageSize, MEM_COMMIT, td[i].prot);
             ok(!ptr, "%d: VirtualAlloc(%02x) should fail\n", i, td[i].prot);
             /* FIXME: remove once Wine is fixed */
-            if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
-todo_wine
-            ok(GetLastError() == ERROR_ACCESS_DENIED, "%d: expected ERROR_ACCESS_DENIED, got %d\n", i, GetLastError());
-            else
-            ok(GetLastError() == ERROR_ACCESS_DENIED, "%d: expected ERROR_ACCESS_DENIED, got %d\n", i, GetLastError());
+            todo_wine_if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
+                ok(GetLastError() == ERROR_ACCESS_DENIED, "%d: expected ERROR_ACCESS_DENIED, got %d\n", i, GetLastError());
 
             SetLastError(0xdeadbeef);
             ret = VirtualProtect(base, si.dwPageSize, td[i].prot, &old_prot);
@@ -3258,9 +3264,7 @@ todo_wine
             ok(info.BaseAddress == base, "%d: got %p != expected %p\n", i, info.BaseAddress, base);
             ok(info.RegionSize == si.dwPageSize, "%d: got %#lx != expected %#x\n", i, info.RegionSize, si.dwPageSize);
             /* FIXME: remove the condition below once Wine is fixed */
-            if (td[i].prot == PAGE_EXECUTE_WRITECOPY)
-                todo_wine ok(info.Protect == prot, "%d: got %#x != expected %#x\n", i, info.Protect, prot);
-            else
+            todo_wine_if (td[i].prot == PAGE_EXECUTE_WRITECOPY)
                 ok(info.Protect == prot, "%d: got %#x != expected %#x\n", i, info.Protect, prot);
             ok(info.AllocationBase == base, "%d: %p != %p\n", i, info.AllocationBase, base);
             ok(info.AllocationProtect == alloc_prot, "%d: %#x != %#x\n", i, info.AllocationProtect, alloc_prot);
@@ -3275,9 +3279,7 @@ todo_wine
                 ret = VirtualQuery(base, &info, sizeof(info));
                 ok(ret, "VirtualQuery failed %d\n", GetLastError());
                 /* FIXME: remove the condition below once Wine is fixed */
-                if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
-                    todo_wine ok(info.Protect == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot_after_write);
-                else
+                todo_wine_if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
                     ok(info.Protect == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, info.Protect, td[i].prot_after_write);
             }
         }
@@ -3293,9 +3295,7 @@ todo_wine
         ret = VirtualProtect(base, si.dwPageSize, PAGE_NOACCESS, &old_prot);
         ok(ret, "%d: VirtualProtect error %d\n", i, GetLastError());
         /* FIXME: remove the condition below once Wine is fixed */
-        if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
-            todo_wine ok(old_prot == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, old_prot, td[i].prot_after_write);
-        else
+        todo_wine_if (td[i].prot == PAGE_WRITECOPY || td[i].prot == PAGE_EXECUTE_WRITECOPY)
             ok(old_prot == td[i].prot_after_write, "%d: got %#x != expected %#x\n", i, old_prot, td[i].prot_after_write);
     }
 
@@ -3666,11 +3666,8 @@ static void test_mapping(void)
                 ptr = VirtualAlloc(base, si.dwPageSize, MEM_COMMIT, page_prot[k]);
                 ok(!ptr, "VirtualAlloc(%02x) should fail\n", page_prot[k]);
                 /* FIXME: remove once Wine is fixed */
-                if (page_prot[k] == PAGE_WRITECOPY || page_prot[k] == PAGE_EXECUTE_WRITECOPY)
-todo_wine
-                ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
-                else
-                ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
+                todo_wine_if (page_prot[k] == PAGE_WRITECOPY || page_prot[k] == PAGE_EXECUTE_WRITECOPY)
+                    ok(GetLastError() == ERROR_ACCESS_DENIED, "expected ERROR_ACCESS_DENIED, got %d\n", GetLastError());
             }
 
             UnmapViewOfFile(base);

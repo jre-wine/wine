@@ -25,7 +25,22 @@
 #include <string.h>
 #include <sys/types.h>
 
+#include "wine/unicode.h"
 #include "wine/library.h"
+
+/* functions from libwine_port that are also exported from libwine for backwards compatibility */
+const void *libwine_port_functions[] =
+{
+    wine_cp_enum_table,
+    wine_cp_get_table,
+    wine_cp_mbstowcs,
+    wine_cp_wcstombs,
+    wine_cpsymbol_mbstowcs,
+    wine_cpsymbol_wcstombs,
+    wine_fold_string,
+    wine_utf8_mbstowcs,
+    wine_utf8_wcstombs
+};
 
 /* no longer used, for backwards compatibility only */
 struct wine_pthread_functions;

@@ -44,7 +44,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(wgl);
 
 
 struct gl_info {
-    char *glVersion;
     char *glExtensions;
 
     char wglExtensions[4096];
@@ -1259,9 +1258,6 @@ static BOOL init_gl_info(void)
         return FALSE;
     }
 
-    str = (const char*)opengl_funcs.gl.p_glGetString(GL_VERSION);
-    gl_info.glVersion = HeapAlloc(GetProcessHeap(), 0, strlen(str) + 1);
-    strcpy(gl_info.glVersion, str);
     str = (const char*)opengl_funcs.gl.p_glGetString(GL_EXTENSIONS);
     length = strlen(str) + sizeof(legacy_extensions);
     if (allow_vsync)
@@ -1274,9 +1270,10 @@ static BOOL init_gl_info(void)
 
     opengl_funcs.gl.p_glGetIntegerv(GL_MAX_VIEWPORT_DIMS, gl_info.max_viewport_dims);
 
-    TRACE("GL version   : %s\n", gl_info.glVersion);
+    str = (const char*)opengl_funcs.gl.p_glGetString(GL_VERSION);
+    sscanf(str, "%u.%u", &gl_info.max_major, &gl_info.max_minor);
+    TRACE("GL version   : %s\n", str);
     TRACE("GL renderer  : %s\n", opengl_funcs.gl.p_glGetString(GL_RENDERER));
-    sscanf(gl_info.glVersion, "%u.%u", &gl_info.max_major, &gl_info.max_minor);
 
     CGLSetCurrentContext(old_context);
     CGLReleaseContext(context);
@@ -3060,7 +3057,13 @@ static BOOL macdrv_wglMakeContextCurrentARB(HDC draw_hdc, HDC read_hdc, struct w
         return TRUE;
     }
 
-    if ((hwnd = WindowFromDC(draw_hdc)))
+    if (!draw_hdc && !read_hdc)
+    {
+        context->draw_hwnd = NULL;
+        context->draw_view = NULL;
+        context->draw_pbuffer = NULL;
+    }
+    else if ((hwnd = WindowFromDC(draw_hdc)))
     {
         if (!(data = get_win_data(hwnd)))
         {

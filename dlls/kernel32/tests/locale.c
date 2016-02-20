@@ -329,24 +329,13 @@ static void test_GetLocaleInfoW(void)
 
           val = 0;
           GetLocaleInfoW(lcid, LOCALE_ILANGUAGE|LOCALE_RETURN_NUMBER, (WCHAR*)&val, sizeof(val)/sizeof(WCHAR));
-          if (ptr->todo & 0x1)
-          {
-          todo_wine
-              ok(val == ptr->lcid || (val && broken(val == ptr->lcid_broken)), "%s: got wrong lcid 0x%04x, expected 0x%04x\n",
-                  wine_dbgstr_w(ptr->name), val, ptr->lcid);
-          }
-          else
+          todo_wine_if (ptr->todo & 0x1)
               ok(val == ptr->lcid || (val && broken(val == ptr->lcid_broken)), "%s: got wrong lcid 0x%04x, expected 0x%04x\n",
                   wine_dbgstr_w(ptr->name), val, ptr->lcid);
 
           /* now check LOCALE_SNAME */
           GetLocaleInfoW(lcid, LOCALE_SNAME, bufferW, COUNTOF(bufferW));
-          if (ptr->todo & 0x2)
-          todo_wine
-              ok(!lstrcmpW(bufferW, ptr->sname) ||
-                 (*ptr->sname_broken && broken(!lstrcmpW(bufferW, ptr->sname_broken))),
-                  "%s: got %s\n", wine_dbgstr_w(ptr->name), wine_dbgstr_w(bufferW));
-          else
+          todo_wine_if (ptr->todo & 0x2)
               ok(!lstrcmpW(bufferW, ptr->sname) ||
                  (*ptr->sname_broken && broken(!lstrcmpW(bufferW, ptr->sname_broken))),
                   "%s: got %s\n", wine_dbgstr_w(ptr->name), wine_dbgstr_w(bufferW));
@@ -1636,7 +1625,21 @@ static const struct comparestringa_entry comparestringa_data[] = {
   { LOCALE_SYSTEM_DEFAULT, SORT_STRINGSORT, "'o", -1, "/m", -1, CSTR_LESS_THAN },
   { LOCALE_SYSTEM_DEFAULT, SORT_STRINGSORT, "/m", -1, "'o", -1, CSTR_GREATER_THAN },
   { LOCALE_SYSTEM_DEFAULT, 0, "aLuZkUtZ", 8, "aLuZkUtZ", 9, CSTR_EQUAL },
-  { LOCALE_SYSTEM_DEFAULT, 0, "aLuZkUtZ", 7, "aLuZkUtZ\0A", 10, CSTR_LESS_THAN }
+  { LOCALE_SYSTEM_DEFAULT, 0, "aLuZkUtZ", 7, "aLuZkUtZ\0A", 10, CSTR_LESS_THAN },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a-", 3, "a\0", 3, CSTR_GREATER_THAN },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a'", 3, "a\0", 3, CSTR_GREATER_THAN },
+  { LOCALE_SYSTEM_DEFAULT, SORT_STRINGSORT, "a-", 3, "a\0", 3, CSTR_GREATER_THAN },
+  { LOCALE_SYSTEM_DEFAULT, SORT_STRINGSORT, "a'", 3, "a\0", 3, CSTR_GREATER_THAN },
+  { LOCALE_SYSTEM_DEFAULT, NORM_IGNORESYMBOLS, "a.", 3, "a\0", 3, CSTR_EQUAL },
+  { LOCALE_SYSTEM_DEFAULT, NORM_IGNORESYMBOLS, "a ", 3, "a\0", 3, CSTR_EQUAL },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a", 1, "a\0\0", 4, CSTR_EQUAL },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a", 2, "a\0\0", 4, CSTR_EQUAL },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a\0\0", 4, "a", 1, CSTR_EQUAL },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a\0\0", 4, "a", 2, CSTR_EQUAL },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a", 1, "a\0x", 4, CSTR_LESS_THAN },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a", 2, "a\0x", 4, CSTR_LESS_THAN },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a\0x", 4, "a", 1, CSTR_GREATER_THAN },
+  { LOCALE_SYSTEM_DEFAULT, 0, "a\0x", 4, "a", 2, CSTR_GREATER_THAN },
 };
 
 static void test_CompareStringA(void)
@@ -1782,6 +1785,36 @@ static void test_CompareStringA(void)
     ret = CompareStringA(lcid, 0, a, sizeof(a), a, sizeof(a));
     ok (GetLastError() == 0xdeadbeef && ret == CSTR_EQUAL,
         "ret %d, error %d, expected value %d\n", ret, GetLastError(), CSTR_EQUAL);
+}
+
+static void test_CompareStringW(void)
+{
+    WCHAR *str1, *str2;
+    SYSTEM_INFO si;
+    DWORD old_prot;
+    BOOL success;
+    char *buf;
+    int ret;
+
+    GetSystemInfo(&si);
+    buf = VirtualAlloc(NULL, si.dwPageSize * 4, MEM_COMMIT, PAGE_READWRITE);
+    ok(buf != NULL, "VirtualAlloc failed with %u\n", GetLastError());
+    success = VirtualProtect(buf + si.dwPageSize, si.dwPageSize, PAGE_NOACCESS, &old_prot);
+    ok(success, "VirtualProtect failed with %u\n", GetLastError());
+    success = VirtualProtect(buf + 3 * si.dwPageSize, si.dwPageSize, PAGE_NOACCESS, &old_prot);
+    ok(success, "VirtualProtect failed with %u\n", GetLastError());
+
+    str1 = (WCHAR *)(buf + si.dwPageSize - sizeof(WCHAR));
+    str2 = (WCHAR *)(buf + 3 * si.dwPageSize - sizeof(WCHAR));
+    *str1 = 'A';
+    *str2 = 'B';
+
+    /* CompareStringW should abort on the first non-matching character */
+    ret = CompareStringW(CP_ACP, 0, str1, 100, str2, 100);
+    ok(ret == CSTR_LESS_THAN, "expected CSTR_LESS_THAN, got %d\n", ret);
+
+    success = VirtualFree(buf, 0, MEM_RELEASE);
+    ok(success, "VirtualFree failed with %u\n", GetLastError());
 }
 
 struct comparestringex_test {
@@ -1966,16 +1999,9 @@ static void test_CompareStringEx(void)
 
         MultiByteToWideChar(CP_ACP, 0, e->locale, -1, locale, sizeof(locale)/sizeof(WCHAR));
         ret = pCompareStringEx(locale, e->flags, e->first, -1, e->second, -1, NULL, NULL, 0);
-        if (e->todo)
-        {
-            todo_wine ok(ret == e->ret || broken(ret == e->broken),
-                         "%d: got %s, expected %s\n", i, op[ret], op[e->ret]);
-        }
-        else
-        {
+        todo_wine_if (e->todo)
             ok(ret == e->ret || broken(ret == e->broken),
                "%d: got %s, expected %s\n", i, op[ret], op[e->ret]);
-        }
     }
 
 }
@@ -2442,11 +2468,7 @@ static void test_LocaleNameToLCID(void)
         while (*ptr->name)
         {
             lcid = pLocaleNameToLCID(ptr->name, 0);
-            if (ptr->todo)
-            todo_wine
-                ok(lcid == ptr->lcid, "%s: got wrong lcid 0x%04x, expected 0x%04x\n",
-                    wine_dbgstr_w(ptr->name), lcid, ptr->lcid);
-            else
+            todo_wine_if (ptr->todo)
                 ok(lcid == ptr->lcid, "%s: got wrong lcid 0x%04x, expected 0x%04x\n",
                     wine_dbgstr_w(ptr->name), lcid, ptr->lcid);
 
@@ -3645,8 +3667,8 @@ static void test_GetStringTypeW(void)
     static const WCHAR space_special[] = {0x09, 0x0d, 0x85};
 
     WORD types[20];
+    WCHAR ch[2];
     BOOL ret;
-    WCHAR ch;
     int i;
 
     /* NULL src */
@@ -3721,19 +3743,27 @@ static void test_GetStringTypeW(void)
         ok(types[i] & C1_SPACE || broken(types[i] == C1_CNTRL) || broken(types[i] == 0), "incorrect types returned for %x -> (%x does not have %x)\n",space_special[i], types[i], C1_SPACE );
 
     /* surrogate pairs */
-    ch = 0xd800;
+    ch[0] = 0xd800;
     memset(types, 0, sizeof(types));
-    GetStringTypeW(CT_CTYPE3, &ch, 1, types);
+    GetStringTypeW(CT_CTYPE3, ch, 1, types);
     if (types[0] == C3_NOTAPPLICABLE)
         win_skip("C3_HIGHSURROGATE/C3_LOWSURROGATE are not supported.\n");
     else {
         ok(types[0] == C3_HIGHSURROGATE, "got %x\n", types[0]);
 
-        ch = 0xdc00;
+        ch[0] = 0xdc00;
         memset(types, 0, sizeof(types));
-        GetStringTypeW(CT_CTYPE3, &ch, 1, types);
+        GetStringTypeW(CT_CTYPE3, ch, 1, types);
         ok(types[0] == C3_LOWSURROGATE, "got %x\n", types[0]);
     }
+
+    /* Zl, Zp categories */
+    ch[0] = 0x2028;
+    ch[1] = 0x2029;
+    memset(types, 0, sizeof(types));
+    GetStringTypeW(CT_CTYPE1, ch, 2, types);
+    ok(types[0] == (C1_DEFINED|C1_SPACE), "got %x\n", types[0]);
+    ok(types[1] == (C1_DEFINED|C1_SPACE), "got %x\n", types[1]);
 }
 
 static void test_IdnToNameprepUnicode(void)
@@ -3890,16 +3920,10 @@ static void test_IdnToNameprepUnicode(void)
                 test_data[i].in_len, buf, sizeof(buf)/sizeof(WCHAR));
         err = GetLastError();
 
-        if (!test_data[i].todo)
-        {
+        todo_wine_if (test_data[i].todo)
             ok(ret == test_data[i].ret ||
                     broken(ret == test_data[i].broken_ret), "%d) ret = %d\n", i, ret);
-        }
-        else
-        {
-            todo_wine ok(ret == test_data[i].ret ||
-                    broken(ret == test_data[i].broken_ret), "%d) ret = %d\n", i, ret);
-        }
+
         if(ret != test_data[i].ret)
             continue;
 
@@ -4121,10 +4145,7 @@ static void test_GetLocaleInfoEx(void)
         {
             val = 0;
             pGetLocaleInfoEx(ptr->name, LOCALE_ILANGUAGE|LOCALE_RETURN_NUMBER, (WCHAR*)&val, sizeof(val)/sizeof(WCHAR));
-            if (ptr->todo)
-            todo_wine
-                ok(val == ptr->lcid, "%s: got wrong lcid 0x%04x, expected 0x%04x\n", wine_dbgstr_w(ptr->name), val, ptr->lcid);
-            else
+            todo_wine_if (ptr->todo)
                 ok(val == ptr->lcid, "%s: got wrong lcid 0x%04x, expected 0x%04x\n", wine_dbgstr_w(ptr->name), val, ptr->lcid);
             bufferW[0] = 0;
             ret = pGetLocaleInfoEx(ptr->name, LOCALE_SNAME, bufferW, sizeof(bufferW)/sizeof(WCHAR));
@@ -4579,10 +4600,8 @@ static void test_GetSystemPreferredUILanguages(void)
     size = 0;
     SetLastError(0xdeadbeef);
     ret = pGetSystemPreferredUILanguages(0, &count, NULL, &size);
-    todo_wine
     ok(ret, "Expected GetSystemPreferredUILanguages to succeed\n");
     ok(count, "Expected count > 0\n");
-    todo_wine
     ok(size % 6 == 1, "Expected size (%d) %% 6 == 1\n", size);
 
     count = 0xdeadbeef;
@@ -4613,20 +4632,16 @@ static void test_GetSystemPreferredUILanguages(void)
     size = 0;
     SetLastError(0xdeadbeef);
     ret = pGetSystemPreferredUILanguages(MUI_LANGUAGE_ID | MUI_MACHINE_LANGUAGE_SETTINGS, &count, NULL, &size);
-    todo_wine
     ok(ret, "Expected GetSystemPreferredUILanguages to succeed\n");
     ok(count, "Expected count > 0\n");
-    todo_wine
     ok(size % 5 == 1, "Expected size (%d) %% 5 == 1\n", size);
 
     count = 0xdeadbeef;
     size = 0;
     SetLastError(0xdeadbeef);
     ret = pGetSystemPreferredUILanguages(MUI_LANGUAGE_NAME | MUI_MACHINE_LANGUAGE_SETTINGS, &count, NULL, &size);
-    todo_wine
     ok(ret, "Expected GetSystemPreferredUILanguages to succeed\n");
     ok(count, "Expected count > 0\n");
-    todo_wine
     ok(size % 6 == 1, "Expected size (%d) %% 6 == 1\n", size);
 
     /* second parameter
@@ -4652,20 +4667,16 @@ static void test_GetSystemPreferredUILanguages(void)
     size_id = 0;
     SetLastError(0xdeadbeef);
     ret = pGetSystemPreferredUILanguages(MUI_LANGUAGE_ID, &count, NULL, &size_id);
-    todo_wine
     ok(ret, "Expected GetSystemPreferredUILanguages to succeed\n");
     ok(count, "Expected count > 0\n");
-    todo_wine
     ok(size_id  % 5 == 1, "Expected size (%d) %% 5 == 1\n", size_id);
 
     count = 0xdeadbeef;
     size_name = 0;
     SetLastError(0xdeadbeef);
     ret = pGetSystemPreferredUILanguages(MUI_LANGUAGE_NAME, &count, NULL, &size_name);
-    todo_wine
     ok(ret, "Expected GetSystemPreferredUILanguages to succeed\n");
     ok(count, "Expected count > 0\n");
-    todo_wine
     ok(size_name % 6 == 1, "Expected size (%d) %% 6 == 1\n", size_name);
 
     size_buffer = max(size_id, size_name);
@@ -4777,6 +4788,7 @@ START_TEST(locale)
   test_GetCurrencyFormatA(); /* Also tests the W version */
   test_GetNumberFormatA();   /* Also tests the W version */
   test_CompareStringA();
+  test_CompareStringW();
   test_CompareStringEx();
   test_LCMapStringA();
   test_LCMapStringW();

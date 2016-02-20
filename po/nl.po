@@ -10445,12 +10445,12 @@ msgstr ""
 msgid "Are you sure?"
 msgstr "Bent u zeker?"
 
-#: cmd.rc:354 xcopy.rc:43
+#: cmd.rc:354 reg.rc:45 xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr "J"
 
-#: cmd.rc:355 xcopy.rc:44
+#: cmd.rc:355 reg.rc:46 xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr "N"
@@ -10589,7 +10589,7 @@ msgstr "Volume in schijfstation %1!c! is %2\n"
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr "Volume in schijfstation %1!c! heeft geen label.\n"
 
-#: cmd.rc:390
+#: cmd.rc:390 reg.rc:44
 msgid " (Yes|No)"
 msgstr " (Ja|Nee)"
 
@@ -11802,22 +11802,29 @@ msgid "The operation completed successfully\n"
 msgstr "De bewerking is succesvol voltooid\n"
 
 #: reg.rc:35
-msgid "Error: Invalid key name\n"
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "reg: Invalid key name\n"
 msgstr "Fout: Foutieve sleutelnaam\n"
 
 #: reg.rc:36
-msgid "Error: Invalid command line parameters\n"
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "reg: Invalid command line parameters\n"
 msgstr "Fout: Foutieve commandoregel-parameters\n"
 
 #: reg.rc:37
 #, fuzzy
 #| msgid "Error: Unable to add keys to remote machine\n"
-msgid "Error: Unable to access remote machine\n"
+msgid "reg: Unable to access remote machine\n"
 msgstr "Fout: Sleutels konden niet toegevoegd worden aan de remote machine\n"
 
 #: reg.rc:38
+#, fuzzy
+#| msgid ""
+#| "Error: The system was unable to find the specified registry key or value\n"
 msgid ""
-"Error: The system was unable to find the specified registry key or value\n"
+"reg: The system was unable to find the specified registry key or value\n"
 msgstr ""
 "Fout: Het systeem kon de gespecificeerde registersleutel of waarde niet "
 "vinden\n"
@@ -11825,8 +11832,52 @@ msgstr ""
 #: reg.rc:39
 #, fuzzy
 #| msgid "Unsupported type.\n"
-msgid "Error: Unsupported type\n"
+msgid "reg: Unsupported registry data type [%1]\n"
 msgstr "Niet-ondersteund type.\n"
+
+#: reg.rc:40
+msgid "reg: The option [/d] must be followed by a valid integer\n"
+msgstr ""
+
+#: reg.rc:41
+msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
+msgstr ""
+
+#: reg.rc:42
+msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
+msgstr ""
+
+#: reg.rc:43
+#, fuzzy
+#| msgid "The specified file already exists. Do you want to replace it?"
+msgid "The registry value '%1' already exists. Do you want to overwrite it?"
+msgstr "Het gespecifeerde bestand bestaat reeds. Wilt u het vervangen?"
+
+#: reg.rc:47
+msgid "The registry operation was cancelled\n"
+msgstr ""
+
+#: reg.rc:48 regedit.rc:204
+msgid "(Default)"
+msgstr "(Standaard)"
+
+#: reg.rc:49
+#, fuzzy
+#| msgid "Are you sure you want to delete these values?"
+msgid "Are you sure you want to delete the registry value '%1'?"
+msgstr "Weet u zeker dat u deze waarden wilt verwijderen?"
+
+#: reg.rc:50
+#, fuzzy
+#| msgid "Are you sure you want to delete value '%s'?"
+msgid "Are you sure you want to delete all registry values in '%1'?"
+msgstr "Weet u zeker dat u de waarde '%s' wilt verwijderen?"
+
+#: reg.rc:51
+#, fuzzy
+#| msgid "Are you sure you want to delete '%1'?"
+msgid "Are you sure you want to delete the registry key '%1'?"
+msgstr "Weet u zeker dat u '%1' wilt verwijderen?"
 
 #: regedit.rc:34
 msgid "&Registry"
@@ -12029,10 +12080,6 @@ msgstr "Registerbestanden (*.reg)"
 #: regedit.rc:197
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
 msgstr "Win9x/NT4 Registerbestanden (REGEDIT4)"
-
-#: regedit.rc:204
-msgid "(Default)"
-msgstr "(Standaard)"
 
 #: regedit.rc:205
 msgid "(value not set)"

@@ -99,11 +99,13 @@ static struct object *symlink_lookup_name( struct object *obj, struct unicode_st
     struct object *target;
 
     assert( obj->ops == &symlink_ops );
+
+    if (!name) return NULL;
     if (!name->len && (attr & OBJ_OPENLINK)) return NULL;
 
     target_str.str = symlink->target;
     target_str.len = symlink->len;
-    if ((target = find_object_dir( NULL, &target_str, attr, &name_left )))
+    if ((target = lookup_named_object( NULL, &target_str, attr, &name_left )))
     {
         if (name_left.len)
         {
@@ -131,7 +133,7 @@ static void symlink_destroy( struct object *obj )
     free( symlink->target );
 }
 
-struct symlink *create_symlink( struct directory *root, const struct unicode_str *name,
+struct symlink *create_symlink( struct object *root, const struct unicode_str *name,
                                 unsigned int attr, const struct unicode_str *target,
                                 const struct security_descriptor *sd )
 {
@@ -142,16 +144,12 @@ struct symlink *create_symlink( struct directory *root, const struct unicode_str
         set_error( STATUS_INVALID_PARAMETER );
         return NULL;
     }
-    if ((symlink = create_named_object_dir( root, name, attr, &symlink_ops )) &&
+    if ((symlink = create_named_object( root, &symlink_ops, name, attr, sd )) &&
         (get_error() != STATUS_OBJECT_NAME_EXISTS))
     {
         if ((symlink->target = memdup( target->str, target->len )))
         {
             symlink->len = target->len;
-            if (sd)
-                default_set_sd( &symlink->obj, sd,
-                                OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
-                                DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION );
         }
         else
         {
@@ -168,7 +166,7 @@ DECL_HANDLER(create_symlink)
 {
     struct symlink *symlink;
     struct unicode_str name, target;
-    struct directory *root;
+    struct object *root;
     const struct security_descriptor *sd;
     const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 

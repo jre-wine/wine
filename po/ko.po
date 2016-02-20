@@ -10483,12 +10483,12 @@ msgstr ""
 msgid "Are you sure?"
 msgstr "당신은 확신합니까?"
 
-#: cmd.rc:354 xcopy.rc:43
+#: cmd.rc:354 reg.rc:45 xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr "예"
 
-#: cmd.rc:355 xcopy.rc:44
+#: cmd.rc:355 reg.rc:46 xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr "아니오"
@@ -10626,7 +10626,7 @@ msgstr "드라이브 %1!c!의 볼륨은 %2임\n"
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr "드라이브 %1!c!는 라벨을 가지고 있지 않습니다.\n"
 
-#: cmd.rc:390
+#: cmd.rc:390 reg.rc:44
 msgid " (Yes|No)"
 msgstr "(예(Y)|아니오(N))"
 
@@ -11827,29 +11827,80 @@ msgid "The operation completed successfully\n"
 msgstr "작업이 성공적으로 끝났습니다\n"
 
 #: reg.rc:35
-msgid "Error: Invalid key name\n"
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "reg: Invalid key name\n"
 msgstr "오류: 올바르지 않은 키 이름\n"
 
 #: reg.rc:36
-msgid "Error: Invalid command line parameters\n"
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "reg: Invalid command line parameters\n"
 msgstr "오류:올바르지 않은 명령라인 매개변수\n"
 
 #: reg.rc:37
 #, fuzzy
 #| msgid "Error: Unable to add keys to remote machine\n"
-msgid "Error: Unable to access remote machine\n"
+msgid "reg: Unable to access remote machine\n"
 msgstr "오류: 원격 머신에  키를 더하는 것은 가능하지 않습니다\n"
 
 #: reg.rc:38
+#, fuzzy
+#| msgid ""
+#| "Error: The system was unable to find the specified registry key or value\n"
 msgid ""
-"Error: The system was unable to find the specified registry key or value\n"
+"reg: The system was unable to find the specified registry key or value\n"
 msgstr "오류: 이 시스템에서 지정된 레지스트리 키나 값을 찾을수 없습니다\n"
 
 #: reg.rc:39
 #, fuzzy
 #| msgid "Unsupported type.\n"
-msgid "Error: Unsupported type\n"
+msgid "reg: Unsupported registry data type [%1]\n"
 msgstr "지원하지 않는 형식.\n"
+
+#: reg.rc:40
+msgid "reg: The option [/d] must be followed by a valid integer\n"
+msgstr ""
+
+#: reg.rc:41
+msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
+msgstr ""
+
+#: reg.rc:42
+msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
+msgstr ""
+
+#: reg.rc:43
+#, fuzzy
+#| msgid "The specified file already exists. Do you want to replace it?"
+msgid "The registry value '%1' already exists. Do you want to overwrite it?"
+msgstr "지정된 파일은 이미 존재합니다.덮어 쓰시겠습니까?"
+
+#: reg.rc:47
+msgid "The registry operation was cancelled\n"
+msgstr ""
+
+#: reg.rc:48 regedit.rc:204
+msgid "(Default)"
+msgstr "(기본)"
+
+#: reg.rc:49
+#, fuzzy
+#| msgid "Are you sure you want to delete these values?"
+msgid "Are you sure you want to delete the registry value '%1'?"
+msgstr "이 값들을 정말로 지우겠습니까?"
+
+#: reg.rc:50
+#, fuzzy
+#| msgid "Are you sure you want to delete value '%s'?"
+msgid "Are you sure you want to delete all registry values in '%1'?"
+msgstr "당신은 이 값 '%s'을 정말로 지우겠습니까?"
+
+#: reg.rc:51
+#, fuzzy
+#| msgid "Are you sure you want to delete '%1'?"
+msgid "Are you sure you want to delete the registry key '%1'?"
+msgstr "당신은  '%1'을 지우기를 바랍니까?"
 
 #: regedit.rc:34
 msgid "&Registry"
@@ -12051,10 +12102,6 @@ msgstr "레지스트리 파일 (*.reg)"
 #: regedit.rc:197
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
 msgstr "Win9x/NT4 레지스트리 파일 (REGEDIT4)"
-
-#: regedit.rc:204
-msgid "(Default)"
-msgstr "(기본)"
 
 #: regedit.rc:205
 msgid "(value not set)"
