@@ -1,3 +1,15 @@
+wine-development (1.9.2-1) unstable; urgency=medium
+
+  * New upstream release 1.9.2, released Jan 22, 2016.
+    - GStreamer 1.0 support (closes: #754050).
+    - Support for SHA hashes in BCrypt.
+    - Synthesizing bold glyphs also for bitmap fonts.
+    - Underlines support in DirectWrite.
+    - Still more Shader Model 4 instructions.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 19 Feb 2016 02:16:00 +0000
+
 wine-development (1.9.1-1) unstable; urgency=medium
 
   [ Michael Gilbert ]

@@ -24,6 +24,9 @@ export DEB_BUILD_MAINT_OPTIONS=hardening=+all,-pie,-fortify
 # linker options
 export DEB_LDFLAGS_MAINT_APPEND+=-Wl,-rpath,/$(LIBDIR)
 
+# gstreamer libs
+export GSTREAMER_LIBS=-lgstreamer-video-1.0 -lgstreamer-audio-1.0 $(shell pkg-config --libs gstreamer-1.0)
+
 # configure options
 CONFLAGS=--with-gnutls \
          --without-hal \
@@ -31,7 +34,6 @@ CONFLAGS=--with-gnutls \
          --without-sane \
          --without-capi \
          --without-gphoto \
-         --without-gstreamer \
          --disable-tests \
          --libdir=/$(LIBDIR) \
          --bindir=/$(BINDIR) \
