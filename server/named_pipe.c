@@ -473,6 +473,8 @@ static struct object *named_pipe_device_lookup_name( struct object *obj, struct 
     assert( obj->ops == &named_pipe_device_ops );
     assert( device->pipes );
 
+    if (!name) return NULL;  /* open the device itself */
+
     if ((found = find_object( device->pipes, name, attr | OBJ_CASE_INSENSITIVE )))
         name->len = 0;
 
@@ -498,11 +500,11 @@ static enum server_fd_type named_pipe_device_get_fd_type( struct fd *fd )
     return FD_TYPE_DEVICE;
 }
 
-void create_named_pipe_device( struct directory *root, const struct unicode_str *name )
+void create_named_pipe_device( struct object *root, const struct unicode_str *name )
 {
     struct named_pipe_device *dev;
 
-    if ((dev = create_named_object_dir( root, name, 0, &named_pipe_device_ops )) &&
+    if ((dev = create_named_object( root, &named_pipe_device_ops, name, 0, NULL )) &&
         get_error() != STATUS_OBJECT_NAME_EXISTS)
     {
         dev->pipes = NULL;
@@ -666,47 +668,6 @@ static obj_handle_t pipe_server_ioctl( struct fd *fd, ioctl_code_t code, const a
     default:
         return default_fd_ioctl( fd, code, async_data, blocking );
     }
-}
-
-static struct named_pipe *create_named_pipe( struct directory *root, const struct unicode_str *name,
-                                             unsigned int attr, const struct security_descriptor *sd )
-{
-    struct object *obj;
-    struct named_pipe *pipe = NULL;
-    struct unicode_str new_name;
-
-    if (!name || !name->len)
-    {
-        if ((pipe = alloc_object( &named_pipe_ops ))) clear_error();
-        return pipe;
-    }
-
-    if (!(obj = find_object_dir( root, name, attr, &new_name )))
-    {
-        set_error( STATUS_OBJECT_NAME_INVALID );
-        return NULL;
-    }
-    if (!new_name.len)
-    {
-        if (attr & OBJ_OPENIF && obj->ops == &named_pipe_ops)
-            set_error( STATUS_OBJECT_NAME_EXISTS );
-        else
-        {
-            release_object( obj );
-            obj = NULL;
-            if (attr & OBJ_OPENIF)
-                set_error( STATUS_OBJECT_TYPE_MISMATCH );
-            else
-                set_error( STATUS_OBJECT_NAME_COLLISION );
-        }
-        return (struct named_pipe *)obj;
-    }
-
-    if ((pipe = create_object( obj, &named_pipe_ops, &new_name )))
-        clear_error();
-
-    release_object( obj );
-    return pipe;
 }
 
 static struct pipe_server *get_pipe_server_obj( struct process *process,
@@ -896,11 +857,8 @@ static obj_handle_t named_pipe_device_ioctl( struct fd *fd, ioctl_code_t code,
             }
             name.str = buffer->Name;
             name.len = (buffer->NameLength / sizeof(WCHAR)) * sizeof(WCHAR);
-            if (!(pipe = (struct named_pipe *)find_object( device->pipes, &name, OBJ_CASE_INSENSITIVE )))
-            {
-                set_error( STATUS_OBJECT_NAME_NOT_FOUND );
-                return 0;
-            }
+            if (!(pipe = open_named_object( &device->obj, &named_pipe_ops, &name, 0 ))) return 0;
+
             if (!(server = find_available_server( pipe )))
             {
                 struct async *async;
@@ -934,7 +892,7 @@ DECL_HANDLER(create_named_pipe)
     struct named_pipe *pipe;
     struct pipe_server *server;
     struct unicode_str name;
-    struct directory *root;
+    struct object *root;
     const struct security_descriptor *sd;
     const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 
@@ -954,10 +912,10 @@ DECL_HANDLER(create_named_pipe)
             set_error( STATUS_OBJECT_PATH_SYNTAX_BAD );
             return;
         }
-        else if (!(root = get_directory_obj( current->process, objattr->rootdir, 0 ))) return;
+        if (!(root = get_directory_obj( current->process, objattr->rootdir ))) return;
     }
 
-    pipe = create_named_pipe( root, &name, objattr->attributes | OBJ_OPENIF, sd );
+    pipe = create_named_object( root, &named_pipe_ops, &name, objattr->attributes | OBJ_OPENIF, NULL );
 
     if (root) release_object( root );
     if (!pipe) return;

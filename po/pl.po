@@ -10280,12 +10280,12 @@ msgstr ""
 msgid "Are you sure?"
 msgstr "Czy jesteś pewien?"
 
-#: cmd.rc:354 xcopy.rc:43
+#: cmd.rc:354 reg.rc:45 xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr "T"
 
-#: cmd.rc:355 xcopy.rc:44
+#: cmd.rc:355 reg.rc:46 xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr "N"
@@ -10423,7 +10423,7 @@ msgstr "Wolumen w napędzie %1!c! to %2\n"
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr "Wolumen w napędzie %1!c! nie ma etykiety.\n"
 
-#: cmd.rc:390
+#: cmd.rc:390 reg.rc:44
 msgid " (Yes|No)"
 msgstr " (Tak|Nie)"
 
@@ -11628,25 +11628,88 @@ msgid "The operation completed successfully\n"
 msgstr "Operacja zakończona pomyślnie\n"
 
 #: reg.rc:35
-msgid "Error: Invalid key name\n"
+#, fuzzy
+#| msgid "Error: Invalid key name\n"
+msgid "reg: Invalid key name\n"
 msgstr "Błąd: Niewłaściwa nazwa klucza\n"
 
 #: reg.rc:36
-msgid "Error: Invalid command line parameters\n"
+#, fuzzy
+#| msgid "Error: Invalid command line parameters\n"
+msgid "reg: Invalid command line parameters\n"
 msgstr "Błąd: Niewłaściwe parametry wiersza poleceń\n"
 
 #: reg.rc:37
-msgid "Error: Unable to access remote machine\n"
+#, fuzzy
+#| msgid "Error: Unable to access remote machine\n"
+msgid "reg: Unable to access remote machine\n"
 msgstr "Błąd: Błąd dostępu do zdalnej maszyny\n"
 
 #: reg.rc:38
+#, fuzzy
+#| msgid ""
+#| "Error: The system was unable to find the specified registry key or value\n"
 msgid ""
-"Error: The system was unable to find the specified registry key or value\n"
+"reg: The system was unable to find the specified registry key or value\n"
 msgstr "Błąd: System nie mógł znaleźć podanej wartości lub klucza rejestru\n"
 
 #: reg.rc:39
-msgid "Error: Unsupported type\n"
+#, fuzzy
+#| msgid "Error: Unsupported type\n"
+msgid "reg: Unsupported registry data type [%1]\n"
 msgstr "Błąd: Niewspierany typ\n"
+
+#: reg.rc:40
+#, fuzzy
+#| msgid ""
+#| "uninstaller: The option '--remove' must be followed by an application "
+#| "GUID\n"
+msgid "reg: The option [/d] must be followed by a valid integer\n"
+msgstr "usuwanie programów: Po opcji '--remove' należy podać GUID aplikacji\n"
+
+#: reg.rc:41
+#, fuzzy
+#| msgid ""
+#| "uninstaller: The option '--remove' must be followed by an application "
+#| "GUID\n"
+msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
+msgstr "usuwanie programów: Po opcji '--remove' należy podać GUID aplikacji\n"
+
+#: reg.rc:42
+msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
+msgstr ""
+
+#: reg.rc:43
+#, fuzzy
+#| msgid "The specified file already exists. Do you want to replace it?"
+msgid "The registry value '%1' already exists. Do you want to overwrite it?"
+msgstr "Określony plik już istnieje. Czy chcesz go zastąpić?"
+
+#: reg.rc:47
+msgid "The registry operation was cancelled\n"
+msgstr ""
+
+#: reg.rc:48 regedit.rc:204
+msgid "(Default)"
+msgstr "(Domyślna)"
+
+#: reg.rc:49
+#, fuzzy
+#| msgid "Are you sure you want to delete these values?"
+msgid "Are you sure you want to delete the registry value '%1'?"
+msgstr "Czy jesteś pewien, że chcesz usunąć te wartości?"
+
+#: reg.rc:50
+#, fuzzy
+#| msgid "Are you sure you want to delete value '%s'?"
+msgid "Are you sure you want to delete all registry values in '%1'?"
+msgstr "Jesteś pewien, że chcesz usunąć daną '%s'?"
+
+#: reg.rc:51
+#, fuzzy
+#| msgid "Are you sure you want to delete '%1'?"
+msgid "Are you sure you want to delete the registry key '%1'?"
+msgstr "Czy jesteś pewien, że chcesz usunąć '%1'?"
 
 #: regedit.rc:34
 msgid "&Registry"
@@ -11848,10 +11911,6 @@ msgstr "Pliki rejestru (*.reg)"
 #: regedit.rc:197
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
 msgstr "Pliki rejestru Win9x/NT4 (REGEDIT4)"
-
-#: regedit.rc:204
-msgid "(Default)"
-msgstr "(Domyślna)"
 
 #: regedit.rc:205
 msgid "(value not set)"

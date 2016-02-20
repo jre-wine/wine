@@ -206,12 +206,14 @@ void WINMM_DeleteWaveform(void)
             WINMM_Device *device = mmdevice->devices[j];
             if(device->handle)
                 CloseHandle(device->handle);
+            device->lock.DebugInfo->Spare[0] = 0;
             DeleteCriticalSection(&device->lock);
         }
 
         if(mmdevice->volume)
             ISimpleAudioVolume_Release(mmdevice->volume);
         CoTaskMemFree(mmdevice->dev_id);
+        mmdevice->lock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&mmdevice->lock);
     }
 
@@ -222,12 +224,14 @@ void WINMM_DeleteWaveform(void)
             WINMM_Device *device = mmdevice->devices[j];
             if(device->handle)
                 CloseHandle(device->handle);
+            device->lock.DebugInfo->Spare[0] = 0;
             DeleteCriticalSection(&device->lock);
         }
 
         if(mmdevice->volume)
             ISimpleAudioVolume_Release(mmdevice->volume);
         CoTaskMemFree(mmdevice->dev_id);
+        mmdevice->lock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&mmdevice->lock);
     }
 
@@ -4286,6 +4290,8 @@ UINT WINAPI mixerGetLineInfoW(HMIXEROBJ hmix, LPMIXERLINEW lpmliW, DWORD fdwInfo
     mmdevice = WINMM_GetMixerMMDevice(hmix, fdwInfo, &mmdev_index);
     if(!mmdevice)
         return MMSYSERR_INVALHANDLE;
+
+    lpmliW->dwUser = 0;
 
     switch(fdwInfo & MIXER_GETLINEINFOF_QUERYMASK){
     case MIXER_GETLINEINFOF_DESTINATION:

@@ -10345,12 +10345,12 @@ msgstr ""
 msgid "Are you sure?"
 msgstr "Êtes-vous sûr(e) ?"
 
-#: cmd.rc:354 xcopy.rc:43
+#: cmd.rc:354 reg.rc:45 xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr "O"
 
-#: cmd.rc:355 xcopy.rc:44
+#: cmd.rc:355 reg.rc:46 xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr "N"
@@ -10490,7 +10490,7 @@ msgstr "Le volume dans le lecteur %1!c! est %2\n"
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr "Le volume dans le lecteur %1!c! n'a pas de label.\n"
 
-#: cmd.rc:390
+#: cmd.rc:390 reg.rc:44
 msgid " (Yes|No)"
 msgstr " (Oui|Non)"
 
@@ -11707,27 +11707,64 @@ msgid "The operation completed successfully\n"
 msgstr "L'opération s'est terminée avec succès\n"
 
 #: reg.rc:35
-msgid "Error: Invalid key name\n"
-msgstr "Erreur : nom de clé invalide\n"
+msgid "reg: Invalid key name\n"
+msgstr "reg : nom de clé invalide\n"
 
 #: reg.rc:36
-msgid "Error: Invalid command line parameters\n"
-msgstr "Erreur : paramètre de ligne de commande invalide\n"
+msgid "reg: Invalid command line parameters\n"
+msgstr "reg : paramètres de ligne de commande invalide\n"
 
 #: reg.rc:37
-msgid "Error: Unable to access remote machine\n"
-msgstr "Erreur : impossible d'accéder à une machine distante\n"
+msgid "reg: Unable to access remote machine\n"
+msgstr "reg : impossible d'accéder à une machine distante\n"
 
 #: reg.rc:38
 msgid ""
-"Error: The system was unable to find the specified registry key or value\n"
+"reg: The system was unable to find the specified registry key or value\n"
 msgstr ""
-"Erreur : le système n'a pas pu trouver la clé ou la valeur de registre "
-"spécifiée\n"
+"reg : le système n'a pas pu trouver la clé ou valeur de registre spécifiée\n"
 
 #: reg.rc:39
-msgid "Error: Unsupported type\n"
-msgstr "Erreur : type non pris en charge\n"
+msgid "reg: Unsupported registry data type [%1]\n"
+msgstr "reg : type non pris en charge [%1]\n"
+
+#: reg.rc:40
+msgid "reg: The option [/d] must be followed by a valid integer\n"
+msgstr "reg : l'option [/d] doit être suivie d'un entier valide\n"
+
+#: reg.rc:41
+msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
+msgstr ""
+"reg : l'option [/d] doit être suivie d'une valeur hexadécimale valide\n"
+
+#: reg.rc:42
+msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
+msgstr "reg : type de donnée non géré [/t 0x%1!x!, /d %2]\n"
+
+#: reg.rc:43
+msgid "The registry value '%1' already exists. Do you want to overwrite it?"
+msgstr "La valeur de registre « %1 » existe déjà. Voulez-vous la remplacer ?"
+
+#: reg.rc:47
+msgid "The registry operation was cancelled\n"
+msgstr "L'operation sur le registre a été annulée\n"
+
+#: reg.rc:48 regedit.rc:204
+msgid "(Default)"
+msgstr "(par défaut)"
+
+#: reg.rc:49
+msgid "Are you sure you want to delete the registry value '%1'?"
+msgstr "Voulez-vous réellement supprimer la valeur de registre « %1 » ?"
+
+#: reg.rc:50
+msgid "Are you sure you want to delete all registry values in '%1'?"
+msgstr ""
+"Voulez-vous réellement supprimer toutes les valeurs de registre dans « %1 » ?"
+
+#: reg.rc:51
+msgid "Are you sure you want to delete the registry key '%1'?"
+msgstr "Voulez-vous réellement supprimer la clé de registre « %1 » ?"
 
 #: regedit.rc:34
 msgid "&Registry"
@@ -11931,10 +11968,6 @@ msgstr "Fichiers de registre (*.reg)"
 #: regedit.rc:197
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
 msgstr "Fichiers de registre Win9x/NT4 (REGEDIT4)"
-
-#: regedit.rc:204
-msgid "(Default)"
-msgstr "(par défaut)"
 
 #: regedit.rc:205
 msgid "(value not set)"
@@ -13887,8 +13920,6 @@ msgid "Configuration error"
 msgstr "Erreur de configuration"
 
 #: wineconsole.rc:42
-#, fuzzy
-#| msgid "Screen buffer size must be greater or equal to the window's one"
 msgid ""
 "The size of the screen buffer must be greater than or equal to the size of "
 "the window."

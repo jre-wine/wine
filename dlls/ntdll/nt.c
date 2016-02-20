@@ -1520,7 +1520,7 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
                 fclose(f);
             }
             else r = 0;
-            if(!logical_proc_info_add_by_id(data, dataex, &len, max_len, RelationProcessorPackage, r, 1 << i))
+            if(!logical_proc_info_add_by_id(data, dataex, &len, max_len, RelationProcessorPackage, r, (ULONG_PTR)1 << i))
             {
                 fclose(fcpu_list);
                 return STATUS_NO_MEMORY;
@@ -1534,7 +1534,7 @@ static NTSTATUS create_logical_proc_info(SYSTEM_LOGICAL_PROCESSOR_INFORMATION **
                 fclose(f);
             }
             else r = i;
-            if(!logical_proc_info_add_by_id(data, dataex, &len, max_len, RelationProcessorCore, r, 1 << i))
+            if(!logical_proc_info_add_by_id(data, dataex, &len, max_len, RelationProcessorCore, r, (ULONG_PTR)1 << i))
             {
                 fclose(fcpu_list);
                 return STATUS_NO_MEMORY;
@@ -2317,6 +2317,17 @@ NTSTATUS WINAPI NtQuerySystemInformation(
             RtlFreeHeap(GetProcessHeap(), 0, buf);
         }
         break;
+    case SystemRecommendedSharedDataAlignment:
+        {
+            len = sizeof(DWORD);
+            if (Length >= len)
+            {
+                if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
+                else *((DWORD *)SystemInformation) = 64;
+            }
+            else ret = STATUS_INFO_LENGTH_MISMATCH;
+        }
+        break;
     default:
 	FIXME("(0x%08x,%p,0x%08x,%p) stub\n",
 	      SystemInformationClass,SystemInformation,Length,ResultLength);
@@ -2340,7 +2351,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
 NTSTATUS WINAPI NtQuerySystemInformationEx(SYSTEM_INFORMATION_CLASS SystemInformationClass,
     void *Query, ULONG QueryLength, void *SystemInformation, ULONG Length, ULONG *ResultLength)
 {
-    ULONG len;
+    ULONG len = 0;
     NTSTATUS ret = STATUS_NOT_IMPLEMENTED;
 
     TRACE("(0x%08x,%p,%u,%p,%u,%p) stub\n", SystemInformationClass, Query, QueryLength, SystemInformation,

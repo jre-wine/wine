@@ -1325,20 +1325,15 @@ static void test_CreateFileA(void)
                 skip("Do not have authority to access volumes. Test for %s skipped\n", filename);
         }
         /* otherwise validate results with expectations */
-        else if (p[i].todo_flag)
-            todo_wine ok(
-                (hFile == INVALID_HANDLE_VALUE &&
-                  (p[i].err == GetLastError() || p[i].err2 == GetLastError())) ||
-                (hFile != INVALID_HANDLE_VALUE && p[i].err == ERROR_SUCCESS),
-                "CreateFileA failed on %s, hFile %p, err=%u, should be %u\n",
-                filename, hFile, GetLastError(), p[i].err);
         else
-            ok(
-                (hFile == INVALID_HANDLE_VALUE &&
-                 (p[i].err == GetLastError() || p[i].err2 == GetLastError())) ||
-                (hFile != INVALID_HANDLE_VALUE && p[i].err == ERROR_SUCCESS),
+        {
+            todo_wine_if (p[i].todo_flag)
+                ok((hFile == INVALID_HANDLE_VALUE &&
+                   (p[i].err == GetLastError() || p[i].err2 == GetLastError())) ||
+                   (hFile != INVALID_HANDLE_VALUE && p[i].err == ERROR_SUCCESS),
                 "CreateFileA failed on %s, hFile %p, err=%u, should be %u\n",
                 filename, hFile, GetLastError(), p[i].err);
+        }
         if (hFile != INVALID_HANDLE_VALUE)
             CloseHandle( hFile );
         i++;
@@ -3104,7 +3099,7 @@ static void test_read_write(void)
         "wrong error %u\n", GetLastError() );
     ok( bytes == 0, "read %x bytes\n", bytes );
 
-    VirtualFree( mem, 0, MEM_FREE );
+    VirtualFree( mem, 0, MEM_RELEASE );
 
     ret = CloseHandle(hFile);
     ok( ret, "CloseHandle: error %d\n", GetLastError());

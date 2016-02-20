@@ -214,7 +214,7 @@ static void context_attach_surface_fbo(struct wined3d_context *context,
             case WINED3D_LOCATION_TEXTURE_SRGB:
                 srgb = location == WINED3D_LOCATION_TEXTURE_SRGB;
                 gl_info->fbo_ops.glFramebufferTexture2D(fbo_target, GL_COLOR_ATTACHMENT0 + idx,
-                        surface->texture_target, surface_get_texture_name(surface, gl_info, srgb),
+                        surface->texture_target, surface_get_texture_name(surface, context, srgb),
                         surface->texture_level);
                 checkGLcall("glFramebufferTexture2D()");
                 break;
@@ -790,7 +790,7 @@ static BOOL context_restore_pixel_format(struct wined3d_context *ctx)
     {
         if (ctx->gl_info->supported[WGL_WINE_PIXEL_FORMAT_PASSTHROUGH])
         {
-            HDC dc = GetDC(ctx->restore_pf_win);
+            HDC dc = GetDCEx(ctx->restore_pf_win, 0, DCX_USESTYLE | DCX_CACHE);
             if (dc)
             {
                 if (!(ret = GL_EXTCALL(wglSetPixelFormatWINE(dc, ctx->restore_pf))))
@@ -966,7 +966,7 @@ static void context_update_window(struct wined3d_context *context)
     context->needs_set = 1;
     context->valid = 1;
 
-    if (!(context->hdc = GetDC(context->win_handle)))
+    if (!(context->hdc = GetDCEx(context->win_handle, 0, DCX_USESTYLE | DCX_CACHE)))
     {
         ERR("Failed to get a device context for window %p.\n", context->win_handle);
         context->valid = 0;
@@ -1526,7 +1526,7 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
         }
     }
 
-    if (!(hdc = GetDC(swapchain->win_handle)))
+    if (!(hdc = GetDCEx(swapchain->win_handle, 0, DCX_USESTYLE | DCX_CACHE)))
     {
         WARN("Failed to retrieve device context, trying swapchain backup.\n");
 
@@ -2470,7 +2470,8 @@ BOOL context_apply_clear_state(struct wined3d_context *context, const struct win
     gl_info->gl_ops.gl.p_glEnable(GL_SCISSOR_TEST);
     if (gl_info->supported[ARB_FRAMEBUFFER_SRGB])
     {
-        if (device->state.render_states[WINED3D_RS_SRGBWRITEENABLE])
+        if (!(context->d3d_info->wined3d_creation_flags & WINED3D_SRGB_READ_WRITE_CONTROL)
+                || device->state.render_states[WINED3D_RS_SRGBWRITEENABLE])
             gl_info->gl_ops.gl.p_glEnable(GL_FRAMEBUFFER_SRGB);
         else
             gl_info->gl_ops.gl.p_glDisable(GL_FRAMEBUFFER_SRGB);

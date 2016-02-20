@@ -130,21 +130,18 @@ static unsigned int completion_map_access( struct object *obj, unsigned int acce
     return access & ~(GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE | GENERIC_ALL);
 }
 
-static struct completion *create_completion( struct directory *root, const struct unicode_str *name,
+static struct completion *create_completion( struct object *root, const struct unicode_str *name,
                                              unsigned int attr, unsigned int concurrent,
                                              const struct security_descriptor *sd )
 {
     struct completion *completion;
 
-    if ((completion = create_named_object_dir( root, name, attr, &completion_ops )))
+    if ((completion = create_named_object( root, &completion_ops, name, attr, sd )))
     {
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
             list_init( &completion->queue );
             completion->depth = 0;
-            if (sd) default_set_sd( &completion->obj, sd,
-                                    OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION |
-                                    DACL_SECURITY_INFORMATION | SACL_SECURITY_INFORMATION );
         }
     }
 
@@ -179,7 +176,7 @@ DECL_HANDLER(create_completion)
 {
     struct completion *completion;
     struct unicode_str name;
-    struct directory *root;
+    struct object *root;
     const struct security_descriptor *sd;
     const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 

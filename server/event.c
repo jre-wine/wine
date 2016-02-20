@@ -106,23 +106,19 @@ static const struct object_ops keyed_event_ops =
 };
 
 
-struct event *create_event( struct directory *root, const struct unicode_str *name,
+struct event *create_event( struct object *root, const struct unicode_str *name,
                             unsigned int attr, int manual_reset, int initial_state,
                             const struct security_descriptor *sd )
 {
     struct event *event;
 
-    if ((event = create_named_object_dir( root, name, attr, &event_ops )))
+    if ((event = create_named_object( root, &event_ops, name, attr, sd )))
     {
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
             /* initialize it if it didn't already exist */
             event->manual_reset = manual_reset;
             event->signaled     = initial_state;
-            if (sd) default_set_sd( &event->obj, sd, OWNER_SECURITY_INFORMATION|
-                                                     GROUP_SECURITY_INFORMATION|
-                                                     DACL_SECURITY_INFORMATION|
-                                                     SACL_SECURITY_INFORMATION );
         }
     }
     return event;
@@ -206,20 +202,16 @@ static int event_signal( struct object *obj, unsigned int access )
     return 1;
 }
 
-struct keyed_event *create_keyed_event( struct directory *root, const struct unicode_str *name,
+struct keyed_event *create_keyed_event( struct object *root, const struct unicode_str *name,
                                         unsigned int attr, const struct security_descriptor *sd )
 {
     struct keyed_event *event;
 
-    if ((event = create_named_object_dir( root, name, attr, &keyed_event_ops )))
+    if ((event = create_named_object( root, &keyed_event_ops, name, attr, sd )))
     {
         if (get_error() != STATUS_OBJECT_NAME_EXISTS)
         {
             /* initialize it if it didn't already exist */
-            if (sd) default_set_sd( &event->obj, sd, OWNER_SECURITY_INFORMATION|
-                                                     GROUP_SECURITY_INFORMATION|
-                                                     DACL_SECURITY_INFORMATION|
-                                                     SACL_SECURITY_INFORMATION );
         }
     }
     return event;
@@ -284,7 +276,7 @@ DECL_HANDLER(create_event)
 {
     struct event *event;
     struct unicode_str name;
-    struct directory *root;
+    struct object *root;
     const struct security_descriptor *sd;
     const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 
@@ -355,7 +347,7 @@ DECL_HANDLER(create_keyed_event)
 {
     struct keyed_event *event;
     struct unicode_str name;
-    struct directory *root;
+    struct object *root;
     const struct security_descriptor *sd;
     const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 

@@ -10,7 +10,7 @@
 @ stub _atol_l
 @ cdecl _atoldbl(ptr str) ucrtbase._atoldbl
 @ stub _atoldbl_l
-@ stub _atoll_l
+@ cdecl -ret64 _atoll_l(str ptr) ucrtbase._atoll_l
 @ cdecl _ecvt(double long ptr ptr) ucrtbase._ecvt
 @ cdecl _ecvt_s(str long double long ptr ptr) ucrtbase._ecvt_s
 @ cdecl _fcvt(double long ptr ptr) ucrtbase._fcvt
@@ -30,7 +30,7 @@
 @ cdecl _ltow(long ptr long) ucrtbase._ltow
 @ cdecl _ltow_s(long ptr long long) ucrtbase._ltow_s
 @ cdecl _strtod_l(str ptr ptr) ucrtbase._strtod_l
-@ stub _strtof_l
+@ cdecl _strtof_l(str ptr ptr) ucrtbase._strtof_l
 @ cdecl -ret64 _strtoi64(str ptr long) ucrtbase._strtoi64
 @ cdecl -ret64 _strtoi64_l(str ptr long ptr) ucrtbase._strtoi64_l
 @ stub _strtoimax_l
@@ -51,7 +51,7 @@
 @ cdecl _ultow(long ptr long) ucrtbase._ultow
 @ cdecl _ultow_s(long ptr long long) ucrtbase._ultow_s
 @ cdecl _wcstod_l(wstr ptr) ucrtbase._wcstod_l
-@ stub _wcstof_l
+@ cdecl _wcstof_l(wstr ptr ptr) ucrtbase._wcstof_l
 @ cdecl -ret64 _wcstoi64(wstr ptr long) ucrtbase._wcstoi64
 @ cdecl -ret64 _wcstoi64_l(wstr ptr long ptr) ucrtbase._wcstoi64_l
 @ stub _wcstoimax_l
@@ -75,12 +75,12 @@
 @ cdecl _wtoi_l(wstr ptr) ucrtbase._wtoi_l
 @ cdecl _wtol(wstr) ucrtbase._wtol
 @ cdecl _wtol_l(wstr ptr) ucrtbase._wtol_l
-@ stub _wtoll
-@ stub _wtoll_l
+@ cdecl -ret64 _wtoll(wstr) ucrtbase._wtoll
+@ cdecl -ret64 _wtoll_l(wstr ptr) ucrtbase._wtoll_l
 @ cdecl atof(str) ucrtbase.atof
 @ cdecl atoi(str) ucrtbase.atoi
 @ cdecl atol(str) ucrtbase.atol
-@ stub atoll
+@ cdecl -ret64 atoll(str) ucrtbase.atoll
 @ cdecl btowc(long) ucrtbase.btowc
 @ stub c16rtomb
 @ stub c32rtomb
@@ -93,7 +93,7 @@
 @ cdecl mbstowcs_s(ptr ptr long str long) ucrtbase.mbstowcs_s
 @ cdecl mbtowc(ptr str long) ucrtbase.mbtowc
 @ cdecl strtod(str ptr) ucrtbase.strtod
-@ stub strtof
+@ cdecl strtof(str ptr) ucrtbase.strtof
 @ stub strtoimax
 @ cdecl strtol(str ptr long) ucrtbase.strtol
 @ stub strtold
@@ -106,7 +106,7 @@
 @ cdecl wcsrtombs(ptr ptr long ptr) ucrtbase.wcsrtombs
 @ cdecl wcsrtombs_s(ptr ptr long ptr long ptr) ucrtbase.wcsrtombs_s
 @ cdecl wcstod(wstr ptr) ucrtbase.wcstod
-@ stub wcstof
+@ cdecl wcstof(ptr ptr) ucrtbase.wcstof
 @ stub wcstoimax
 @ cdecl wcstol(wstr ptr long) ucrtbase.wcstol
 @ stub wcstold

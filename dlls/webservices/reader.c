@@ -387,7 +387,6 @@ enum reader_state
     READER_STATE_BOF,
     READER_STATE_STARTELEMENT,
     READER_STATE_STARTATTRIBUTE,
-    READER_STATE_STARTENDELEMENT,
     READER_STATE_STARTCDATA,
     READER_STATE_CDATA,
     READER_STATE_TEXT,
@@ -962,6 +961,7 @@ static HRESULT read_element( struct reader *reader )
     hr = E_OUTOFMEMORY;
     if (!(elem->ns = alloc_xml_string( NULL, 0 ))) goto error;
 
+    reader->current_attr = 0;
     for (;;)
     {
         read_skip_whitespace( reader );
@@ -972,6 +972,7 @@ static HRESULT read_element( struct reader *reader )
             free_attribute( attr );
             goto error;
         }
+        reader->current_attr++;
     }
 
     read_skip_whitespace( reader );
@@ -985,8 +986,9 @@ static HRESULT read_element( struct reader *reader )
     if (!read_cmp( reader, "/>", 2 ))
     {
         read_skip( reader, 2 );
-        reader->current = reader->current->parent;
-        reader->state   = READER_STATE_STARTENDELEMENT;
+        if (!(node = alloc_node( WS_XML_NODE_TYPE_END_ELEMENT ))) return E_OUTOFMEMORY;
+        read_insert_node( reader, reader->current, node );
+        reader->state = READER_STATE_ENDELEMENT;
     }
     else
     {
@@ -1068,12 +1070,12 @@ static HRESULT read_to_startelement( struct reader *reader, BOOL *found )
     return hr;
 }
 
-static BOOL cmp_localname( const unsigned char *name1, ULONG len1, const unsigned char *name2, ULONG len2 )
+static int cmp_name( const unsigned char *name1, ULONG len1, const unsigned char *name2, ULONG len2 )
 {
     ULONG i;
-    if (len1 != len2) return FALSE;
-    for (i = 0; i < len1; i++) { if (toupper( name1[i] ) != toupper( name2[i] )) return FALSE; }
-    return TRUE;
+    if (len1 != len2) return 1;
+    for (i = 0; i < len1; i++) { if (toupper( name1[i] ) != toupper( name2[i] )) return 1; }
+    return 0;
 }
 
 struct node *find_parent_element( struct node *node, const WS_XML_STRING *prefix,
@@ -1088,10 +1090,10 @@ struct node *find_parent_element( struct node *node, const WS_XML_STRING *prefix
         if (!localname) return parent;
 
         str = parent->hdr.prefix;
-        if (!cmp_localname( str->bytes, str->length, prefix->bytes, prefix->length )) continue;
+        if (cmp_name( str->bytes, str->length, prefix->bytes, prefix->length )) continue;
 
         str = parent->hdr.localName;
-        if (!cmp_localname( str->bytes, str->length, localname->bytes, localname->length )) continue;
+        if (cmp_name( str->bytes, str->length, localname->bytes, localname->length )) continue;
 
         return parent;
     }
@@ -1317,6 +1319,124 @@ HRESULT WINAPI WsReadToStartElement( WS_XML_READER *handle, const WS_XML_STRING 
     return read_to_startelement( reader, found );
 }
 
+static BOOL move_to_root_element( struct reader *reader )
+{
+    struct list *ptr;
+    struct node *node;
+
+    if (!(ptr = list_head( &reader->root->children ))) return FALSE;
+    node = LIST_ENTRY( ptr, struct node, entry );
+    if (node->hdr.node.nodeType == WS_XML_NODE_TYPE_ELEMENT)
+    {
+        reader->current = node;
+        return TRUE;
+    }
+    while ((ptr = list_next( &reader->root->children, &node->entry )))
+    {
+        struct node *next = LIST_ENTRY( ptr, struct node, entry );
+        if (next->hdr.node.nodeType == WS_XML_NODE_TYPE_ELEMENT)
+        {
+            reader->current = next;
+            return TRUE;
+        }
+        node = next;
+    }
+    return FALSE;
+}
+
+static BOOL move_to_next_element( struct reader *reader )
+{
+    struct list *ptr;
+    struct node *node = reader->current;
+
+    while ((ptr = list_next( &node->parent->children, &node->entry )))
+    {
+        struct node *next = LIST_ENTRY( ptr, struct node, entry );
+        if (next->hdr.node.nodeType == WS_XML_NODE_TYPE_ELEMENT)
+        {
+            reader->current = next;
+            return TRUE;
+        }
+        node = next;
+    }
+    return FALSE;
+}
+
+static BOOL move_to_prev_element( struct reader *reader )
+{
+    struct list *ptr;
+    struct node *node = reader->current;
+
+    while ((ptr = list_prev( &node->parent->children, &node->entry )))
+    {
+        struct node *prev = LIST_ENTRY( ptr, struct node, entry );
+        if (prev->hdr.node.nodeType == WS_XML_NODE_TYPE_ELEMENT)
+        {
+            reader->current = prev;
+            return TRUE;
+        }
+        node = prev;
+    }
+    return FALSE;
+}
+
+static BOOL move_to_child_element( struct reader *reader )
+{
+    struct list *ptr;
+    struct node *node;
+
+    if (!(ptr = list_head( &reader->current->children ))) return FALSE;
+    node = LIST_ENTRY( ptr, struct node, entry );
+    if (node->hdr.node.nodeType == WS_XML_NODE_TYPE_ELEMENT)
+    {
+        reader->current = node;
+        return TRUE;
+    }
+    while ((ptr = list_next( &reader->current->children, &node->entry )))
+    {
+        struct node *next = LIST_ENTRY( ptr, struct node, entry );
+        if (next->hdr.node.nodeType == WS_XML_NODE_TYPE_ELEMENT)
+        {
+            reader->current = next;
+            return TRUE;
+        }
+        node = next;
+    }
+    return FALSE;
+}
+
+static BOOL move_to_end_element( struct reader *reader )
+{
+    struct list *ptr;
+    struct node *node = reader->current;
+
+    if (node->hdr.node.nodeType != WS_XML_NODE_TYPE_ELEMENT) return FALSE;
+
+    if ((ptr = list_tail( &node->children )))
+    {
+        struct node *tail = LIST_ENTRY( ptr, struct node, entry );
+        if (tail->hdr.node.nodeType == WS_XML_NODE_TYPE_END_ELEMENT)
+        {
+            reader->current = tail;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static BOOL move_to_parent_element( struct reader *reader )
+{
+    struct node *parent = reader->current->parent;
+
+    if (parent && (parent->hdr.node.nodeType == WS_XML_NODE_TYPE_ELEMENT ||
+                   parent->hdr.node.nodeType == WS_XML_NODE_TYPE_BOF))
+    {
+        reader->current = parent;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static HRESULT read_move_to( struct reader *reader, WS_MOVE_TO move, BOOL *found )
 {
     struct list *ptr;
@@ -1330,6 +1450,30 @@ static HRESULT read_move_to( struct reader *reader, WS_MOVE_TO move, BOOL *found
     }
     switch (move)
     {
+    case WS_MOVE_TO_ROOT_ELEMENT:
+        success = move_to_root_element( reader );
+        break;
+
+    case WS_MOVE_TO_NEXT_ELEMENT:
+        success = move_to_next_element( reader );
+        break;
+
+    case WS_MOVE_TO_PREVIOUS_ELEMENT:
+        success = move_to_prev_element( reader );
+        break;
+
+    case WS_MOVE_TO_CHILD_ELEMENT:
+        success = move_to_child_element( reader );
+        break;
+
+    case WS_MOVE_TO_END_ELEMENT:
+        success = move_to_end_element( reader );
+        break;
+
+    case WS_MOVE_TO_PARENT_ELEMENT:
+        success = move_to_parent_element( reader );
+        break;
+
     case WS_MOVE_TO_FIRST_NODE:
         if ((ptr = list_head( &reader->current->parent->children )))
         {
@@ -1576,6 +1720,59 @@ static HRESULT read_get_attribute_text( struct reader *reader, WS_XML_UTF8_TEXT 
     }
     *ret = (WS_XML_UTF8_TEXT *)attr->value;
     reader->current_attr++;
+    return S_OK;
+}
+
+static BOOL find_attribute( struct reader *reader, const WS_XML_STRING *localname,
+                            const WS_XML_STRING *ns, ULONG *index )
+{
+    ULONG i;
+    WS_XML_ELEMENT_NODE *elem = &reader->current->hdr;
+
+    if (!localname)
+    {
+        *index = reader->current_attr;
+        return TRUE;
+    }
+    for (i = 0; i < elem->attributeCount; i++)
+    {
+        const WS_XML_STRING *localname2 = elem->attributes[i]->localName;
+        const WS_XML_STRING *ns2 = elem->attributes[i]->ns;
+
+        if (!cmp_name( localname->bytes, localname->length, localname2->bytes, localname2->length ) &&
+            !cmp_name( ns->bytes, ns->length, ns2->bytes, ns2->length ))
+        {
+            *index = i;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+/**************************************************************************
+ *          WsFindAttribute		[webservices.@]
+ */
+HRESULT WINAPI WsFindAttribute( WS_XML_READER *handle, const WS_XML_STRING *localname,
+                                const WS_XML_STRING *ns, BOOL required, ULONG *index,
+                                WS_ERROR *error )
+{
+    struct reader *reader = (struct reader *)handle;
+
+    TRACE( "%p %s %s %d %p %p\n", handle, debugstr_xmlstr(localname), debugstr_xmlstr(ns),
+           required, index, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!reader || !localname || !ns || !index) return E_INVALIDARG;
+
+    if (reader->current->hdr.node.nodeType != WS_XML_NODE_TYPE_ELEMENT)
+        return WS_E_INVALID_OPERATION;
+
+    if (!find_attribute( reader, localname, ns, index ))
+    {
+        if (required) return WS_E_INVALID_FORMAT;
+        *index = ~0u;
+        return S_FALSE;
+    }
     return S_OK;
 }
 

@@ -11805,13 +11805,7 @@ static void test_ShowWindow(void)
        "expected -1,-1 got %d,%d\n", wp.ptMinPosition.x, wp.ptMinPosition.y);
     ok(wp.ptMaxPosition.x == -1 && wp.ptMaxPosition.y == -1,
        "expected -1,-1 got %d,%d\n", wp.ptMaxPosition.x, wp.ptMaxPosition.y);
-    if (work_rc.left || work_rc.top) todo_wine /* FIXME: remove once Wine is fixed */
-    ok(EqualRect(&win_rc, &wp.rcNormalPosition),
-       "expected %d,%d-%d,%d got %d,%d-%d,%d\n",
-        win_rc.left, win_rc.top, win_rc.right, win_rc.bottom,
-        wp.rcNormalPosition.left, wp.rcNormalPosition.top,
-        wp.rcNormalPosition.right, wp.rcNormalPosition.bottom);
-    else
+    todo_wine_if (work_rc.left || work_rc.top) /* FIXME: remove once Wine is fixed */
     ok(EqualRect(&win_rc, &wp.rcNormalPosition),
        "expected %d,%d-%d,%d got %d,%d-%d,%d\n",
         win_rc.left, win_rc.top, win_rc.right, win_rc.bottom,
@@ -11907,6 +11901,76 @@ static INT_PTR WINAPI test_dlg_proc(HWND hwnd, UINT message, WPARAM wParam, LPAR
     return 1;
 }
 
+static WNDPROC orig_edit_proc;
+static LRESULT WINAPI dlg_creation_edit_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
+{
+    struct recvd_message msg;
+
+    if (ignore_message( message )) return 0;
+
+    msg.hwnd = hwnd;
+    msg.message = message;
+    msg.flags = sent|wparam|lparam;
+    msg.wParam = wp;
+    msg.lParam = lp;
+    msg.descr = "edit";
+    add_message(&msg);
+
+    return CallWindowProcW(orig_edit_proc, hwnd, message, wp, lp);
+}
+
+static INT_PTR WINAPI test_dlg_proc2(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    struct recvd_message msg;
+
+    if (ignore_message( message )) return 0;
+
+    msg.hwnd = hwnd;
+    msg.message = message;
+    msg.flags = sent|wparam|lparam|parent;
+    msg.wParam = wParam;
+    msg.lParam = lParam;
+    msg.descr = "dialog";
+    add_message(&msg);
+
+    if (message == WM_INITDIALOG)
+    {
+        orig_edit_proc = (WNDPROC)SetWindowLongPtrW(GetDlgItem(hwnd, 200),
+                GWLP_WNDPROC, (LONG_PTR)dlg_creation_edit_proc);
+    }
+
+    return 1;
+}
+
+static INT_PTR WINAPI test_dlg_proc3(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    ok( 0, "should not be called since DefDlgProc is not used\n" );
+    return 0;
+}
+
+static LRESULT WINAPI test_dlg_proc4(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    struct recvd_message msg;
+
+    if (!ignore_message( message ))
+    {
+        msg.hwnd = hwnd;
+        msg.message = message;
+        msg.flags = sent|wparam|lparam|parent;
+        msg.wParam = wParam;
+        msg.lParam = lParam;
+        msg.descr = "dialog";
+        add_message(&msg);
+    }
+    if (message == WM_INITDIALOG)
+    {
+        orig_edit_proc = (WNDPROC)SetWindowLongPtrW(GetDlgItem(hwnd, 200),
+                GWLP_WNDPROC, (LONG_PTR)dlg_creation_edit_proc);
+        return 1;
+    }
+    return DefWindowProcW( hwnd, message, wParam, lParam );
+}
+
 static const struct message WmDefDlgSetFocus_1[] = {
     { WM_GETDLGCODE, sent|wparam|lparam, 0, 0 },
     { WM_GETTEXTLENGTH, sent|wparam|lparam|optional, 0, 0 }, /* XP */
@@ -11962,6 +12026,65 @@ static const struct message WmCreateDialogParamSeq_2[] = {
     { WM_SIZE, sent|wparam, SIZE_RESTORED },
     { WM_MOVE, sent },
     { WM_CHANGEUISTATE, sent|optional },
+    { 0 }
+};
+
+static const struct message WmCreateDialogParamSeq_3[] = {
+    { HCBT_CREATEWND, hook },
+    { WM_SETFONT, sent|parent },
+    { WM_INITDIALOG, sent|parent },
+    { WM_GETDLGCODE, sent|wparam|lparam, 0, 0 },
+    { EM_SETSEL, sent|wparam|lparam, 0, INT_MAX },
+    { EM_SETSEL, sent|wparam|lparam|optional, 0, INT_MAX },
+    { EM_SETSEL, sent|wparam|lparam|optional, 0, INT_MAX },
+    { EM_SETSEL, sent|wparam|lparam|optional, 0, INT_MAX },
+    { HCBT_ACTIVATE, hook },
+    { WM_QUERYNEWPALETTE, sent|parent|optional }, /* TODO: this message should not be sent */
+    { WM_WINDOWPOSCHANGING, sent|parent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGING, sent|parent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_ACTIVATEAPP, sent|parent|wparam, 1 },
+    { WM_NCACTIVATE, sent|parent },
+    { WM_ACTIVATE, sent|parent|wparam, 1 },
+    { WM_SETFOCUS, sent },
+    { WM_COMMAND, sent|parent|wparam, MAKELONG(200, EN_SETFOCUS) },
+    { WM_GETDLGCODE, sent|wparam|lparam, 0, 0 },
+    { WM_USER, sent|parent },
+    { WM_CHANGEUISTATE, sent|parent|optional },
+    { 0 }
+};
+
+static const struct message WmCreateDialogParamSeq_4[] = {
+    { HCBT_CREATEWND, hook },
+    { WM_NCCREATE, sent|parent },
+    { WM_NCCALCSIZE, sent|parent|wparam, 0 },
+    { WM_CREATE, sent|parent },
+    { EVENT_OBJECT_CREATE, winevent_hook|wparam|lparam, 0, 0 },
+    { WM_SIZE, sent|parent|wparam, SIZE_RESTORED },
+    { WM_MOVE, sent|parent },
+    { WM_SETFONT, sent|parent },
+    { WM_INITDIALOG, sent|parent },
+    { WM_GETDLGCODE, sent|wparam|lparam, 0, 0 },
+    { EM_SETSEL, sent|wparam|lparam, 0, INT_MAX },
+    { EM_SETSEL, sent|wparam|lparam|optional, 0, INT_MAX },
+    { EM_SETSEL, sent|wparam|lparam|optional, 0, INT_MAX },
+    { EM_SETSEL, sent|wparam|lparam|optional, 0, INT_MAX },
+    { HCBT_ACTIVATE, hook },
+    { WM_QUERYNEWPALETTE, sent|parent|optional }, /* TODO: this message should not be sent */
+    { WM_WINDOWPOSCHANGING, sent|parent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_WINDOWPOSCHANGING, sent|parent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE },
+    { WM_ACTIVATEAPP, sent|parent|wparam, 1 },
+    { WM_NCACTIVATE, sent|parent },
+    { WM_ACTIVATE, sent|parent|wparam, 1 },
+    { HCBT_SETFOCUS, hook },
+    { WM_SETFOCUS, sent|parent },
+    { WM_KILLFOCUS, sent|parent },
+    { WM_SETFOCUS, sent },
+    { WM_COMMAND, sent|parent|wparam, MAKELONG(200, EN_SETFOCUS) },
+    { WM_GETDLGCODE, sent|wparam|lparam, 0, 0 },
+    { WM_USER, sent|parent },
+    { WM_CHANGEUISTATE, sent|parent|optional },
+    { WM_UPDATEUISTATE, sent|parent|optional },
+    { WM_UPDATEUISTATE, sent|optional },
     { 0 }
 };
 
@@ -12063,6 +12186,23 @@ static void test_dialog_messages(void)
     hdlg = CreateDialogParamA(0, "CLASS_TEST_DIALOG_2", 0, NULL, 0);
     ok(IsWindow(hdlg), "CreateDialogParam failed\n");
     ok_sequence(WmCreateDialogParamSeq_2, "CreateDialogParam_2", FALSE);
+    EndDialog(hdlg, 0);
+    DestroyWindow(hdlg);
+    flush_sequence();
+
+    hdlg = CreateDialogParamA(0, "FOCUS_TEST_DIALOG_3", 0, test_dlg_proc2, 0);
+    ok(IsWindow(hdlg), "CreateDialogParam failed\n");
+    ok_sequence(WmCreateDialogParamSeq_3, "CreateDialogParam_3", TRUE);
+    EndDialog(hdlg, 0);
+    DestroyWindow(hdlg);
+    flush_sequence();
+
+    UnregisterClassA( cls.lpszClassName, cls.hInstance );
+    cls.lpfnWndProc = test_dlg_proc4;
+    ok( RegisterClassA(&cls), "failed to register class again\n" );
+    hdlg = CreateDialogParamA(0, "FOCUS_TEST_DIALOG_4", 0, test_dlg_proc3, 0);
+    ok(IsWindow(hdlg), "CreateDialogParam failed\n");
+    ok_sequence(WmCreateDialogParamSeq_4, "CreateDialogParam_4", TRUE);
     EndDialog(hdlg, 0);
     DestroyWindow(hdlg);
     flush_sequence();
@@ -15106,9 +15246,7 @@ static void test_SendMessage_other_thread(int thread_n)
 
     ret = GetQueueStatus(QS_SENDMESSAGE|QS_POSTMESSAGE);
     /* FIXME: remove once Wine is fixed */
-if (thread_n == 2) todo_wine
-    ok(ret == 0, "wrong status %08x\n", ret);
-else
+todo_wine_if (thread_n == 2)
     ok(ret == 0, "wrong status %08x\n", ret);
 
     trace("main: call PeekMessage\n");

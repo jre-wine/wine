@@ -3365,7 +3365,7 @@ static void wined3d_adapter_init_limits(struct wined3d_gl_info *gl_info)
 }
 
 /* Context activation is done by the caller. */
-static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
+static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter, DWORD wined3d_creation_flags)
 {
     static const struct
     {
@@ -3739,6 +3739,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
     adapter->d3d_info.limits.ffp_blend_stages = fragment_caps.MaxTextureBlendStages;
     adapter->d3d_info.limits.ffp_textures = fragment_caps.MaxSimultaneousTextures;
     adapter->d3d_info.shader_color_key = fragment_caps.wined3d_caps & WINED3D_FRAGMENT_CAP_COLOR_KEY;
+    adapter->d3d_info.wined3d_creation_flags = wined3d_creation_flags;
     TRACE("Max texture stages: %u.\n", adapter->d3d_info.limits.ffp_blend_stages);
 
     if (gl_info->supported[ARB_FRAMEBUFFER_OBJECT])
@@ -4639,6 +4640,8 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
             allowed_usage = WINED3DUSAGE_DEPTHSTENCIL
                     | WINED3DUSAGE_RENDERTARGET
                     | WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING;
+            if (usage & WINED3DUSAGE_RENDERTARGET)
+                allowed_usage |= WINED3DUSAGE_QUERY_SRGBWRITE;
             gl_type = WINED3D_GL_RES_TYPE_RB;
             break;
 
@@ -4753,6 +4756,7 @@ UINT CDECL wined3d_calculate_format_pitch(const struct wined3d *wined3d, UINT ad
         enum wined3d_format_id format_id, UINT width)
 {
     const struct wined3d_gl_info *gl_info;
+    unsigned int row_pitch, slice_pitch;
 
     TRACE("wined3d %p, adapter_idx %u, format_id %s, width %u.\n",
             wined3d, adapter_idx, debug_d3dformat(format_id), width);
@@ -4761,7 +4765,10 @@ UINT CDECL wined3d_calculate_format_pitch(const struct wined3d *wined3d, UINT ad
         return ~0u;
 
     gl_info = &wined3d->adapters[adapter_idx].gl_info;
-    return wined3d_format_calculate_pitch(wined3d_get_format(gl_info, format_id), width);
+    wined3d_format_calculate_pitch(wined3d_get_format(gl_info, format_id),
+            1, width, 1, &row_pitch, &slice_pitch);
+
+    return row_pitch;
 }
 
 HRESULT CDECL wined3d_check_device_format_conversion(const struct wined3d *wined3d, UINT adapter_idx,
@@ -5827,7 +5834,7 @@ static void wined3d_adapter_init_fb_cfgs(struct wined3d_adapter *adapter, HDC dc
     }
 }
 
-static BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, UINT ordinal)
+static BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, UINT ordinal, DWORD wined3d_creation_flags)
 {
     static const DWORD supported_gl_versions[] =
     {
@@ -5904,7 +5911,7 @@ static BOOL wined3d_adapter_init(struct wined3d_adapter *adapter, UINT ordinal)
                 supported_gl_versions[i] >> 16, supported_gl_versions[i] & 0xffff);
     }
 
-    if (!wined3d_adapter_init_gl_caps(adapter))
+    if (!wined3d_adapter_init_gl_caps(adapter, wined3d_creation_flags))
     {
         ERR("Failed to initialize GL caps for adapter %p.\n", adapter);
         wined3d_caps_gl_ctx_destroy(&caps_gl_ctx);
@@ -5998,7 +6005,7 @@ HRESULT wined3d_init(struct wined3d *wined3d, DWORD flags)
         return WINED3D_OK;
     }
 
-    if (!wined3d_adapter_init(&wined3d->adapters[0], 0))
+    if (!wined3d_adapter_init(&wined3d->adapters[0], 0, flags))
     {
         WARN("Failed to initialize adapter.\n");
         return E_FAIL;

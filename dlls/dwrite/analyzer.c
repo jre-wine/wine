@@ -182,6 +182,28 @@ const char *debugstr_sa_script(UINT16 script)
     return script < Script_LastId ? debugstr_an((char*)&dwritescripts_properties[script].props.isoScriptCode, 4): "not defined";
 }
 
+/* system font falback configuration */
+static const WCHAR meiryoW[] = {'M','e','i','r','y','o',0};
+
+struct fallback_mapping {
+    DWRITE_UNICODE_RANGE range;
+    const WCHAR *family;
+};
+
+static const struct fallback_mapping fontfallback_neutral_data[] = {
+    { { 0x3000, 0x30ff }, meiryoW }, /* CJK Symbols and Punctuation, Hiragana, Katakana */
+    { { 0x31f0, 0x31ff }, meiryoW }, /* Katakana Phonetic Extensions */
+    { { 0x4e00, 0x9fff }, meiryoW }, /* CJK Unified Ideographs */
+};
+
+struct dwrite_fontfallback {
+    IDWriteFontFallback IDWriteFontFallback_iface;
+    IDWriteFactory2 *factory;
+    IDWriteFontCollection *systemcollection;
+    const struct fallback_mapping *mappings;
+    UINT32 count;
+};
+
 struct dwrite_numbersubstitution {
     IDWriteNumberSubstitution IDWriteNumberSubstitution_iface;
     LONG ref;
@@ -196,6 +218,11 @@ static inline struct dwrite_numbersubstitution *impl_from_IDWriteNumberSubstitut
     return CONTAINING_RECORD(iface, struct dwrite_numbersubstitution, IDWriteNumberSubstitution_iface);
 }
 
+static inline struct dwrite_fontfallback *impl_from_IDWriteFontFallback(IDWriteFontFallback *iface)
+{
+    return CONTAINING_RECORD(iface, struct dwrite_fontfallback, IDWriteFontFallback_iface);
+}
+
 static inline UINT32 decode_surrogate_pair(const WCHAR *str, UINT32 index, UINT32 end)
 {
     if (index < end-1 && IS_SURROGATE_PAIR(str[index], str[index+1])) {
@@ -208,53 +235,67 @@ static inline UINT32 decode_surrogate_pair(const WCHAR *str, UINT32 index, UINT3
 
 static inline UINT16 get_char_script(WCHAR c)
 {
-    UINT16 script = get_table_entry(wine_scripts_table, c);
-    if (script == Script_Unknown) {
-        WORD type;
-        if (GetStringTypeW(CT_CTYPE1, &c, 1, &type) && (type & C1_CNTRL))
-            script = Script_Common;
-    }
-    return script;
+    return get_table_entry(wine_scripts_table, c);
 }
 
-static HRESULT analyze_script(const WCHAR *text, UINT32 position, UINT32 len, IDWriteTextAnalysisSink *sink)
+static DWRITE_SCRIPT_ANALYSIS get_char_sa(WCHAR c)
 {
     DWRITE_SCRIPT_ANALYSIS sa;
-    UINT32 pos, i, length;
 
-    if (!len) return S_OK;
+    sa.script = get_char_script(c);
+    sa.shapes = iscntrlW(c) || c == 0x2028 /* LINE SEPARATOR */ || c == 0x2029 /* PARAGRAPH SEPARATOR */ ?
+        DWRITE_SCRIPT_SHAPES_NO_VISUAL : DWRITE_SCRIPT_SHAPES_DEFAULT;
+    return sa;
+}
 
-    sa.script = get_char_script(*text);
+static HRESULT analyze_script(const WCHAR *text, UINT32 position, UINT32 length, IDWriteTextAnalysisSink *sink)
+{
+    DWRITE_SCRIPT_ANALYSIS sa;
+    UINT32 pos, i, seq_length;
+
+    if (!length) return S_OK;
+
+    sa = get_char_sa(*text);
 
     pos = position;
-    length = 1;
+    seq_length = 1;
 
-    for (i = 1; i < len; i++)
+    for (i = 1; i < length; i++)
     {
-        UINT16 script = get_char_script(text[i]);
+        DWRITE_SCRIPT_ANALYSIS cur_sa = get_char_sa(text[i]);
 
         /* Unknown type is ignored when preceded or followed by another script */
-        if (sa.script == Script_Unknown) sa.script = script;
-        if (script == Script_Unknown && sa.script != Script_Common) script = sa.script;
-        /* this is a length of a sequence to be reported next */
-        if (sa.script == script) length++;
+        switch (sa.script) {
+        case Script_Unknown:
+            sa.script = cur_sa.script;
+            break;
+        case Script_Common:
+            if (cur_sa.script == Script_Unknown)
+                cur_sa.script = sa.script;
+            else if (cur_sa.script != Script_Common)
+                sa.script = cur_sa.script;
+            break;
+        default:
+            if (cur_sa.script == Script_Unknown || cur_sa.script == Script_Common)
+                cur_sa.script = sa.script;
+        }
 
-        if (sa.script != script)
-        {
+        /* this is a length of a sequence to be reported next */
+        if (sa.script == cur_sa.script && sa.shapes == cur_sa.shapes)
+            seq_length++;
+        else {
             HRESULT hr;
 
-            sa.shapes = sa.script != Script_Common ? DWRITE_SCRIPT_SHAPES_DEFAULT : DWRITE_SCRIPT_SHAPES_NO_VISUAL;
-            hr = IDWriteTextAnalysisSink_SetScriptAnalysis(sink, pos, length, &sa);
+            hr = IDWriteTextAnalysisSink_SetScriptAnalysis(sink, pos, seq_length, &sa);
             if (FAILED(hr)) return hr;
             pos = position + i;
-            length = 1;
-            sa.script = script;
+            seq_length = 1;
+            sa = cur_sa;
         }
     }
 
-    /* 1 length case or normal completion call */
-    sa.shapes = sa.script != Script_Common ? DWRITE_SCRIPT_SHAPES_DEFAULT : DWRITE_SCRIPT_SHAPES_NO_VISUAL;
-    return IDWriteTextAnalysisSink_SetScriptAnalysis(sink, pos, length, &sa);
+    /* one char length case or normal completion call */
+    return IDWriteTextAnalysisSink_SetScriptAnalysis(sink, pos, seq_length, &sa);
 }
 
 struct linebreaking_state {
@@ -766,14 +807,14 @@ static HRESULT WINAPI dwritetextanalyzer_AnalyzeBidi(IDWriteTextAnalyzer2 *iface
 {
     UINT8 *levels = NULL, *explicit = NULL;
     UINT8 baselevel, level, explicit_level;
+    UINT32 pos, i, seq_length;
     WCHAR *buff = NULL;
     const WCHAR *text;
-    UINT32 pos, i;
     HRESULT hr;
 
     TRACE("(%p %u %u %p)\n", source, position, length, sink);
 
-    if (length == 0)
+    if (!length)
         return S_OK;
 
     hr = get_text_source_ptr(source, position, length, &text, &buff);
@@ -795,20 +836,25 @@ static HRESULT WINAPI dwritetextanalyzer_AnalyzeBidi(IDWriteTextAnalyzer2 *iface
 
     level = levels[0];
     explicit_level = explicit[0];
-    pos = 0;
+    pos = position;
+    seq_length = 1;
+
     for (i = 1; i < length; i++) {
-        if (levels[i] != level || explicit[i] != explicit_level) {
-            hr = IDWriteTextAnalysisSink_SetBidiLevel(sink, pos, i - pos, explicit_level, level);
+        if (levels[i] == level && explicit[i] == explicit_level)
+            seq_length++;
+        else {
+            hr = IDWriteTextAnalysisSink_SetBidiLevel(sink, pos, seq_length, explicit_level, level);
             if (FAILED(hr))
-                break;
+                goto done;
+
+            pos += seq_length;
+            seq_length = 1;
             level = levels[i];
             explicit_level = explicit[i];
-            pos = i;
         }
-
-        if (i == length - 1)
-            hr = IDWriteTextAnalysisSink_SetBidiLevel(sink, pos, length - pos, explicit_level, level);
     }
+    /* one char length case or normal completion call */
+    hr = IDWriteTextAnalysisSink_SetBidiLevel(sink, pos, seq_length, explicit_level, level);
 
 done:
     heap_free(explicit);
@@ -1065,13 +1111,16 @@ static HRESULT WINAPI dwritetextanalyzer_GetGlyphPlacements(IDWriteTextAnalyzer2
 
     IDWriteFontFace_GetMetrics(fontface, &metrics);
     for (i = 0; i < glyph_count; i++) {
-        INT32 a;
+        if (glyph_props[i].isZeroWidthSpace)
+            advances[i] = 0.0f;
+        else {
+            INT32 a;
 
-        hr = IDWriteFontFace1_GetDesignGlyphAdvances(fontface1, 1, &glyphs[i], &a, is_sideways);
-        if (FAILED(hr))
-            a = 0;
-
-        advances[i] = get_scaled_advance_width(a, emSize, &metrics);
+            hr = IDWriteFontFace1_GetDesignGlyphAdvances(fontface1, 1, &glyphs[i], &a, is_sideways);
+            if (FAILED(hr))
+                a = 0;
+            advances[i] = get_scaled_advance_width(a, emSize, &metrics);
+        }
         offsets[i].advanceOffset = 0.0f;
         offsets[i].ascenderOffset = 0.0f;
     }
@@ -1676,4 +1725,235 @@ HRESULT create_numbersubstitution(DWRITE_NUMBER_SUBSTITUTION_METHOD method, cons
 
     *ret = &substitution->IDWriteNumberSubstitution_iface;
     return S_OK;
+}
+
+/* IDWriteFontFallback */
+static HRESULT WINAPI fontfallback_QueryInterface(IDWriteFontFallback *iface, REFIID riid, void **obj)
+{
+    struct dwrite_fontfallback *fallback = impl_from_IDWriteFontFallback(iface);
+
+    TRACE("(%p)->(%s %p)\n", fallback, debugstr_guid(riid), obj);
+
+    if (IsEqualIID(riid, &IID_IDWriteFontFallback) || IsEqualIID(riid, &IID_IUnknown)) {
+        *obj = iface;
+        IDWriteFontFallback_AddRef(iface);
+        return S_OK;
+    }
+
+    *obj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI fontfallback_AddRef(IDWriteFontFallback *iface)
+{
+    struct dwrite_fontfallback *fallback = impl_from_IDWriteFontFallback(iface);
+    TRACE("(%p)\n", fallback);
+    return IDWriteFactory2_AddRef(fallback->factory);
+}
+
+static ULONG WINAPI fontfallback_Release(IDWriteFontFallback *iface)
+{
+    struct dwrite_fontfallback *fallback = impl_from_IDWriteFontFallback(iface);
+    TRACE("(%p)\n", fallback);
+    return IDWriteFactory2_Release(fallback->factory);
+}
+
+static int compare_fallback_mapping(const void *a, const void *b)
+{
+    UINT32 ch = *(UINT32*)a;
+    struct fallback_mapping *mapping = (struct fallback_mapping*)b;
+
+    if (ch > mapping->range.last)
+        return 1;
+    else if (ch < mapping->range.first)
+        return -1;
+    else
+        return 0;
+}
+
+static const struct fallback_mapping *find_fallback_mapping(struct dwrite_fontfallback *fallback, UINT32 ch)
+{
+    return bsearch(&ch, fallback->mappings, fallback->count, sizeof(*fallback->mappings),
+        compare_fallback_mapping);
+}
+
+HRESULT create_matching_font(IDWriteFontCollection *collection, const WCHAR *name,
+    DWRITE_FONT_WEIGHT weight, DWRITE_FONT_STYLE style, DWRITE_FONT_STRETCH stretch, IDWriteFont **font)
+{
+    IDWriteFontFamily *family;
+    BOOL exists = FALSE;
+    HRESULT hr;
+    UINT32 i;
+
+    *font = NULL;
+
+    hr = IDWriteFontCollection_FindFamilyName(collection, name, &i, &exists);
+    if (FAILED(hr))
+        return hr;
+
+    if (!exists)
+        return E_FAIL;
+
+    hr = IDWriteFontCollection_GetFontFamily(collection, i, &family);
+    if (FAILED(hr))
+        return hr;
+
+    hr = IDWriteFontFamily_GetFirstMatchingFont(family, weight, stretch, style, font);
+    IDWriteFontFamily_Release(family);
+    return hr;
+}
+
+static HRESULT fallback_map_characters(IDWriteFont *font, const WCHAR *text, UINT32 length, UINT32 *mapped_length)
+{
+    HRESULT hr = S_OK;
+    UINT32 i;
+
+    for (i = 0; i < length; i++) {
+        UINT16 script = get_char_script(text[i]);
+        BOOL exists;
+
+        if (script == Script_Unknown || script == Script_Common) {
+            ++*mapped_length;
+            continue;
+        }
+
+        /* stop on first unsupported character */
+        exists = FALSE;
+        hr = IDWriteFont_HasCharacter(font, text[i], &exists);
+        if (hr == S_OK && exists)
+            ++*mapped_length;
+        else
+            break;
+    }
+
+    return hr;
+}
+
+static HRESULT fallback_get_fallback_font(struct dwrite_fontfallback *fallback, const WCHAR *text, UINT32 length,
+    DWRITE_FONT_WEIGHT weight, DWRITE_FONT_STYLE style, DWRITE_FONT_STRETCH stretch, UINT32 *mapped_length, IDWriteFont **mapped_font)
+{
+    const struct fallback_mapping *mapping;
+    HRESULT hr;
+
+    mapping = find_fallback_mapping(fallback, text[0]);
+    if (!mapping) {
+        WARN("no mapping for 0x%x\n", text[0]);
+        return E_FAIL;
+    }
+
+    /* now let's see what fallback can handle */
+    hr = create_matching_font(fallback->systemcollection, mapping->family, weight, style, stretch, mapped_font);
+    if (FAILED(hr)) {
+        WARN("failed to create fallback font %s for range [0x%x,0x%x], 0x%08x\n", debugstr_w(mapping->family),
+	    mapping->range.first, mapping->range.last, hr);
+        return hr;
+    }
+
+    hr = fallback_map_characters(*mapped_font, text, length, mapped_length);
+    if (FAILED(hr))
+        WARN("mapping with fallback font %s failed, 0x%08x\n", debugstr_w(mapping->family), hr);
+
+    if (!*mapped_length) {
+        IDWriteFont_Release(*mapped_font);
+        *mapped_font = NULL;
+    }
+
+    return *mapped_length ? S_OK : E_FAIL;
+}
+
+static HRESULT WINAPI fontfallback_MapCharacters(IDWriteFontFallback *iface, IDWriteTextAnalysisSource *source,
+    UINT32 position, UINT32 length, IDWriteFontCollection *basecollection, const WCHAR *basefamily,
+    DWRITE_FONT_WEIGHT weight, DWRITE_FONT_STYLE style, DWRITE_FONT_STRETCH stretch, UINT32 *mapped_length,
+    IDWriteFont **ret_font, FLOAT *scale)
+{
+    struct dwrite_fontfallback *fallback = impl_from_IDWriteFontFallback(iface);
+    WCHAR *buff = NULL;
+    const WCHAR *text;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p %u %u %p, %s, %u, %u, %u, %p, %p, %p)\n", fallback, source, position, length,
+        basecollection, debugstr_w(basefamily), weight, style, stretch, mapped_length, ret_font, scale);
+
+    *mapped_length = 0;
+    *scale = 1.0f;
+    *ret_font = NULL;
+
+    if (!source)
+        return E_INVALIDARG;
+
+    if (length == 0)
+        return S_OK;
+
+    if (!basecollection)
+        basecollection = fallback->systemcollection;
+
+    hr = get_text_source_ptr(source, position, length, &text, &buff);
+    if (FAILED(hr))
+        goto done;
+
+    if (basefamily && *basefamily) {
+        hr = create_matching_font(basecollection, basefamily, weight, style, stretch, ret_font);
+        if (FAILED(hr))
+            goto done;
+
+        hr = fallback_map_characters(*ret_font, text, length, mapped_length);
+        if (FAILED(hr))
+            goto done;
+    }
+
+    if (!*mapped_length) {
+        IDWriteFont *mapped_font;
+
+        hr = fallback_get_fallback_font(fallback, text, length, weight, style, stretch, mapped_length, &mapped_font);
+        if (FAILED(hr)) {
+            /* fallback wasn't found, keep base font if any, so we can get at least some visual output */
+            if (*ret_font) {
+                *mapped_length = length;
+                hr = S_OK;
+            }
+        }
+        else {
+            if (*ret_font)
+                IDWriteFont_Release(*ret_font);
+            *ret_font = mapped_font;
+        }
+    }
+
+done:
+    heap_free(buff);
+    return hr;
+}
+
+static const IDWriteFontFallbackVtbl fontfallbackvtbl = {
+    fontfallback_QueryInterface,
+    fontfallback_AddRef,
+    fontfallback_Release,
+    fontfallback_MapCharacters
+};
+
+HRESULT create_system_fontfallback(IDWriteFactory2 *factory, IDWriteFontFallback **ret)
+{
+    struct dwrite_fontfallback *fallback;
+
+    *ret = NULL;
+
+    fallback = heap_alloc(sizeof(*fallback));
+    if (!fallback)
+        return E_OUTOFMEMORY;
+
+    fallback->IDWriteFontFallback_iface.lpVtbl = &fontfallbackvtbl;
+    fallback->factory = factory;
+    fallback->mappings = fontfallback_neutral_data;
+    fallback->count = sizeof(fontfallback_neutral_data)/sizeof(fontfallback_neutral_data[0]);
+    IDWriteFactory2_GetSystemFontCollection(fallback->factory, &fallback->systemcollection, FALSE);
+
+    *ret = &fallback->IDWriteFontFallback_iface;
+    return S_OK;
+}
+
+void release_system_fontfallback(IDWriteFontFallback *iface)
+{
+    struct dwrite_fontfallback *fallback = impl_from_IDWriteFontFallback(iface);
+    IDWriteFontCollection_Release(fallback->systemcollection);
+    heap_free(fallback);
 }

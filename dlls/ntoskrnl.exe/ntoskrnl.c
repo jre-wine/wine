@@ -1040,9 +1040,44 @@ PDEVICE_OBJECT WINAPI IoGetAttachedDevice( PDEVICE_OBJECT device )
 NTSTATUS WINAPI IoGetDeviceProperty( DEVICE_OBJECT *device, DEVICE_REGISTRY_PROPERTY device_property,
                                      ULONG buffer_length, PVOID property_buffer, PULONG result_length )
 {
-    FIXME( "%p %d %u %p %p: stub\n", device, device_property, buffer_length,
+    NTSTATUS status = STATUS_NOT_IMPLEMENTED;
+    TRACE( "%p %d %u %p %p\n", device, device_property, buffer_length,
            property_buffer, result_length );
-    return STATUS_NOT_IMPLEMENTED;
+    switch (device_property)
+    {
+        case DevicePropertyPhysicalDeviceObjectName:
+        {
+            ULONG used_len, len = buffer_length + sizeof(OBJECT_NAME_INFORMATION);
+            OBJECT_NAME_INFORMATION *name = HeapAlloc(GetProcessHeap(), 0, len);
+
+            status = NtQueryObject(device->Reserved, ObjectNameInformation, name, len, &used_len);
+            if (status == STATUS_SUCCESS)
+            {
+                /* Ensure room for NULL termination */
+                if (buffer_length >= name->Name.MaximumLength)
+                    memcpy(property_buffer, name->Name.Buffer, name->Name.MaximumLength);
+                else
+                    status = STATUS_BUFFER_TOO_SMALL;
+                *result_length = name->Name.MaximumLength;
+            }
+            else
+            {
+                if (status == STATUS_INFO_LENGTH_MISMATCH ||
+                    status == STATUS_BUFFER_OVERFLOW)
+                {
+                    status = STATUS_BUFFER_TOO_SMALL;
+                    *result_length = used_len - sizeof(OBJECT_NAME_INFORMATION);
+                }
+                else
+                    *result_length = 0;
+            }
+            HeapFree(GetProcessHeap(), 0, name);
+            break;
+        }
+        default:
+            FIXME("unhandled property %d\n", device_property);
+    }
+    return status;
 }
 
 
@@ -1223,8 +1258,8 @@ NTSTATUS WINAPI IoReportResourceUsage(PUNICODE_STRING name, PDRIVER_OBJECT drv_o
                                       ULONG drv_size, PDRIVER_OBJECT dev_obj, PCM_RESOURCE_LIST dev_list,
                                       ULONG dev_size, BOOLEAN overwrite, PBOOLEAN detected)
 {
-    FIXME("(%s %p %p %u %p %p %u %d %p) stub\n", debugstr_w(name? name->Buffer : NULL),
-          drv_obj, drv_list, drv_size, dev_obj, dev_list, dev_size, overwrite, detected);
+    FIXME( "(%s, %p, %p, %u, %p, %p, %u, %d, %p): stub\n", debugstr_us(name),
+           drv_obj, drv_list, drv_size, dev_obj, dev_list, dev_size, overwrite, detected );
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -1377,6 +1412,34 @@ LONG WINAPI NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
 #endif
 {
     return InterlockedIncrement( dest );
+}
+
+
+/***********************************************************************
+ *           InterlockedPopEntrySList   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( NTOSKRNL_InterlockedPopEntrySList )
+PSLIST_ENTRY WINAPI __regs_NTOSKRNL_InterlockedPopEntrySList( PSLIST_HEADER list )
+#else
+PSLIST_ENTRY WINAPI NTOSKRNL_InterlockedPopEntrySList( PSLIST_HEADER list )
+#endif
+{
+    return InterlockedPopEntrySList( list );
+}
+
+
+/***********************************************************************
+ *           InterlockedPushEntrySList   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_InterlockedPushEntrySList )
+PSLIST_ENTRY WINAPI __regs_NTOSKRNL_InterlockedPushEntrySList( PSLIST_HEADER list, PSLIST_ENTRY entry )
+#else
+PSLIST_ENTRY WINAPI NTOSKRNL_InterlockedPushEntrySList( PSLIST_HEADER list, PSLIST_ENTRY entry )
+#endif
+{
+    return InterlockedPushEntrySList( list, entry );
 }
 
 
@@ -1922,13 +1985,6 @@ VOID WINAPI MmUnmapIoSpace( PVOID BaseAddress, SIZE_T NumberOfBytes )
     FIXME( "stub: %p, %lu\n", BaseAddress, NumberOfBytes );
 }
 
-/***********************************************************************
- *           ObfReferenceObject   (NTOSKRNL.EXE.@)
- */
-VOID WINAPI ObfReferenceObject(PVOID Object)
-{
-    FIXME("(%p): stub\n", Object);
-}
 
  /***********************************************************************
  *           ObReferenceObjectByHandle    (NTOSKRNL.EXE.@)
@@ -1958,17 +2014,32 @@ NTSTATUS WINAPI ObReferenceObjectByName( UNICODE_STRING *ObjectName,
     return STATUS_NOT_IMPLEMENTED;
 }
 
+
+/***********************************************************************
+ *           ObfReferenceObject   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( ObfReferenceObject )
+void WINAPI __regs_ObfReferenceObject( void *obj )
+#else
+void WINAPI ObfReferenceObject( void *obj )
+#endif
+{
+    FIXME( "(%p): stub\n", obj );
+}
+
+
 /***********************************************************************
  *           ObfDereferenceObject   (NTOSKRNL.EXE.@)
  */
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( ObfDereferenceObject )
-void WINAPI __regs_ObfDereferenceObject( VOID *obj )
+void WINAPI __regs_ObfDereferenceObject( void *obj )
 #else
-void WINAPI ObfDereferenceObject( VOID *obj )
+void WINAPI ObfDereferenceObject( void *obj )
 #endif
 {
-    FIXME( "stub: %p\n", obj );
+    FIXME( "(%p): stub\n", obj );
 }
 
 

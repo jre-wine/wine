@@ -42,6 +42,8 @@ static HRESULT shdr_handler(const char *data, DWORD data_size, DWORD tag, void *
             break;
 
         case TAG_SHDR:
+        case TAG_SHEX:
+            if (shader_info->shader_code) FIXME("Multiple SHDR/SHEX chunks.\n");
             shader_info->shader_code = (const DWORD *)data;
             break;
 
@@ -66,7 +68,7 @@ static HRESULT shader_extract_from_dxbc(const void *dxbc, SIZE_T dxbc_length, st
 
     if (FAILED(hr))
     {
-        ERR("Failed to parse shader, hr %#x\n", hr);
+        FIXME("Failed to parse shader, hr %#x.\n", hr);
         shader_free_signature(shader_info->input_signature);
         shader_free_signature(shader_info->output_signature);
     }
@@ -378,7 +380,7 @@ static HRESULT d3d_vertex_shader_init(struct d3d_vertex_shader *shader, struct d
     shader_info.output_signature = &output_signature;
     if (FAILED(hr = shader_extract_from_dxbc(byte_code, byte_code_length, &shader_info)))
     {
-        ERR("Failed to extract shader, hr %#x.\n", hr);
+        WARN("Failed to extract shader, hr %#x.\n", hr);
         wined3d_private_store_cleanup(&shader->private_store);
         wined3d_mutex_unlock();
         return hr;
@@ -697,7 +699,7 @@ static HRESULT d3d_geometry_shader_init(struct d3d_geometry_shader *shader, stru
     shader_info.output_signature = &output_signature;
     if (FAILED(hr = shader_extract_from_dxbc(byte_code, byte_code_length, &shader_info)))
     {
-        ERR("Failed to extract shader, hr %#x.\n", hr);
+        WARN("Failed to extract shader, hr %#x.\n", hr);
         wined3d_private_store_cleanup(&shader->private_store);
         wined3d_mutex_unlock();
         return hr;
@@ -1023,7 +1025,7 @@ static HRESULT d3d_pixel_shader_init(struct d3d_pixel_shader *shader, struct d3d
     shader_info.output_signature = &output_signature;
     if (FAILED(hr = shader_extract_from_dxbc(byte_code, byte_code_length, &shader_info)))
     {
-        ERR("Failed to extract shader, hr %#x.\n", hr);
+        WARN("Failed to extract shader, hr %#x.\n", hr);
         wined3d_private_store_cleanup(&shader->private_store);
         wined3d_mutex_unlock();
         return hr;

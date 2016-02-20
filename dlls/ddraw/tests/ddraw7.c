@@ -1,6 +1,6 @@
 /*
  * Copyright 2005 Antoine Chavasse (a.chavasse@gmail.com)
- * Copyright 2006, 2012-2014 Stefan Dösinger for CodeWeavers
+ * Copyright 2006, 2008, 2011, 2012-2014 Stefan Dösinger for CodeWeavers
  * Copyright 2011-2014 Henri Verbeet for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -98,6 +98,27 @@ static ULONG get_refcount(IUnknown *iface)
 {
     IUnknown_AddRef(iface);
     return IUnknown_Release(iface);
+}
+
+static IDirectDrawSurface7 *create_overlay(IDirectDraw7 *ddraw,
+        unsigned int width, unsigned int height, DWORD format)
+{
+    IDirectDrawSurface7 *surface;
+    DDSURFACEDESC2 desc;
+
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
+    desc.dwWidth = width;
+    desc.dwHeight = height;
+    desc.ddsCaps.dwCaps = DDSCAPS_OVERLAY;
+    U4(desc).ddpfPixelFormat.dwSize = sizeof(U4(desc).ddpfPixelFormat);
+    U4(desc).ddpfPixelFormat.dwFlags = DDPF_FOURCC;
+    U4(desc).ddpfPixelFormat.dwFourCC = format;
+
+    if (FAILED(IDirectDraw7_CreateSurface(ddraw, &desc, &surface, NULL)))
+        return NULL;
+    return surface;
 }
 
 static DWORD WINAPI create_window_thread_proc(void *param)
@@ -4975,11 +4996,7 @@ static void test_block_formats_creation(void)
                         expect_hr = D3D_OK;
 
                     hr = IDirectDraw7_CreateSurface(ddraw, &ddsd, &surface, NULL);
-                    if (todo)
-                        todo_wine ok(hr == expect_hr,
-                                "Got unexpected hr %#x for format %s, resource type %s, size %ux%u, expected %#x.\n",
-                                hr, formats[i].name, types[j].name, w, h, expect_hr);
-                    else
+                    todo_wine_if (todo)
                         ok(hr == expect_hr,
                                 "Got unexpected hr %#x for format %s, resource type %s, size %ux%u, expected %#x.\n",
                                 hr, formats[i].name, types[j].name, w, h, expect_hr);
@@ -8841,10 +8858,7 @@ static void test_fog_interpolation(void)
         color = get_surface_color(rt, 0, 240);
         ok(compare_color(color, 0x000000ff, 2), "Got unexpected color 0x%08x, case %u.\n", color, i);
         color = get_surface_color(rt, 320, 240);
-        if (tests[i].todo)
-            todo_wine ok(compare_color(color, tests[i].middle_color, 2),
-                    "Got unexpected color 0x%08x, case %u.\n", color, i);
-        else
+        todo_wine_if (tests[i].todo)
             ok(compare_color(color, tests[i].middle_color, 2),
                     "Got unexpected color 0x%08x, case %u.\n", color, i);
         color = get_surface_color(rt, 639, 240);
@@ -9597,18 +9611,12 @@ static void test_color_fill(void)
         ok(SUCCEEDED(hr), "Failed to create surface, hr %#x, surface %s.\n", hr, tests[i].name);
 
         hr = IDirectDrawSurface7_Blt(surface, NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
-        if (tests[i].format.dwFourCC)
-            todo_wine ok(hr == tests[i].colorfill_hr, "Blt returned %#x, expected %#x, surface %s.\n",
-                    hr, tests[i].colorfill_hr, tests[i].name);
-        else
+        todo_wine_if (tests[i].format.dwFourCC)
             ok(hr == tests[i].colorfill_hr, "Blt returned %#x, expected %#x, surface %s.\n",
                     hr, tests[i].colorfill_hr, tests[i].name);
 
         hr = IDirectDrawSurface7_Blt(surface, &rect, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &fx);
-        if (tests[i].format.dwFourCC)
-            todo_wine ok(hr == tests[i].colorfill_hr, "Blt returned %#x, expected %#x, surface %s.\n",
-                    hr, tests[i].colorfill_hr, tests[i].name);
-        else
+        todo_wine_if (tests[i].format.dwFourCC)
             ok(hr == tests[i].colorfill_hr, "Blt returned %#x, expected %#x, surface %s.\n",
                     hr, tests[i].colorfill_hr, tests[i].name);
 
@@ -10716,10 +10724,7 @@ static void test_lockrect_invalid(void)
             locked_desc.dwSize = sizeof(locked_desc);
 
             hr = IDirectDrawSurface7_Lock(surface, rect, &locked_desc, DDLOCK_WAIT, NULL);
-            if (SUCCEEDED(resources[r].hr))
-                todo_wine ok(hr == resources[r].hr, "Lock returned %#x for rect [%d, %d]->[%d, %d], type %s.\n",
-                        hr, rect->left, rect->top, rect->right, rect->bottom, resources[r].name);
-            else
+            todo_wine_if (SUCCEEDED(resources[r].hr))
                 ok(hr == resources[r].hr, "Lock returned %#x for rect [%d, %d]->[%d, %d], type %s.\n",
                         hr, rect->left, rect->top, rect->right, rect->bottom, resources[r].name);
             if (SUCCEEDED(hr))
@@ -10756,6 +10761,288 @@ static void test_lockrect_invalid(void)
         IDirectDrawSurface7_Release(surface);
     }
 
+done:
+    IDirectDraw7_Release(ddraw);
+    DestroyWindow(window);
+}
+
+static void test_yv12_overlay(void)
+{
+    IDirectDrawSurface7 *src_surface, *dst_surface;
+    RECT rect = {13, 17, 14, 18};
+    unsigned int offset, y;
+    DDSURFACEDESC2 desc;
+    unsigned char *base;
+    IDirectDraw7 *ddraw;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    if (!(src_surface = create_overlay(ddraw, 256, 256, MAKEFOURCC('Y','V','1','2'))))
+    {
+        skip("Failed to create a YV12 overlay, skipping test.\n");
+        goto done;
+    }
+
+    memset(&desc, 0, sizeof(desc));
+    desc.dwSize = sizeof(desc);
+    hr = IDirectDrawSurface7_Lock(src_surface, NULL, &desc, DDLOCK_WAIT, NULL);
+    ok(SUCCEEDED(hr), "Failed to lock surface, hr %#x.\n", hr);
+
+    ok(desc.dwFlags == (DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_CAPS | DDSD_PITCH),
+            "Got unexpected flags %#x.\n", desc.dwFlags);
+    ok(desc.ddsCaps.dwCaps == (DDSCAPS_OVERLAY | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM | DDSCAPS_HWCODEC)
+            || desc.ddsCaps.dwCaps == (DDSCAPS_OVERLAY | DDSCAPS_VIDEOMEMORY | DDSCAPS_LOCALVIDMEM),
+            "Got unexpected caps %#x.\n", desc.ddsCaps.dwCaps);
+    ok(desc.dwWidth == 256, "Got unexpected width %u.\n", desc.dwWidth);
+    ok(desc.dwHeight == 256, "Got unexpected height %u.\n", desc.dwHeight);
+    /* The overlay pitch seems to have 256 byte alignment. */
+    ok(!(U1(desc).lPitch & 0xff), "Got unexpected pitch %u.\n", U1(desc).lPitch);
+
+    /* Fill the surface with some data for the blit test. */
+    base = desc.lpSurface;
+    /* Luminance */
+    for (y = 0; y < desc.dwHeight; ++y)
+    {
+        memset(base + U1(desc).lPitch * y, 0x10, desc.dwWidth);
+    }
+    /* V */
+    for (; y < desc.dwHeight + desc.dwHeight / 4; ++y)
+    {
+        memset(base + U1(desc).lPitch * y, 0x20, desc.dwWidth);
+    }
+    /* U */
+    for (; y < desc.dwHeight + desc.dwHeight / 2; ++y)
+    {
+        memset(base + U1(desc).lPitch * y, 0x30, desc.dwWidth);
+    }
+
+    hr = IDirectDrawSurface7_Unlock(src_surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to unlock surface, hr %#x.\n", hr);
+
+    /* YV12 uses 2x2 blocks with 6 bytes per block (4*Y, 1*U, 1*V). Unlike
+     * other block-based formats like DXT the entire Y channel is stored in
+     * one big chunk of memory, followed by the chroma channels. So partial
+     * locks do not really make sense. Show that they are allowed nevertheless
+     * and the offset points into the luminance data. */
+    hr = IDirectDrawSurface7_Lock(src_surface, &rect, &desc, DDLOCK_WAIT, NULL);
+    ok(SUCCEEDED(hr), "Failed to lock surface, hr %#x.\n", hr);
+    offset = ((const unsigned char *)desc.lpSurface - base);
+    ok(offset == rect.top * U1(desc).lPitch + rect.left, "Got unexpected offset %u, expected %u.\n",
+            offset, rect.top * U1(desc).lPitch + rect.left);
+    hr = IDirectDrawSurface7_Unlock(src_surface, NULL);
+    ok(SUCCEEDED(hr), "Failed to unlock surface, hr %#x.\n", hr);
+
+    if (!(dst_surface = create_overlay(ddraw, 256, 256, MAKEFOURCC('Y','V','1','2'))))
+    {
+        /* Windows XP with a Radeon X1600 GPU refuses to create a second
+         * overlay surface, DDERR_NOOVERLAYHW, making the blit tests moot. */
+        skip("Failed to create a second YV12 surface, skipping blit test.\n");
+        IDirectDrawSurface7_Release(src_surface);
+        goto done;
+    }
+
+    hr = IDirectDrawSurface7_Blt(dst_surface, NULL, src_surface, NULL, DDBLT_WAIT, NULL);
+    /* VMware rejects YV12 blits. This behavior has not been seen on real
+     * hardware yet, so mark it broken. */
+    ok(SUCCEEDED(hr) || broken(hr == E_NOTIMPL), "Failed to blit, hr %#x.\n", hr);
+
+    if (SUCCEEDED(hr))
+    {
+        memset(&desc, 0, sizeof(desc));
+        desc.dwSize = sizeof(desc);
+        hr = IDirectDrawSurface7_Lock(dst_surface, NULL, &desc, DDLOCK_WAIT, NULL);
+        ok(SUCCEEDED(hr), "Failed to lock surface, hr %#x.\n", hr);
+
+        base = desc.lpSurface;
+        ok(base[0] == 0x10, "Got unexpected Y data 0x%02x.\n", base[0]);
+        base += desc.dwHeight * U1(desc).lPitch;
+        todo_wine ok(base[0] == 0x20, "Got unexpected V data 0x%02x.\n", base[0]);
+        base += desc.dwHeight / 4 * U1(desc).lPitch;
+        todo_wine ok(base[0] == 0x30, "Got unexpected U data 0x%02x.\n", base[0]);
+
+        hr = IDirectDrawSurface7_Unlock(dst_surface, NULL);
+        ok(SUCCEEDED(hr), "Failed to unlock surface, hr %#x.\n", hr);
+    }
+
+    IDirectDrawSurface7_Release(dst_surface);
+    IDirectDrawSurface7_Release(src_surface);
+done:
+    IDirectDraw7_Release(ddraw);
+    DestroyWindow(window);
+}
+
+static void test_offscreen_overlay(void)
+{
+    IDirectDrawSurface7 *overlay, *offscreen, *primary;
+    DDSURFACEDESC2 surface_desc;
+    IDirectDraw7 *ddraw;
+    HWND window;
+    HRESULT hr;
+    HDC dc;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    if (!(overlay = create_overlay(ddraw, 64, 64, MAKEFOURCC('U','Y','V','Y'))))
+    {
+        skip("Failed to create a UYVY overlay, skipping test.\n");
+        goto done;
+    }
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &primary, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n",hr);
+
+    /* On Windows 7, and probably Vista, UpdateOverlay() will return
+     * DDERR_OUTOFCAPS if the dwm is active. Calling GetDC() on the primary
+     * surface prevents this by disabling the dwm. */
+    hr = IDirectDrawSurface7_GetDC(primary, &dc);
+    ok(SUCCEEDED(hr), "Failed to get DC, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_ReleaseDC(primary, dc);
+    ok(SUCCEEDED(hr), "Failed to release DC, hr %#x.\n", hr);
+
+    /* Try to overlay a NULL surface. */
+    hr = IDirectDrawSurface7_UpdateOverlay(overlay, NULL, NULL, NULL, DDOVER_SHOW, NULL);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_UpdateOverlay(overlay, NULL, NULL, NULL, DDOVER_HIDE, NULL);
+    ok(hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+
+    /* Try to overlay an offscreen surface. */
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH | DDSD_PIXELFORMAT;
+    surface_desc.dwWidth = 64;
+    surface_desc.dwHeight = 64;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
+    U4(surface_desc).ddpfPixelFormat.dwSize = sizeof(U4(surface_desc).ddpfPixelFormat);
+    U4(surface_desc).ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U4(surface_desc).ddpfPixelFormat.dwFourCC = 0;
+    U1(U4(surface_desc).ddpfPixelFormat).dwRGBBitCount = 16;
+    U2(U4(surface_desc).ddpfPixelFormat).dwRBitMask = 0xf800;
+    U3(U4(surface_desc).ddpfPixelFormat).dwGBitMask = 0x07e0;
+    U4(U4(surface_desc).ddpfPixelFormat).dwBBitMask = 0x001f;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &offscreen, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n",hr);
+
+    hr = IDirectDrawSurface7_UpdateOverlay(overlay, NULL, offscreen, NULL, DDOVER_SHOW, NULL);
+    ok(SUCCEEDED(hr), "Failed to update overlay, hr %#x.\n", hr);
+
+    /* Try to overlay the primary with a non-overlay surface. */
+    hr = IDirectDrawSurface7_UpdateOverlay(offscreen, NULL, primary, NULL, DDOVER_SHOW, NULL);
+    ok(hr == DDERR_NOTAOVERLAYSURFACE, "Got unexpected hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_UpdateOverlay(offscreen, NULL, primary, NULL, DDOVER_HIDE, NULL);
+    ok(hr == DDERR_NOTAOVERLAYSURFACE, "Got unexpected hr %#x.\n", hr);
+
+    IDirectDrawSurface7_Release(offscreen);
+    IDirectDrawSurface7_Release(primary);
+    IDirectDrawSurface7_Release(overlay);
+done:
+    IDirectDraw7_Release(ddraw);
+    DestroyWindow(window);
+}
+
+static void test_overlay_rect(void)
+{
+    IDirectDrawSurface7 *overlay, *primary;
+    DDSURFACEDESC2 surface_desc;
+    RECT rect = {0, 0, 64, 64};
+    IDirectDraw7 *ddraw;
+    LONG pos_x, pos_y;
+    HRESULT hr, hr2;
+    HWND window;
+    HDC dc;
+
+    window = CreateWindowA("static", "ddraw_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, 0, 0, 0, 0);
+    ddraw = create_ddraw();
+    ok(!!ddraw, "Failed to create a ddraw object.\n");
+    hr = IDirectDraw7_SetCooperativeLevel(ddraw, window, DDSCL_NORMAL);
+    ok(SUCCEEDED(hr), "Failed to set cooperative level, hr %#x.\n", hr);
+
+    if (!(overlay = create_overlay(ddraw, 64, 64, MAKEFOURCC('U','Y','V','Y'))))
+    {
+        skip("Failed to create a UYVY overlay, skipping test.\n");
+        goto done;
+    }
+
+    memset(&surface_desc, 0, sizeof(surface_desc));
+    surface_desc.dwSize = sizeof(surface_desc);
+    surface_desc.dwFlags = DDSD_CAPS;
+    surface_desc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
+    hr = IDirectDraw7_CreateSurface(ddraw, &surface_desc, &primary, NULL);
+    ok(SUCCEEDED(hr), "Failed to create surface, hr %#x.\n",hr);
+
+    /* On Windows 7, and probably Vista, UpdateOverlay() will return
+     * DDERR_OUTOFCAPS if the dwm is active. Calling GetDC() on the primary
+     * surface prevents this by disabling the dwm. */
+    hr = IDirectDrawSurface7_GetDC(primary, &dc);
+    ok(SUCCEEDED(hr), "Failed to get DC, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_ReleaseDC(primary, dc);
+    ok(SUCCEEDED(hr), "Failed to release DC, hr %#x.\n", hr);
+
+    /* The dx sdk sort of implies that rect must be set when DDOVER_SHOW is
+     * used. This is not true in Windows Vista and earlier, but changed in
+     * Windows 7. */
+    hr = IDirectDrawSurface7_UpdateOverlay(overlay, NULL, primary, &rect, DDOVER_SHOW, NULL);
+    ok(SUCCEEDED(hr), "Failed to update overlay, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_UpdateOverlay(overlay, NULL, primary, NULL, DDOVER_HIDE, NULL);
+    ok(SUCCEEDED(hr), "Failed to update overlay, hr %#x.\n", hr);
+    hr = IDirectDrawSurface7_UpdateOverlay(overlay, NULL, primary, NULL, DDOVER_SHOW, NULL);
+    ok(hr == DD_OK || hr == DDERR_INVALIDPARAMS, "Got unexpected hr %#x.\n", hr);
+
+    /* Show that the overlay position is the (top, left) coordinate of the
+     * destination rectangle. */
+    OffsetRect(&rect, 32, 16);
+    hr = IDirectDrawSurface7_UpdateOverlay(overlay, NULL, primary, &rect, DDOVER_SHOW, NULL);
+    ok(SUCCEEDED(hr), "Failed to update overlay, hr %#x.\n", hr);
+    pos_x = -1; pos_y = -1;
+    hr = IDirectDrawSurface7_GetOverlayPosition(overlay, &pos_x, &pos_y);
+    ok(SUCCEEDED(hr), "Failed to get overlay position, hr %#x.\n", hr);
+    ok(pos_x == rect.left, "Got unexpected pos_x %d, expected %d.\n", pos_x, rect.left);
+    ok(pos_y == rect.top, "Got unexpected pos_y %d, expected %d.\n", pos_y, rect.top);
+
+    /* Passing a NULL dest rect sets the position to 0/0. Visually it can be
+     * seen that the overlay overlays the whole primary(==screen). */
+    hr2 = IDirectDrawSurface7_UpdateOverlay(overlay, NULL, primary, NULL, 0, NULL);
+    ok(hr2 == DD_OK || hr2 == DDERR_INVALIDPARAMS || hr2 == DDERR_OUTOFCAPS, "Got unexpected hr %#x.\n", hr2);
+    hr = IDirectDrawSurface7_GetOverlayPosition(overlay, &pos_x, &pos_y);
+    ok(SUCCEEDED(hr), "Failed to get overlay position, hr %#x.\n", hr);
+    if (SUCCEEDED(hr2))
+    {
+        ok(!pos_x, "Got unexpected pos_x %d.\n", pos_x);
+        ok(!pos_y, "Got unexpected pos_y %d.\n", pos_y);
+    }
+    else
+    {
+        ok(pos_x == 32, "Got unexpected pos_x %d.\n", pos_x);
+        ok(pos_y == 16, "Got unexpected pos_y %d.\n", pos_y);
+    }
+
+    /* The position cannot be retrieved when the overlay is not shown. */
+    hr = IDirectDrawSurface7_UpdateOverlay(overlay, NULL, primary, &rect, DDOVER_HIDE, NULL);
+    ok(SUCCEEDED(hr), "Failed to update overlay, hr %#x.\n", hr);
+    pos_x = -1; pos_y = -1;
+    hr = IDirectDrawSurface7_GetOverlayPosition(overlay, &pos_x, &pos_y);
+    ok(hr == DDERR_OVERLAYNOTVISIBLE, "Got unexpected hr %#x.\n", hr);
+    ok(!pos_x, "Got unexpected pos_x %d.\n", pos_x);
+    ok(!pos_y, "Got unexpected pos_y %d.\n", pos_y);
+
+    IDirectDrawSurface7_Release(primary);
+    IDirectDrawSurface7_Release(overlay);
 done:
     IDirectDraw7_Release(ddraw);
     DestroyWindow(window);
@@ -10859,4 +11146,7 @@ START_TEST(ddraw7)
     test_range_colorkey();
     test_shademode();
     test_lockrect_invalid();
+    test_yv12_overlay();
+    test_offscreen_overlay();
+    test_overlay_rect();
 }

@@ -5,14 +5,14 @@ msgstr ""
 "Project-Id-Version: Wine\n"
 "Report-Msgid-Bugs-To: http://bugs.winehq.org\n"
 "POT-Creation-Date: N/A\n"
-"PO-Revision-Date: 2016-01-26 15:30+0300\n"
+"PO-Revision-Date: 2016-02-14 19:13+0300\n"
 "Last-Translator: Nikolay Sivov <nsivov@codeweavers.com>\n"
 "Language-Team: Russian\n"
 "Language: ru\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"X-Generator: Poedit 1.8.6\n"
+"X-Generator: Poedit 1.8.7\n"
 
 #: appwiz.rc:58
 msgid "Install/Uninstall"
@@ -10229,12 +10229,12 @@ msgstr ""
 msgid "Are you sure?"
 msgstr "Вы уверены?"
 
-#: cmd.rc:354 xcopy.rc:43
+#: cmd.rc:354 reg.rc:45 xcopy.rc:43
 msgctxt "Yes key"
 msgid "Y"
 msgstr "Y"
 
-#: cmd.rc:355 xcopy.rc:44
+#: cmd.rc:355 reg.rc:46 xcopy.rc:44
 msgctxt "No key"
 msgid "N"
 msgstr "N"
@@ -10372,7 +10372,7 @@ msgstr "Том на диске %1!c! имеет метку %2\n"
 msgid "Volume in drive %1!c! has no label.\n"
 msgstr "Том на диске %1!c! не имеет метки.\n"
 
-#: cmd.rc:390
+#: cmd.rc:390 reg.rc:44
 msgid " (Yes|No)"
 msgstr " (Y - да|N - нет)"
 
@@ -11573,25 +11573,62 @@ msgid "The operation completed successfully\n"
 msgstr "Операция успешно завершена\n"
 
 #: reg.rc:35
-msgid "Error: Invalid key name\n"
-msgstr "Ошибка: неправильное имя раздела\n"
+msgid "reg: Invalid key name\n"
+msgstr "reg: неверное имя раздела\n"
 
 #: reg.rc:36
-msgid "Error: Invalid command line parameters\n"
-msgstr "Ошибка: неправильные параметры командной строки\n"
+msgid "reg: Invalid command line parameters\n"
+msgstr "reg: неверные параметры командной строки\n"
 
 #: reg.rc:37
-msgid "Error: Unable to access remote machine\n"
-msgstr "Ошибка: не удалось получить доступ к удалённому компьютеру\n"
+msgid "reg: Unable to access remote machine\n"
+msgstr "reg: не удалось получить доступ к удалённому компьютеру\n"
 
 #: reg.rc:38
 msgid ""
-"Error: The system was unable to find the specified registry key or value\n"
-msgstr "Ошибка: не удалось найти указанный раздел реестра или значение\n"
+"reg: The system was unable to find the specified registry key or value\n"
+msgstr "reg: не удалось найти указанный раздел реестра или значение\n"
 
 #: reg.rc:39
-msgid "Error: Unsupported type\n"
-msgstr "Ошибка: тип не поддерживается\n"
+msgid "reg: Unsupported registry data type [%1]\n"
+msgstr "reg: тип данных [%1] не поддерживается\n"
+
+#: reg.rc:40
+msgid "reg: The option [/d] must be followed by a valid integer\n"
+msgstr "reg: за опцией [/d] должно следовать целое число\n"
+
+#: reg.rc:41
+msgid "reg: The option [/d] must be followed by a valid hexadecimal value\n"
+msgstr ""
+"reg: за опцией [/d] должно следовать число в шестнадцатеричном формате\n"
+
+#: reg.rc:42
+msgid "reg: Unhandled registry data type [/t 0x%1!x!, /d %2]\n"
+msgstr "reg: тип данных не поддерживается [/t 0x%1!x!, /d %2]\n"
+
+#: reg.rc:43
+msgid "The registry value '%1' already exists. Do you want to overwrite it?"
+msgstr "Значение «%1» уже существует. Вы хотите заменить его?"
+
+#: reg.rc:47
+msgid "The registry operation was cancelled\n"
+msgstr "Операция с реестром была отменена\n"
+
+#: reg.rc:48 regedit.rc:204
+msgid "(Default)"
+msgstr "(По умолчанию)"
+
+#: reg.rc:49
+msgid "Are you sure you want to delete the registry value '%1'?"
+msgstr "Вы точно хотите удалить параметр реестра «%1»?"
+
+#: reg.rc:50
+msgid "Are you sure you want to delete all registry values in '%1'?"
+msgstr "Вы точно хотите удалить все параметры реестра из «%s»?"
+
+#: reg.rc:51
+msgid "Are you sure you want to delete the registry key '%1'?"
+msgstr "Вы точно хотите удалить ключ реестра «%1»?"
 
 #: regedit.rc:34
 msgid "&Registry"
@@ -11794,10 +11831,6 @@ msgstr "Файлы реестра (*.reg)"
 #: regedit.rc:197
 msgid "Win9x/NT4 Registry files (REGEDIT4)"
 msgstr "Файлы реестра Win9x/NT4 (REGEDIT4)"
-
-#: regedit.rc:204
-msgid "(Default)"
-msgstr "(По умолчанию)"
 
 #: regedit.rc:205
 msgid "(value not set)"
@@ -13728,12 +13761,10 @@ msgid "Configuration error"
 msgstr "Ошибка настройки"
 
 #: wineconsole.rc:42
-#, fuzzy
-#| msgid "Screen buffer size must be greater or equal to the window's one"
 msgid ""
 "The size of the screen buffer must be greater than or equal to the size of "
 "the window."
-msgstr "Размер буфера экрана должен быть не менее буфера окна"
+msgstr "Размер буфера экрана должен быть не меньше размера окна."
 
 #: wineconsole.rc:37
 msgid "Each character is %1!u! pixels wide and %2!u! pixels high"
