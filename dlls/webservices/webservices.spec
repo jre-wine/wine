@@ -108,7 +108,7 @@
 @ stub WsReadChars
 @ stub WsReadCharsUtf8
 @ stub WsReadElement
-@ stub WsReadEndAttribute
+@ stdcall WsReadEndAttribute(ptr ptr)
 @ stdcall WsReadEndElement(ptr ptr)
 @ stub WsReadEndpointAddressExtension
 @ stub WsReadEnvelopeEnd
@@ -118,7 +118,7 @@
 @ stub WsReadMetadata
 @ stdcall WsReadNode(ptr ptr)
 @ stub WsReadQualifiedName
-@ stub WsReadStartAttribute
+@ stdcall WsReadStartAttribute(ptr long ptr)
 @ stdcall WsReadStartElement(ptr ptr)
 @ stdcall WsReadToStartElement(ptr ptr ptr ptr ptr)
 @ stdcall WsReadType(ptr long long ptr long ptr ptr long ptr)
@@ -165,14 +165,14 @@
 @ stub WsTrimXmlWhitespace
 @ stub WsVerifyXmlNCName
 @ stub WsWriteArray
-@ stub WsWriteAttribute
+@ stdcall WsWriteAttribute(ptr ptr long ptr long ptr)
 @ stub WsWriteBody
 @ stub WsWriteBytes
 @ stub WsWriteChars
 @ stub WsWriteCharsUtf8
-@ stub WsWriteElement
+@ stdcall WsWriteElement(ptr ptr long ptr long ptr)
 @ stdcall WsWriteEndAttribute(ptr ptr)
-@ stub WsWriteEndCData
+@ stdcall WsWriteEndCData(ptr ptr)
 @ stdcall WsWriteEndElement(ptr ptr)
 @ stdcall WsWriteEndStartElement(ptr ptr)
 @ stub WsWriteEnvelopeEnd
@@ -182,11 +182,11 @@
 @ stub WsWriteNode
 @ stub WsWriteQualifiedName
 @ stdcall WsWriteStartAttribute(ptr ptr ptr ptr long ptr)
-@ stub WsWriteStartCData
+@ stdcall WsWriteStartCData(ptr ptr)
 @ stdcall WsWriteStartElement(ptr ptr ptr ptr ptr)
 @ stdcall WsWriteText(ptr ptr ptr)
 @ stdcall WsWriteType(ptr long long ptr long ptr long ptr)
-@ stub WsWriteValue
+@ stdcall WsWriteValue(ptr long ptr long ptr)
 @ stdcall WsWriteXmlBuffer(ptr ptr ptr)
 @ stdcall WsWriteXmlBufferToBytes(ptr ptr ptr ptr long ptr ptr ptr ptr)
 @ stub WsWriteXmlnsAttribute

@@ -123,8 +123,9 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_ARB_geometry_shader4",             ARB_GEOMETRY_SHADER4          },
     {"GL_ARB_half_float_pixel",             ARB_HALF_FLOAT_PIXEL          },
     {"GL_ARB_half_float_vertex",            ARB_HALF_FLOAT_VERTEX         },
-    {"GL_ARB_instanced_arrays",             ARB_INSTANCED_ARRAYS,         },
-    {"GL_ARB_internalformat_query2",        ARB_INTERNALFORMAT_QUERY2,    },
+    {"GL_ARB_instanced_arrays",             ARB_INSTANCED_ARRAYS          },
+    {"GL_ARB_internalformat_query",         ARB_INTERNALFORMAT_QUERY      },
+    {"GL_ARB_internalformat_query2",        ARB_INTERNALFORMAT_QUERY2     },
     {"GL_ARB_map_buffer_alignment",         ARB_MAP_BUFFER_ALIGNMENT      },
     {"GL_ARB_map_buffer_range",             ARB_MAP_BUFFER_RANGE          },
     {"GL_ARB_multisample",                  ARB_MULTISAMPLE               },
@@ -153,6 +154,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_ARB_texture_query_levels",         ARB_TEXTURE_QUERY_LEVELS      },
     {"GL_ARB_texture_rectangle",            ARB_TEXTURE_RECTANGLE         },
     {"GL_ARB_texture_rg",                   ARB_TEXTURE_RG                },
+    {"GL_ARB_texture_rgb10_a2ui",           ARB_TEXTURE_RGB10_A2UI        },
     {"GL_ARB_timer_query",                  ARB_TIMER_QUERY               },
     {"GL_ARB_uniform_buffer_object",        ARB_UNIFORM_BUFFER_OBJECT     },
     {"GL_ARB_vertex_array_bgra",            ARB_VERTEX_ARRAY_BGRA         },
@@ -194,6 +196,7 @@ static const struct wined3d_extension_map gl_extension_map[] =
     {"GL_EXT_texture_env_combine",          EXT_TEXTURE_ENV_COMBINE       },
     {"GL_EXT_texture_env_dot3",             EXT_TEXTURE_ENV_DOT3          },
     {"GL_EXT_texture_filter_anisotropic",   EXT_TEXTURE_FILTER_ANISOTROPIC},
+    {"GL_EXT_texture_integer",              EXT_TEXTURE_INTEGER           },
     {"GL_EXT_texture_lod_bias",             EXT_TEXTURE_LOD_BIAS          },
     {"GL_EXT_texture_mirror_clamp",         EXT_TEXTURE_MIRROR_CLAMP      },
     {"GL_EXT_texture_snorm",                EXT_TEXTURE_SNORM             },
@@ -3408,6 +3411,7 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
         {ARB_TEXTURE_FLOAT,                MAKEDWORD_VERSION(3, 0)},
         {ARB_TEXTURE_RG,                   MAKEDWORD_VERSION(3, 0)},
         {EXT_DRAW_BUFFERS2,                MAKEDWORD_VERSION(3, 0)},
+        {EXT_TEXTURE_INTEGER,              MAKEDWORD_VERSION(3, 0)},
         /* We don't want to enable EXT_GPU_SHADER4: even though similar
          * functionality is available in core GL 3.0 / GLSL 1.30, it's different
          * enough that reusing the same flag for the new features hurts more
@@ -3433,10 +3437,12 @@ static BOOL wined3d_adapter_init_gl_caps(struct wined3d_adapter *adapter)
         {ARB_INSTANCED_ARRAYS,             MAKEDWORD_VERSION(3, 3)},
         {ARB_SAMPLER_OBJECTS,              MAKEDWORD_VERSION(3, 3)},
         {ARB_SHADER_BIT_ENCODING,          MAKEDWORD_VERSION(3, 3)},
+        {ARB_TEXTURE_RGB10_A2UI,           MAKEDWORD_VERSION(3, 3)},
         {ARB_TIMER_QUERY,                  MAKEDWORD_VERSION(3, 3)},
 
         {ARB_ES2_COMPATIBILITY,            MAKEDWORD_VERSION(4, 1)},
 
+        {ARB_INTERNALFORMAT_QUERY,         MAKEDWORD_VERSION(4, 2)},
         {ARB_MAP_BUFFER_ALIGNMENT,         MAKEDWORD_VERSION(4, 2)},
 
         {ARB_DEBUG_OUTPUT,                 MAKEDWORD_VERSION(4, 3)},
@@ -4402,36 +4408,44 @@ HRESULT CDECL wined3d_check_device_multisample_type(const struct wined3d *wined3
         enum wined3d_device_type device_type, enum wined3d_format_id surface_format_id, BOOL windowed,
         enum wined3d_multisample_type multisample_type, DWORD *quality_levels)
 {
-    const struct wined3d_gl_info *gl_info;
+    const struct wined3d_gl_info *gl_info = &wined3d->adapters[adapter_idx].gl_info;
+    const struct wined3d_format *format = wined3d_get_format(gl_info, surface_format_id);
+    HRESULT hr = WINED3D_OK;
 
-    TRACE("wined3d %p, adapter_idx %u, device_type %s, surface_format %s,\n"
+    TRACE("wined3d %p, adapter_idx %u, device_type %s, surface_format %s, "
             "windowed %#x, multisample_type %#x, quality_levels %p.\n",
             wined3d, adapter_idx, debug_d3ddevicetype(device_type), debug_d3dformat(surface_format_id),
             windowed, multisample_type, quality_levels);
 
     if (adapter_idx >= wined3d->adapter_count)
         return WINED3DERR_INVALIDCALL;
-
-    gl_info = &wined3d->adapters[adapter_idx].gl_info;
-
-    if (multisample_type > gl_info->limits.samples)
+    if (surface_format_id == WINED3DFMT_UNKNOWN)
+        return WINED3DERR_INVALIDCALL;
+    if (multisample_type < WINED3D_MULTISAMPLE_NONE)
+        return WINED3DERR_INVALIDCALL;
+    if (multisample_type > WINED3D_MULTISAMPLE_16_SAMPLES)
     {
-        TRACE("Returning not supported.\n");
-        if (quality_levels)
-            *quality_levels = 0;
-
+        FIXME("multisample_type %u not handled yet.\n", multisample_type);
         return WINED3DERR_NOTAVAILABLE;
     }
 
-    if (quality_levels)
+    if (multisample_type && !(format->multisample_types & 1u << (multisample_type - 1)))
+        hr = WINED3DERR_NOTAVAILABLE;
+
+    if (SUCCEEDED(hr) || (multisample_type == WINED3D_MULTISAMPLE_NON_MASKABLE && format->multisample_types))
     {
-        if (multisample_type == WINED3D_MULTISAMPLE_NON_MASKABLE)
-            *quality_levels = gl_info->limits.samples;
-        else
-            *quality_levels = 1;
+        if (quality_levels)
+        {
+            if (multisample_type == WINED3D_MULTISAMPLE_NON_MASKABLE)
+                *quality_levels = wined3d_popcount(format->multisample_types);
+            else
+                *quality_levels = 1;
+        }
+        return WINED3D_OK;
     }
 
-    return WINED3D_OK;
+    TRACE("Returning not supported.\n");
+    return hr;
 }
 
 /* Check if the given DisplayFormat + DepthStencilFormat combination is valid for the Adapter */
@@ -4615,21 +4629,6 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
 
     switch (resource_type)
     {
-        case WINED3D_RTYPE_CUBE_TEXTURE:
-            format_flags |= WINED3DFMT_FLAG_TEXTURE;
-            allowed_usage = WINED3DUSAGE_AUTOGENMIPMAP
-                    | WINED3DUSAGE_DYNAMIC
-                    | WINED3DUSAGE_RENDERTARGET
-                    | WINED3DUSAGE_SOFTWAREPROCESSING
-                    | WINED3DUSAGE_QUERY_FILTER
-                    | WINED3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING
-                    | WINED3DUSAGE_QUERY_SRGBREAD
-                    | WINED3DUSAGE_QUERY_SRGBWRITE
-                    | WINED3DUSAGE_QUERY_VERTEXTEXTURE
-                    | WINED3DUSAGE_QUERY_WRAPANDMIP;
-            gl_type = WINED3D_GL_RES_TYPE_TEX_CUBE;
-            break;
-
         case WINED3D_RTYPE_SURFACE:
             if (!CheckSurfaceCapability(adapter, adapter_format, format, wined3d->flags & WINED3D_NO3D))
             {
@@ -4643,19 +4642,12 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
             gl_type = WINED3D_GL_RES_TYPE_RB;
             break;
 
-        case WINED3D_RTYPE_TEXTURE:
-            if ((usage & WINED3DUSAGE_DEPTHSTENCIL)
-                    && (format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_SHADOW)
-                    && !gl_info->supported[ARB_SHADOW])
-            {
-                TRACE("[FAILED] - No shadow sampler support.\n");
-                return WINED3DERR_NOTAVAILABLE;
-            }
-
+        case WINED3D_RTYPE_TEXTURE_2D:
             format_flags |= WINED3DFMT_FLAG_TEXTURE;
             allowed_usage = WINED3DUSAGE_AUTOGENMIPMAP
                     | WINED3DUSAGE_DEPTHSTENCIL
                     | WINED3DUSAGE_DYNAMIC
+                    | WINED3DUSAGE_LEGACY_CUBEMAP
                     | WINED3DUSAGE_RENDERTARGET
                     | WINED3DUSAGE_SOFTWAREPROCESSING
                     | WINED3DUSAGE_QUERY_FILTER
@@ -4666,9 +4658,21 @@ HRESULT CDECL wined3d_check_device_format(const struct wined3d *wined3d, UINT ad
                     | WINED3DUSAGE_QUERY_VERTEXTEXTURE
                     | WINED3DUSAGE_QUERY_WRAPANDMIP;
             gl_type = WINED3D_GL_RES_TYPE_TEX_2D;
+            if (usage & WINED3DUSAGE_LEGACY_CUBEMAP)
+            {
+                allowed_usage &= ~(WINED3DUSAGE_DEPTHSTENCIL | WINED3DUSAGE_QUERY_LEGACYBUMPMAP);
+                gl_type = WINED3D_GL_RES_TYPE_TEX_CUBE;
+            }
+            else if ((usage & WINED3DUSAGE_DEPTHSTENCIL)
+                    && (format->flags[WINED3D_GL_RES_TYPE_TEX_2D] & WINED3DFMT_FLAG_SHADOW)
+                    && !gl_info->supported[ARB_SHADOW])
+            {
+                TRACE("[FAILED] - No shadow sampler support.\n");
+                return WINED3DERR_NOTAVAILABLE;
+            }
             break;
 
-        case WINED3D_RTYPE_VOLUME_TEXTURE:
+        case WINED3D_RTYPE_TEXTURE_3D:
         case WINED3D_RTYPE_VOLUME:
             format_flags |= WINED3DFMT_FLAG_TEXTURE;
             allowed_usage = WINED3DUSAGE_DYNAMIC

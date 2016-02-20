@@ -619,7 +619,7 @@ static HRESULT CDECL reset_enum_callback(struct wined3d_resource *resource)
     {
         struct d3d8_surface *surface;
 
-        if (desc.resource_type == WINED3D_RTYPE_TEXTURE)
+        if (desc.resource_type == WINED3D_RTYPE_TEXTURE_2D)
         {
             IUnknown *parent = wined3d_resource_get_parent(resource);
             IDirect3DBaseTexture8 *texture;
@@ -950,7 +950,7 @@ static HRESULT d3d8_device_create_surface(struct d3d8_device *device, UINT width
             device, width, height, format, flags, surface,
             usage, pool, multisample_type, multisample_quality);
 
-    desc.resource_type = WINED3D_RTYPE_TEXTURE;
+    desc.resource_type = WINED3D_RTYPE_TEXTURE_2D;
     desc.format = wined3dformat_from_d3dformat(format);
     desc.multisample_type = multisample_type;
     desc.multisample_quality = multisample_quality;
@@ -995,7 +995,7 @@ static HRESULT WINAPI d3d8_device_CreateRenderTarget(IDirect3DDevice8 *iface, UI
 
     *surface = NULL;
     if (lockable)
-        flags |= WINED3D_SURFACE_MAPPABLE;
+        flags |= WINED3D_TEXTURE_CREATE_MAPPABLE;
 
     return d3d8_device_create_surface(device, width, height, format, flags, surface,
             D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT, multisample_type, 0);
@@ -1013,7 +1013,7 @@ static HRESULT WINAPI d3d8_device_CreateDepthStencilSurface(IDirect3DDevice8 *if
     *surface = NULL;
 
     /* TODO: Verify that Discard is false */
-    return d3d8_device_create_surface(device, width, height, format, WINED3D_SURFACE_MAPPABLE,
+    return d3d8_device_create_surface(device, width, height, format, WINED3D_TEXTURE_CREATE_MAPPABLE,
             surface, D3DUSAGE_DEPTHSTENCIL, D3DPOOL_DEFAULT, multisample_type, 0);
 }
 
@@ -1028,7 +1028,7 @@ static HRESULT WINAPI d3d8_device_CreateImageSurface(IDirect3DDevice8 *iface, UI
 
     *surface = NULL;
 
-    return d3d8_device_create_surface(device, width, height, format, WINED3D_SURFACE_MAPPABLE,
+    return d3d8_device_create_surface(device, width, height, format, WINED3D_TEXTURE_CREATE_MAPPABLE,
             surface, 0, D3DPOOL_SYSTEMMEM, D3DMULTISAMPLE_NONE, 0);
 }
 
@@ -3039,8 +3039,8 @@ static HRESULT CDECL device_parent_create_swapchain_texture(struct wined3d_devic
     TRACE("device_parent %p, container_parent %p, desc %p, texture %p.\n",
             device_parent, container_parent, desc, texture);
 
-    if (FAILED(hr = wined3d_texture_create(device->wined3d_device, desc, 1,
-            WINED3D_SURFACE_MAPPABLE, NULL, &device->IDirect3DDevice8_iface, &d3d8_null_wined3d_parent_ops, texture)))
+    if (FAILED(hr = wined3d_texture_create(device->wined3d_device, desc, 1, WINED3D_TEXTURE_CREATE_MAPPABLE,
+            NULL, &device->IDirect3DDevice8_iface, &d3d8_null_wined3d_parent_ops, texture)))
     {
         WARN("Failed to create texture, hr %#x.\n", hr);
         return hr;

@@ -130,6 +130,8 @@ static const struct object_ops handle_table_ops =
     default_get_sd,                  /* get_sd */
     default_set_sd,                  /* set_sd */
     no_lookup_name,                  /* lookup_name */
+    no_link_name,                    /* link_name */
+    NULL,                            /* unlink_name */
     no_open_file,                    /* open_file */
     no_close_handle,                 /* close_handle */
     handle_table_destroy             /* destroy */
@@ -571,21 +573,28 @@ obj_handle_t duplicate_handle( struct process *src, obj_handle_t src_handle, str
 }
 
 /* open a new handle to an existing object */
-obj_handle_t open_object( const struct namespace *namespace, const struct unicode_str *name,
-                          const struct object_ops *ops, unsigned int access, unsigned int attr )
+obj_handle_t open_object( struct process *process, obj_handle_t parent, unsigned int access,
+                          const struct object_ops *ops, const struct unicode_str *name,
+                          unsigned int attributes )
 {
     obj_handle_t handle = 0;
-    struct object *obj = find_object( namespace, name, attr );
-    if (obj)
+    struct directory *root = NULL;
+    struct object *obj;
+
+    if (name->len >= 65534)
     {
-        if (ops && obj->ops != ops)
-            set_error( STATUS_OBJECT_TYPE_MISMATCH );
-        else
-            handle = alloc_handle( current->process, obj, access, attr );
+        set_error( STATUS_OBJECT_NAME_INVALID );
+        return 0;
+    }
+
+    if (parent && !(root = get_directory_obj( process, parent, 0 ))) return 0;
+
+    if ((obj = open_object_dir( root, name, attributes, ops )))
+    {
+        handle = alloc_handle( process, obj, access, attributes );
         release_object( obj );
     }
-    else
-        set_error( STATUS_OBJECT_NAME_NOT_FOUND );
+    if (root) release_object( root );
     return handle;
 }
 

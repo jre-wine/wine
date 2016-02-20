@@ -611,7 +611,7 @@ static HRESULT CDECL reset_enum_callback(struct wined3d_resource *resource)
     {
         struct d3d9_surface *surface;
 
-        if (desc.resource_type == WINED3D_RTYPE_TEXTURE)
+        if (desc.resource_type == WINED3D_RTYPE_TEXTURE_2D)
         {
             IUnknown *parent = wined3d_resource_get_parent(resource);
             IDirect3DBaseTexture9 *texture;
@@ -1119,7 +1119,7 @@ static HRESULT d3d9_device_create_surface(struct d3d9_device *device, UINT width
             device, width, height, format, flags, surface, usage, pool,
             multisample_type, multisample_quality);
 
-    desc.resource_type = WINED3D_RTYPE_TEXTURE;
+    desc.resource_type = WINED3D_RTYPE_TEXTURE_2D;
     desc.format = wined3dformat_from_d3dformat(format);
     desc.multisample_type = multisample_type;
     desc.multisample_quality = multisample_quality;
@@ -1137,6 +1137,8 @@ static HRESULT d3d9_device_create_surface(struct d3d9_device *device, UINT width
     {
         wined3d_mutex_unlock();
         WARN("Failed to create texture, hr %#x.\n", hr);
+        if (hr == WINED3DERR_NOTAVAILABLE)
+            hr = D3DERR_INVALIDCALL;
         return hr;
     }
 
@@ -1182,7 +1184,7 @@ static HRESULT WINAPI d3d9_device_CreateRenderTarget(IDirect3DDevice9Ex *iface, 
     }
 
     if (lockable)
-        flags |= WINED3D_SURFACE_MAPPABLE;
+        flags |= WINED3D_TEXTURE_CREATE_MAPPABLE;
 
     return d3d9_device_create_surface(device, width, height, format, flags, surface,
             D3DUSAGE_RENDERTARGET, D3DPOOL_DEFAULT, multisample_type, multisample_quality, NULL);
@@ -1193,7 +1195,7 @@ static HRESULT WINAPI d3d9_device_CreateDepthStencilSurface(IDirect3DDevice9Ex *
         BOOL discard, IDirect3DSurface9 **surface, HANDLE *shared_handle)
 {
     struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
-    DWORD flags = WINED3D_SURFACE_MAPPABLE;
+    DWORD flags = WINED3D_TEXTURE_CREATE_MAPPABLE;
 
     TRACE("iface %p, width %u, height %u, format %#x, multisample_type %#x, multisample_quality %u.\n"
             "discard %#x, surface %p, shared_handle %p.\n",
@@ -1213,7 +1215,7 @@ static HRESULT WINAPI d3d9_device_CreateDepthStencilSurface(IDirect3DDevice9Ex *
     }
 
     if (discard)
-        flags |= WINED3D_SURFACE_DISCARD;
+        flags |= WINED3D_TEXTURE_CREATE_DISCARD;
 
     return d3d9_device_create_surface(device, width, height, format, flags, surface,
             D3DUSAGE_DEPTHSTENCIL, D3DPOOL_DEFAULT, multisample_type, multisample_quality, NULL);
@@ -1227,15 +1229,31 @@ static HRESULT WINAPI d3d9_device_UpdateSurface(IDirect3DDevice9Ex *iface,
     struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
     struct d3d9_surface *src = unsafe_impl_from_IDirect3DSurface9(src_surface);
     struct d3d9_surface *dst = unsafe_impl_from_IDirect3DSurface9(dst_surface);
+    struct wined3d_box src_box;
     HRESULT hr;
 
     TRACE("iface %p, src_surface %p, src_rect %p, dst_surface %p, dst_point %p.\n",
             iface, src_surface, src_rect, dst_surface, dst_point);
 
+    if (src_rect)
+    {
+        src_box.left = src_rect->left;
+        src_box.top = src_rect->top;
+        src_box.right = src_rect->right;
+        src_box.bottom = src_rect->bottom;
+        src_box.front = 0;
+        src_box.back = 1;
+    }
+
     wined3d_mutex_lock();
-    hr = wined3d_device_update_surface(device->wined3d_device, src->wined3d_surface, src_rect,
-            dst->wined3d_surface, dst_point);
+    hr = wined3d_device_copy_sub_resource_region(device->wined3d_device,
+            wined3d_texture_get_resource(dst->wined3d_texture), dst->sub_resource_idx, dst_point ? dst_point->x : 0,
+            dst_point ? dst_point->y : 0, 0, wined3d_texture_get_resource(src->wined3d_texture),
+            src->sub_resource_idx, src_rect ? &src_box : NULL);
     wined3d_mutex_unlock();
+
+    if (FAILED(hr))
+        return D3DERR_INVALIDCALL;
 
     return hr;
 }
@@ -1267,20 +1285,32 @@ static HRESULT WINAPI d3d9_device_GetRenderTargetData(IDirect3DDevice9Ex *iface,
     struct d3d9_surface *dst_impl = unsafe_impl_from_IDirect3DSurface9(dst_surface);
     struct wined3d_resource_desc wined3d_desc;
     struct wined3d_resource *sub_resource;
+    RECT dst_rect, src_rect;
     HRESULT hr;
 
     TRACE("iface %p, render_target %p, dst_surface %p.\n", iface, render_target, dst_surface);
 
     wined3d_mutex_lock();
+    sub_resource = wined3d_texture_get_sub_resource(dst_impl->wined3d_texture, dst_impl->sub_resource_idx);
+    wined3d_resource_get_desc(sub_resource, &wined3d_desc);
+    dst_rect.left = 0;
+    dst_rect.top = 0;
+    dst_rect.right = wined3d_desc.width;
+    dst_rect.bottom = wined3d_desc.height;
+
     sub_resource = wined3d_texture_get_sub_resource(rt_impl->wined3d_texture, rt_impl->sub_resource_idx);
     wined3d_resource_get_desc(sub_resource, &wined3d_desc);
+    src_rect.left = 0;
+    src_rect.top = 0;
+    src_rect.right = wined3d_desc.width;
+    src_rect.bottom = wined3d_desc.height;
 
     /* TODO: Check surface sizes, pools, etc. */
     if (wined3d_desc.multisample_type)
         hr = D3DERR_INVALIDCALL;
     else
-        hr = wined3d_texture_blt(dst_impl->wined3d_texture, dst_impl->sub_resource_idx, NULL,
-                rt_impl->wined3d_texture, rt_impl->sub_resource_idx, NULL, 0, NULL, WINED3D_TEXF_POINT);
+        hr = wined3d_texture_blt(dst_impl->wined3d_texture, dst_impl->sub_resource_idx, &dst_rect,
+                rt_impl->wined3d_texture, rt_impl->sub_resource_idx, &src_rect, 0, NULL, WINED3D_TEXF_POINT);
     wined3d_mutex_unlock();
 
     return hr;
@@ -1313,6 +1343,7 @@ static HRESULT WINAPI d3d9_device_StretchRect(IDirect3DDevice9Ex *iface, IDirect
     HRESULT hr = D3DERR_INVALIDCALL;
     struct wined3d_resource_desc src_desc, dst_desc;
     struct wined3d_resource *sub_resource;
+    RECT d, s;
 
     TRACE("iface %p, src_surface %p, src_rect %p, dst_surface %p, dst_rect %p, filter %#x.\n",
             iface, src_surface, src_rect, dst_surface, dst_rect, filter);
@@ -1320,9 +1351,25 @@ static HRESULT WINAPI d3d9_device_StretchRect(IDirect3DDevice9Ex *iface, IDirect
     wined3d_mutex_lock();
     sub_resource = wined3d_texture_get_sub_resource(dst->wined3d_texture, dst->sub_resource_idx);
     wined3d_resource_get_desc(sub_resource, &dst_desc);
+    if (!dst_rect)
+    {
+        d.left = 0;
+        d.top = 0;
+        d.right = dst_desc.width;
+        d.bottom = dst_desc.height;
+        dst_rect = &d;
+    }
 
     sub_resource = wined3d_texture_get_sub_resource(src->wined3d_texture, src->sub_resource_idx);
     wined3d_resource_get_desc(sub_resource, &src_desc);
+    if (!src_rect)
+    {
+        s.left = 0;
+        s.top = 0;
+        s.right = src_desc.width;
+        s.bottom = src_desc.height;
+        src_rect = &s;
+    }
 
     if (src_desc.usage & WINED3DUSAGE_DEPTHSTENCIL)
     {
@@ -1332,26 +1379,22 @@ static HRESULT WINAPI d3d9_device_StretchRect(IDirect3DDevice9Ex *iface, IDirect
             goto done;
         }
 
-        if (src_rect)
+        if (src_rect->left || src_rect->top || src_rect->right != src_desc.width
+                || src_rect->bottom != src_desc.height)
         {
-            if (src_rect->left || src_rect->top || src_rect->right != src_desc.width
-                    || src_rect->bottom != src_desc.height)
-            {
-                WARN("Rejecting depth / stencil blit with invalid source rect %s.\n",
-                        wine_dbgstr_rect(src_rect));
-                goto done;
-            }
+            WARN("Rejecting depth / stencil blit with invalid source rect %s.\n",
+                    wine_dbgstr_rect(src_rect));
+            goto done;
         }
-        if (dst_rect)
+
+        if (dst_rect->left || dst_rect->top || dst_rect->right != dst_desc.width
+                || dst_rect->bottom != dst_desc.height)
         {
-            if (dst_rect->left || dst_rect->top || dst_rect->right != dst_desc.width
-                    || dst_rect->bottom != dst_desc.height)
-            {
-                WARN("Rejecting depth / stencil blit with invalid destination rect %s.\n",
-                        wine_dbgstr_rect(dst_rect));
-                goto done;
-            }
+            WARN("Rejecting depth / stencil blit with invalid destination rect %s.\n",
+                    wine_dbgstr_rect(dst_rect));
+            goto done;
         }
+
         if (src_desc.width != dst_desc.width || src_desc.height != dst_desc.height)
         {
             WARN("Rejecting depth / stencil blit with mismatched surface sizes.\n");
@@ -1465,7 +1508,7 @@ static HRESULT WINAPI d3d9_device_CreateOffscreenPlainSurface(IDirect3DDevice9Ex
      * regardless of the pool they're created in. Should we set dynamic usage
      * here? */
     return d3d9_device_create_surface(device, width, height, format,
-            WINED3D_SURFACE_MAPPABLE, surface, 0, pool, D3DMULTISAMPLE_NONE, 0, user_mem);
+            WINED3D_TEXTURE_CREATE_MAPPABLE, surface, 0, pool, D3DMULTISAMPLE_NONE, 0, user_mem);
 }
 
 static HRESULT WINAPI d3d9_device_SetRenderTarget(IDirect3DDevice9Ex *iface, DWORD idx, IDirect3DSurface9 *surface)
@@ -3353,7 +3396,7 @@ static HRESULT WINAPI d3d9_device_CreateDepthStencilSurfaceEx(IDirect3DDevice9Ex
         BOOL discard, IDirect3DSurface9 **surface, HANDLE *shared_handle, DWORD usage)
 {
     struct d3d9_device *device = impl_from_IDirect3DDevice9Ex(iface);
-    DWORD flags = WINED3D_SURFACE_MAPPABLE;
+    DWORD flags = WINED3D_TEXTURE_CREATE_MAPPABLE;
 
     TRACE("iface %p, width %u, height %u, format %#x, multisample_type %#x, multisample_quality %u, "
             "discard %#x, surface %p, shared_handle %p, usage %#x.\n",
@@ -3370,7 +3413,7 @@ static HRESULT WINAPI d3d9_device_CreateDepthStencilSurfaceEx(IDirect3DDevice9Ex
         FIXME("Resource sharing not implemented, *shared_handle %p.\n", *shared_handle);
 
     if (discard)
-        flags |= WINED3D_SURFACE_DISCARD;
+        flags |= WINED3D_TEXTURE_CREATE_DISCARD;
 
     return d3d9_device_create_surface(device, width, height, format, flags, surface,
             D3DUSAGE_DEPTHSTENCIL | usage, D3DPOOL_DEFAULT, multisample_type, multisample_quality, NULL);
@@ -3602,7 +3645,7 @@ static HRESULT CDECL device_parent_surface_created(struct wined3d_device_parent 
     if (!(d3d_surface = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*d3d_surface))))
         return E_OUTOFMEMORY;
 
-    surface_init(d3d_surface, wined3d_texture, sub_resource_idx, surface, parent_ops);
+    surface_init(d3d_surface, wined3d_texture, sub_resource_idx, parent_ops);
     *parent = d3d_surface;
     TRACE("Created surface %p.\n", d3d_surface);
 
@@ -3642,7 +3685,7 @@ static HRESULT CDECL device_parent_create_swapchain_texture(struct wined3d_devic
         container_parent = &device->IDirect3DDevice9Ex_iface;
 
     if (FAILED(hr = wined3d_texture_create(device->wined3d_device, desc, 1,
-            WINED3D_SURFACE_MAPPABLE, NULL, container_parent, &d3d9_null_wined3d_parent_ops, texture)))
+            WINED3D_TEXTURE_CREATE_MAPPABLE, NULL, container_parent, &d3d9_null_wined3d_parent_ops, texture)))
     {
         WARN("Failed to create texture, hr %#x.\n", hr);
         return hr;

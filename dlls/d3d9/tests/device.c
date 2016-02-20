@@ -1003,9 +1003,94 @@ cleanup:
 
 static void test_checkdevicemultisampletype(void)
 {
-    IDirect3DDevice9 *device;
     DWORD quality_levels;
     IDirect3D9 *d3d;
+    HWND window;
+    HRESULT hr;
+
+    window = CreateWindowA("d3d9_test_wc", "d3d9_test", WS_OVERLAPPEDWINDOW,
+            0, 0, 640, 480, NULL, NULL, NULL, NULL);
+    ok(!!window, "Failed to create a window.\n");
+    d3d = Direct3DCreate9(D3D_SDK_VERSION);
+    ok(!!d3d, "Failed to create a D3D object.\n");
+
+    if (IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_2_SAMPLES, NULL) == D3DERR_NOTAVAILABLE)
+    {
+        skip("Multisampling not supported for D3DFMT_X8R8G8B8, skipping test.\n");
+        goto cleanup;
+    }
+
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_UNKNOWN, TRUE, D3DMULTISAMPLE_NONE, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            65536, TRUE, D3DMULTISAMPLE_NONE, NULL);
+    todo_wine ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_NONE, NULL);
+    ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+
+    quality_levels = 0;
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_NONE, &quality_levels);
+    ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+    ok(quality_levels == 1, "Got unexpected quality_levels %u.\n", quality_levels);
+    quality_levels = 0;
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, FALSE, D3DMULTISAMPLE_NONE, &quality_levels);
+    ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+    ok(quality_levels == 1, "Got unexpected quality_levels %u.\n", quality_levels);
+
+    quality_levels = 0;
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_NONMASKABLE, NULL);
+    ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_NONMASKABLE, &quality_levels);
+    ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+    ok(quality_levels, "Got unexpected quality_levels %u.\n", quality_levels);
+
+    quality_levels = 0;
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_2_SAMPLES, NULL);
+    ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_2_SAMPLES, &quality_levels);
+    ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+    ok(quality_levels, "Got unexpected quality_levels %u.\n", quality_levels);
+
+    /* We assume D3DMULTISAMPLE_15_SAMPLES is never supported in practice. */
+    quality_levels = 0;
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_15_SAMPLES, NULL);
+    ok(hr == D3DERR_NOTAVAILABLE, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_15_SAMPLES, &quality_levels);
+    ok(hr == D3DERR_NOTAVAILABLE, "Got unexpected hr %#x.\n", hr);
+    ok(quality_levels == 1, "Got unexpected quality_levels %u.\n", quality_levels);
+
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, 65536, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+
+    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_DXT5, TRUE, D3DMULTISAMPLE_2_SAMPLES, NULL);
+    ok(hr == D3DERR_NOTAVAILABLE, "Got unexpected hr %#x.\n", hr);
+
+cleanup:
+    IDirect3D9_Release(d3d);
+    DestroyWindow(window);
+}
+
+static void test_invalid_multisample(void)
+{
+    IDirect3DDevice9 *device;
+    IDirect3DSurface9 *rt;
+    DWORD quality_levels;
+    IDirect3D9 *d3d;
+    BOOL available;
     ULONG refcount;
     HWND window;
     HRESULT hr;
@@ -1015,34 +1100,58 @@ static void test_checkdevicemultisampletype(void)
     ok(!!window, "Failed to create a window.\n");
     d3d = Direct3DCreate9(D3D_SDK_VERSION);
     ok(!!d3d, "Failed to create a D3D object.\n");
+
     if (!(device = create_device(d3d, window, NULL)))
     {
         skip("Failed to create a 3D device, skipping test.\n");
         goto cleanup;
     }
 
-    quality_levels = 0;
-    hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
-            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_NONE, &quality_levels);
-    ok(SUCCEEDED(hr) || hr == D3DERR_NOTAVAILABLE, "CheckDeviceMultiSampleType failed with (%08x)\n", hr);
-    if (hr == D3DERR_NOTAVAILABLE)
+    available = SUCCEEDED(IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+                    D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_NONMASKABLE, &quality_levels));
+    hr = IDirect3DDevice9_CreateRenderTarget(device, 128, 128,
+            D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONMASKABLE, 0, FALSE, &rt, NULL);
+    if (available)
     {
-        skip("IDirect3D9_CheckDeviceMultiSampleType not available\n");
-        goto cleanup;
+        ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+        IDirect3DSurface9_Release(rt);
+        hr = IDirect3DDevice9_CreateRenderTarget(device, 128, 128,
+                D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONMASKABLE, quality_levels, FALSE, &rt, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
     }
-    ok(quality_levels == 1, "Got unexpected quality_levels %u.\n", quality_levels);
+    else
+    {
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    }
 
+    available = SUCCEEDED(IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_2_SAMPLES, &quality_levels));
+    hr = IDirect3DDevice9_CreateRenderTarget(device, 128, 128,
+            D3DFMT_X8R8G8B8, D3DMULTISAMPLE_2_SAMPLES, 0, FALSE, &rt, NULL);
+    if (available)
+    {
+        ok(SUCCEEDED(hr), "Got unexpected hr %#x.\n", hr);
+        IDirect3DSurface9_Release(rt);
+        hr = IDirect3DDevice9_CreateRenderTarget(device, 128, 128,
+                D3DFMT_X8R8G8B8, D3DMULTISAMPLE_2_SAMPLES, quality_levels, FALSE, &rt, NULL);
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    }
+    else
+    {
+        ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    }
+
+    /* We assume D3DMULTISAMPLE_15_SAMPLES is never supported in practice. */
     hr = IDirect3D9_CheckDeviceMultiSampleType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
-            D3DFMT_X8R8G8B8, FALSE, D3DMULTISAMPLE_NONE, &quality_levels);
-    ok(SUCCEEDED(hr), "CheckDeviceMultiSampleType failed with (%08x)\n", hr);
-    ok(quality_levels == 1, "Got unexpected quality_levels %u.\n", quality_levels);
+            D3DFMT_X8R8G8B8, TRUE, D3DMULTISAMPLE_15_SAMPLES, NULL);
+    ok(hr == D3DERR_NOTAVAILABLE, "Got unexpected hr %#x.\n", hr);
+    hr = IDirect3DDevice9_CreateRenderTarget(device, 128, 128,
+            D3DFMT_X8R8G8B8, D3DMULTISAMPLE_15_SAMPLES, 0, FALSE, &rt, NULL);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
 
+    refcount = IDirect3DDevice9_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
 cleanup:
-    if (device)
-    {
-        refcount = IDirect3DDevice9_Release(device);
-        ok(!refcount, "Device has %u references left.\n", refcount);
-    }
     IDirect3D9_Release(d3d);
     DestroyWindow(window);
 }
@@ -10163,7 +10272,7 @@ static void test_mipmap_lock(void)
     hr = IDirect3DDevice9_UpdateSurface(device, surface, NULL, surface_dst, NULL);
     ok(SUCCEEDED(hr), "Failed to update surface, hr %#x.\n", hr);
     hr = IDirect3DDevice9_UpdateSurface(device, surface2, NULL, surface_dst2, NULL);
-    todo_wine ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
+    ok(hr == D3DERR_INVALIDCALL, "Got unexpected hr %#x.\n", hr);
 
     /* Apparently there's no validation on the container. */
     hr = IDirect3DDevice9_UpdateTexture(device, (IDirect3DBaseTexture9 *)texture,
@@ -10677,6 +10786,7 @@ START_TEST(device)
     test_refcount();
     test_mipmap_levels();
     test_checkdevicemultisampletype();
+    test_invalid_multisample();
     test_cursor();
     test_cursor_pos();
     test_reset_fullscreen();

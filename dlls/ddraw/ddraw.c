@@ -4765,7 +4765,7 @@ static HRESULT CDECL device_parent_surface_created(struct wined3d_device_parent 
         return DDERR_OUTOFVIDEOMEMORY;
     }
 
-    ddraw_surface_init(ddraw_surface, ddraw, wined3d_texture_get_parent(wined3d_texture), surface, parent_ops);
+    ddraw_surface_init(ddraw_surface, ddraw, wined3d_texture, sub_resource_idx, surface, parent_ops);
     *parent = ddraw_surface;
 
     ddraw_update_lost_surfaces(ddraw);
@@ -4816,13 +4816,13 @@ static HRESULT CDECL device_parent_create_swapchain_texture(struct wined3d_devic
     }
 
     if (FAILED(hr = wined3d_texture_create(ddraw->wined3d_device, desc, 1,
-            WINED3D_SURFACE_MAPPABLE, NULL, ddraw, &ddraw_frontbuffer_parent_ops, texture)))
+            WINED3D_TEXTURE_CREATE_MAPPABLE, NULL, ddraw, &ddraw_frontbuffer_parent_ops, texture)))
     {
         WARN("Failed to create texture, hr %#x.\n", hr);
         return hr;
     }
 
-    ddraw->wined3d_frontbuffer = wined3d_surface_from_resource(wined3d_texture_get_sub_resource(*texture, 0));
+    ddraw->wined3d_frontbuffer = *texture;
 
     return hr;
 }

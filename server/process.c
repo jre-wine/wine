@@ -81,6 +81,8 @@ static const struct object_ops process_ops =
     default_get_sd,              /* get_sd */
     default_set_sd,              /* set_sd */
     no_lookup_name,              /* lookup_name */
+    no_link_name,                /* link_name */
+    NULL,                        /* unlink_name */
     no_open_file,                /* open_file */
     no_close_handle,             /* close_handle */
     process_destroy              /* destroy */
@@ -129,6 +131,8 @@ static const struct object_ops startup_info_ops =
     default_get_sd,                /* get_sd */
     default_set_sd,                /* set_sd */
     no_lookup_name,                /* lookup_name */
+    no_link_name,                  /* link_name */
+    NULL,                          /* unlink_name */
     no_open_file,                  /* open_file */
     no_close_handle,               /* close_handle */
     startup_info_destroy           /* destroy */
@@ -170,6 +174,8 @@ static const struct object_ops job_ops =
     default_get_sd,                /* get_sd */
     default_set_sd,                /* set_sd */
     no_lookup_name,                /* lookup_name */
+    directory_link_name,           /* link_name */
+    default_unlink_name,           /* unlink_name */
     no_open_file,                  /* open_file */
     job_close_handle,              /* close_handle */
     job_destroy                    /* destroy */
@@ -1538,13 +1544,11 @@ DECL_HANDLER(create_job)
 {
     struct job *job;
     struct unicode_str name;
-    struct directory *root = NULL;
+    struct directory *root;
     const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 
     if (!objattr) return;
-
-    if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 ))) return;
 
     if ((job = create_job_object( root, &name, objattr->attributes, sd )))
     {
@@ -1556,6 +1560,15 @@ DECL_HANDLER(create_job)
         release_object( job );
     }
     if (root) release_object( root );
+}
+
+/* open a job object */
+DECL_HANDLER(open_job)
+{
+    struct unicode_str name = get_req_unicode_str();
+
+    reply->handle = open_object( current->process, req->rootdir, req->access,
+                                 &job_ops, &name, req->attributes );
 }
 
 /* assign a job object to a process */

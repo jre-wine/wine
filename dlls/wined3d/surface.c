@@ -356,7 +356,7 @@ static void get_color_masks(const struct wined3d_format *format, DWORD *masks)
     masks[2] = ((1u << format->blue_size) - 1) << format->blue_offset;
 }
 
-static HRESULT surface_create_dib_section(struct wined3d_surface *surface)
+HRESULT surface_create_dib_section(struct wined3d_surface *surface)
 {
     const struct wined3d_format *format = surface->resource.format;
     unsigned int format_flags = surface->container->resource.format_flags;
@@ -1048,19 +1048,35 @@ static BOOL surface_convert_depth_to_float(const struct wined3d_surface *surface
 
 static HRESULT wined3d_surface_depth_fill(struct wined3d_surface *surface, const RECT *rect, float depth)
 {
-    const struct wined3d_resource *resource = &surface->container->resource;
+    struct wined3d_resource *resource = &surface->container->resource;
     struct wined3d_device *device = resource->device;
+    struct wined3d_rendertarget_view_desc view_desc;
+    struct wined3d_rendertarget_view *view;
     const struct blit_shader *blitter;
+    HRESULT hr;
 
-    blitter = wined3d_select_blitter(&device->adapter->gl_info, &device->adapter->d3d_info, WINED3D_BLIT_OP_DEPTH_FILL,
-            NULL, 0, 0, NULL, rect, resource->usage, resource->pool, resource->format);
-    if (!blitter)
+    if (!(blitter = wined3d_select_blitter(&device->adapter->gl_info, &device->adapter->d3d_info,
+            WINED3D_BLIT_OP_DEPTH_FILL, NULL, 0, 0, NULL, rect, resource->usage, resource->pool, resource->format)))
     {
         FIXME("No blitter is capable of performing the requested depth fill operation.\n");
         return WINED3DERR_INVALIDCALL;
     }
 
-    return blitter->depth_fill(device, surface, rect, depth);
+    view_desc.format_id = resource->format->id;
+    view_desc.u.texture.level_idx = surface->texture_level;
+    view_desc.u.texture.layer_idx = surface->texture_layer;
+    view_desc.u.texture.layer_count = 1;
+    if (FAILED(hr = wined3d_rendertarget_view_create(&view_desc,
+            resource, NULL, &wined3d_null_parent_ops, &view)))
+    {
+        ERR("Failed to create rendertarget view, hr %#x.\n", hr);
+        return hr;
+    }
+
+    hr = blitter->depth_fill(device, view, rect, depth);
+    wined3d_rendertarget_view_decref(view);
+
+    return hr;
 }
 
 static HRESULT wined3d_surface_depth_blt(struct wined3d_surface *src_surface, DWORD src_location, const RECT *src_rect,
@@ -1093,12 +1109,20 @@ static void surface_remove_pbo(struct wined3d_surface *surface, const struct win
 
 static ULONG surface_resource_incref(struct wined3d_resource *resource)
 {
-    return wined3d_surface_incref(surface_from_resource(resource));
+    struct wined3d_surface *surface = surface_from_resource(resource);
+
+    TRACE("surface %p, container %p.\n", surface, surface->container);
+
+    return wined3d_texture_incref(surface->container);
 }
 
 static ULONG surface_resource_decref(struct wined3d_resource *resource)
 {
-    return wined3d_surface_decref(surface_from_resource(resource));
+    struct wined3d_surface *surface = surface_from_resource(resource);
+
+    TRACE("surface %p, container %p.\n", surface, surface->container);
+
+    return wined3d_texture_decref(surface->container);
 }
 
 static void surface_unload(struct wined3d_resource *resource)
@@ -1859,45 +1883,11 @@ static inline unsigned short float_32_to_16(const float *in)
     return ret;
 }
 
-ULONG CDECL wined3d_surface_incref(struct wined3d_surface *surface)
-{
-    TRACE("surface %p, container %p.\n", surface, surface->container);
-
-    return wined3d_texture_incref(surface->container);
-}
-
-ULONG CDECL wined3d_surface_decref(struct wined3d_surface *surface)
-{
-    TRACE("surface %p, container %p.\n", surface, surface->container);
-
-    return wined3d_texture_decref(surface->container);
-}
-
-void CDECL wined3d_surface_preload(struct wined3d_surface *surface)
-{
-    TRACE("surface %p.\n", surface);
-
-    if (!surface->resource.device->d3d_initialized)
-    {
-        ERR("D3D not initialized.\n");
-        return;
-    }
-
-    wined3d_texture_preload(surface->container);
-}
-
 void * CDECL wined3d_surface_get_parent(const struct wined3d_surface *surface)
 {
     TRACE("surface %p.\n", surface);
 
     return surface->resource.parent;
-}
-
-struct wined3d_resource * CDECL wined3d_surface_get_resource(struct wined3d_surface *surface)
-{
-    TRACE("surface %p.\n", surface);
-
-    return &surface->resource;
 }
 
 DWORD CDECL wined3d_surface_get_pitch(const struct wined3d_surface *surface)
@@ -2340,12 +2330,13 @@ static struct wined3d_texture *surface_convert_format(struct wined3d_surface *so
 
     /* FIXME: Multisampled conversion? */
     wined3d_resource_get_desc(&source->resource, &desc);
-    desc.resource_type = WINED3D_RTYPE_TEXTURE;
+    desc.resource_type = WINED3D_RTYPE_TEXTURE_2D;
     desc.format = to_fmt;
     desc.usage = 0;
     desc.pool = WINED3D_POOL_SCRATCH;
     if (FAILED(wined3d_texture_create(source->resource.device, &desc, 1,
-            WINED3D_SURFACE_MAPPABLE | WINED3D_SURFACE_DISCARD, NULL, NULL, &wined3d_null_parent_ops, &ret)))
+            WINED3D_TEXTURE_CREATE_MAPPABLE | WINED3D_TEXTURE_CREATE_DISCARD,
+            NULL, NULL, &wined3d_null_parent_ops, &ret)))
     {
         ERR("Failed to create a destination surface for conversion.\n");
         return NULL;
@@ -2436,12 +2427,7 @@ do { \
     return WINED3D_OK;
 }
 
-struct wined3d_surface * CDECL wined3d_surface_from_resource(struct wined3d_resource *resource)
-{
-    return surface_from_resource(resource);
-}
-
-HRESULT CDECL wined3d_surface_unmap(struct wined3d_surface *surface)
+HRESULT wined3d_surface_unmap(struct wined3d_surface *surface)
 {
     TRACE("surface %p.\n", surface);
 
@@ -2457,8 +2443,8 @@ HRESULT CDECL wined3d_surface_unmap(struct wined3d_surface *surface)
     return WINED3D_OK;
 }
 
-HRESULT CDECL wined3d_surface_map(struct wined3d_surface *surface,
-        struct wined3d_map_desc *map_desc, const struct wined3d_box *box, DWORD flags)
+HRESULT wined3d_surface_map(struct wined3d_surface *surface, struct wined3d_map_desc *map_desc,
+        const struct wined3d_box *box, DWORD flags)
 {
     const struct wined3d_format *format = surface->resource.format;
     unsigned int fmt_flags = surface->container->resource.format_flags;
@@ -2467,8 +2453,8 @@ HRESULT CDECL wined3d_surface_map(struct wined3d_surface *surface,
     const struct wined3d_gl_info *gl_info;
     BYTE *base_memory;
 
-    TRACE("surface %p, map_desc %p, box %p, flags %#x.\n",
-            surface, map_desc, box, flags);
+    TRACE("surface %p, map_desc %p, box %s, flags %#x.\n",
+            surface, map_desc, debug_box(box), flags);
 
     if (surface->resource.map_count)
     {
@@ -2479,8 +2465,8 @@ HRESULT CDECL wined3d_surface_map(struct wined3d_surface *surface,
     if ((fmt_flags & WINED3DFMT_FLAG_BLOCKS) && box
             && !surface_check_block_align(surface, box))
     {
-        WARN("Map rect %p is misaligned for %ux%u blocks.\n",
-                box, format->block_width, format->block_height);
+        WARN("Map box %s is misaligned for %ux%u blocks.\n",
+                debug_box(box), format->block_width, format->block_height);
 
         if (surface->resource.pool == WINED3D_POOL_DEFAULT)
             return WINED3DERR_INVALIDCALL;
@@ -2599,98 +2585,6 @@ HRESULT CDECL wined3d_surface_map(struct wined3d_surface *surface,
 
     TRACE("Locked rect %s.\n", wine_dbgstr_rect(&surface->lockedRect));
     TRACE("Returning memory %p, pitch %u.\n", map_desc->data, map_desc->row_pitch);
-
-    return WINED3D_OK;
-}
-
-HRESULT CDECL wined3d_surface_getdc(struct wined3d_surface *surface, HDC *dc)
-{
-    HRESULT hr;
-    struct wined3d_device *device = surface->resource.device;
-    struct wined3d_context *context = NULL;
-
-    TRACE("surface %p, dc %p.\n", surface, dc);
-
-    /* Give more detailed info for ddraw. */
-    if (surface->flags & SFLAG_DCINUSE)
-        return WINEDDERR_DCALREADYCREATED;
-
-    /* Can't GetDC if the surface is locked. */
-    if (surface->resource.map_count)
-        return WINED3DERR_INVALIDCALL;
-
-    if (device->d3d_initialized)
-        context = context_acquire(surface->resource.device, NULL);
-
-    /* Create a DIB section if there isn't a dc yet. */
-    if (!surface->hDC)
-    {
-        if (FAILED(hr = surface_create_dib_section(surface)))
-        {
-            if (context)
-                context_release(context);
-             return WINED3DERR_INVALIDCALL;
-        }
-        if (!(surface->resource.map_binding == WINED3D_LOCATION_USER_MEMORY
-                || surface->container->flags & WINED3D_TEXTURE_PIN_SYSMEM
-                || surface->pbo))
-            surface->resource.map_binding = WINED3D_LOCATION_DIB;
-    }
-
-    surface_load_location(surface, context, WINED3D_LOCATION_DIB);
-    surface_invalidate_location(surface, ~WINED3D_LOCATION_DIB);
-
-    if (context)
-        context_release(context);
-
-    surface->flags |= SFLAG_DCINUSE;
-    surface->resource.map_count++;
-
-    *dc = surface->hDC;
-    TRACE("Returning dc %p.\n", *dc);
-
-    return WINED3D_OK;
-}
-
-HRESULT CDECL wined3d_surface_releasedc(struct wined3d_surface *surface, HDC dc)
-{
-    TRACE("surface %p, dc %p.\n", surface, dc);
-
-    if (!(surface->flags & SFLAG_DCINUSE))
-        return WINEDDERR_NODC;
-
-    if (surface->hDC != dc)
-    {
-        WARN("Application tries to release invalid DC %p, surface DC is %p.\n",
-                dc, surface->hDC);
-        return WINEDDERR_NODC;
-    }
-
-    surface->resource.map_count--;
-    surface->flags &= ~SFLAG_DCINUSE;
-
-    if (surface->resource.map_binding == WINED3D_LOCATION_USER_MEMORY
-            || (surface->container->flags & WINED3D_TEXTURE_PIN_SYSMEM
-            && surface->resource.map_binding != WINED3D_LOCATION_DIB))
-    {
-        /* The game Salammbo modifies the surface contents without mapping the surface between
-         * a GetDC/ReleaseDC operation and flipping the surface. If the DIB remains the active
-         * copy and is copied to the screen, this update, which draws the mouse pointer, is lost.
-         * Do not only copy the DIB to the map location, but also make sure the map location is
-         * copied back to the DIB in the next getdc call.
-         *
-         * The same consideration applies to user memory surfaces. */
-        struct wined3d_device *device = surface->resource.device;
-        struct wined3d_context *context = NULL;
-
-        if (device->d3d_initialized)
-            context = context_acquire(device, NULL);
-
-        surface_load_location(surface, context, surface->resource.map_binding);
-        surface_invalidate_location(surface, WINED3D_LOCATION_DIB);
-        if (context)
-            context_release(context);
-    }
 
     return WINED3D_OK;
 }
@@ -2862,10 +2756,28 @@ static void surface_prepare_rb(struct wined3d_surface *surface, const struct win
          *
          * AMD has a similar feature called Enhanced Quality Anti-Aliasing (EQAA),
          * but it does not have an equivalent OpenGL extension. */
+
+        /* We advertise as many WINED3D_MULTISAMPLE_NON_MASKABLE quality levels
+         * as the count of advertised multisample types for the surface format. */
         if (surface->resource.multisample_type == WINED3D_MULTISAMPLE_NON_MASKABLE)
-            samples = surface->resource.multisample_quality;
+        {
+            const struct wined3d_format *format = surface->resource.format;
+            unsigned int i, count = 0;
+
+            for (i = 0; i < sizeof(format->multisample_types) * 8; ++i)
+            {
+                if (format->multisample_types & 1u << i)
+                {
+                    if (surface->resource.multisample_quality == count++)
+                        break;
+                }
+            }
+            samples = i + 1;
+        }
         else
+        {
             samples = surface->resource.multisample_type;
+        }
 
         gl_info->fbo_ops.glGenRenderbuffers(1, &surface->rb_multisample);
         gl_info->fbo_ops.glBindRenderbuffer(GL_RENDERBUFFER, surface->rb_multisample);
@@ -3379,18 +3291,35 @@ static void surface_blt_to_drawable(const struct wined3d_device *device,
 
 HRESULT surface_color_fill(struct wined3d_surface *s, const RECT *rect, const struct wined3d_color *color)
 {
-    struct wined3d_device *device = s->resource.device;
+    struct wined3d_resource *resource = &s->container->resource;
+    struct wined3d_device *device = resource->device;
+    struct wined3d_rendertarget_view_desc view_desc;
+    struct wined3d_rendertarget_view *view;
     const struct blit_shader *blitter;
+    HRESULT hr;
 
-    blitter = wined3d_select_blitter(&device->adapter->gl_info, &device->adapter->d3d_info, WINED3D_BLIT_OP_COLOR_FILL,
-            NULL, 0, 0, NULL, rect, s->resource.usage, s->resource.pool, s->resource.format);
-    if (!blitter)
+    if (!(blitter = wined3d_select_blitter(&device->adapter->gl_info, &device->adapter->d3d_info,
+            WINED3D_BLIT_OP_COLOR_FILL, NULL, 0, 0, NULL, rect, resource->usage, resource->pool, resource->format)))
     {
         FIXME("No blitter is capable of performing the requested color fill operation.\n");
         return WINED3DERR_INVALIDCALL;
     }
 
-    return blitter->color_fill(device, s, rect, color);
+    view_desc.format_id = resource->format->id;
+    view_desc.u.texture.level_idx = s->texture_level;
+    view_desc.u.texture.layer_idx = s->texture_layer;
+    view_desc.u.texture.layer_count = 1;
+    if (FAILED(hr = wined3d_rendertarget_view_create(&view_desc,
+            resource, NULL, &wined3d_null_parent_ops, &view)))
+    {
+        ERR("Failed to create rendertarget view, hr %#x.\n", hr);
+        return hr;
+    }
+
+    hr = blitter->color_fill(device, view, rect, color);
+    wined3d_rendertarget_view_decref(view);
+
+    return hr;
 }
 
 static HRESULT surface_blt_special(struct wined3d_surface *dst_surface, const RECT *dst_rect,
@@ -4255,43 +4184,24 @@ static BOOL ffp_blit_supported(const struct wined3d_gl_info *gl_info,
     }
 }
 
-static HRESULT ffp_blit_color_fill(struct wined3d_device *device, struct wined3d_surface *dst_surface,
-        const RECT *dst_rect, const struct wined3d_color *color)
+static HRESULT ffp_blit_color_fill(struct wined3d_device *device, struct wined3d_rendertarget_view *view,
+        const RECT *rect, const struct wined3d_color *color)
 {
-    const RECT draw_rect = {0, 0, dst_surface->resource.width, dst_surface->resource.height};
-    struct wined3d_rendertarget_view *view;
+    const RECT draw_rect = {0, 0, view->width, view->height};
     struct wined3d_fb_state fb = {&view, NULL};
-    HRESULT hr;
 
-    if (FAILED(hr = wined3d_rendertarget_view_create_from_surface(dst_surface,
-            NULL, &wined3d_null_parent_ops, &view)))
-    {
-        ERR("Failed to create rendertarget view, hr %#x.\n", hr);
-        return hr;
-    }
-
-    device_clear_render_targets(device, 1, &fb, 1, dst_rect, &draw_rect, WINED3DCLEAR_TARGET, color, 0.0f, 0);
-    wined3d_rendertarget_view_decref(view);
+    device_clear_render_targets(device, 1, &fb, 1, rect, &draw_rect, WINED3DCLEAR_TARGET, color, 0.0f, 0);
 
     return WINED3D_OK;
 }
 
-static HRESULT ffp_blit_depth_fill(struct wined3d_device *device, struct wined3d_surface *dst_surface,
-        const RECT *dst_rect, float depth)
+static HRESULT ffp_blit_depth_fill(struct wined3d_device *device,
+        struct wined3d_rendertarget_view *view, const RECT *rect, float depth)
 {
-    const RECT draw_rect = {0, 0, dst_surface->resource.width, dst_surface->resource.height};
-    struct wined3d_fb_state fb = {NULL, NULL};
-    HRESULT hr;
+    const RECT draw_rect = {0, 0, view->width, view->height};
+    struct wined3d_fb_state fb = {NULL, view};
 
-    if (FAILED(hr = wined3d_rendertarget_view_create_from_surface(dst_surface,
-            NULL, &wined3d_null_parent_ops, &fb.depth_stencil)))
-    {
-        ERR("Failed to create rendertarget view, hr %#x.\n", hr);
-        return hr;
-    }
-
-    device_clear_render_targets(device, 0, &fb, 1, dst_rect, &draw_rect, WINED3DCLEAR_ZBUFFER, 0, depth, 0);
-    wined3d_rendertarget_view_decref(fb.depth_stencil);
+    device_clear_render_targets(device, 0, &fb, 1, rect, &draw_rect, WINED3DCLEAR_ZBUFFER, 0, depth, 0);
 
     return WINED3D_OK;
 }
@@ -4965,21 +4875,22 @@ release:
     return hr;
 }
 
-static HRESULT cpu_blit_color_fill(struct wined3d_device *device, struct wined3d_surface *dst_surface,
-        const RECT *dst_rect, const struct wined3d_color *color)
+static HRESULT cpu_blit_color_fill(struct wined3d_device *device, struct wined3d_rendertarget_view *view,
+        const RECT *rect, const struct wined3d_color *color)
 {
+    struct wined3d_surface *surface = wined3d_rendertarget_view_get_surface(view);
     static const RECT src_rect;
     WINEDDBLTFX BltFx;
 
     memset(&BltFx, 0, sizeof(BltFx));
     BltFx.dwSize = sizeof(BltFx);
-    BltFx.u5.dwFillColor = wined3d_format_convert_from_float(dst_surface, color);
-    return surface_cpu_blt(dst_surface, dst_rect, NULL, &src_rect,
+    BltFx.u5.dwFillColor = wined3d_format_convert_from_float(surface, color);
+    return surface_cpu_blt(surface, rect, NULL, &src_rect,
             WINEDDBLT_COLORFILL, &BltFx, WINED3D_TEXF_POINT);
 }
 
 static HRESULT cpu_blit_depth_fill(struct wined3d_device *device,
-        struct wined3d_surface *surface, const RECT *rect, float depth)
+        struct wined3d_rendertarget_view *view, const RECT *rect, float depth)
 {
     FIXME("Depth filling not implemented by cpu_blit.\n");
     return WINED3DERR_INVALIDCALL;
@@ -5005,14 +4916,13 @@ const struct blit_shader cpu_blit =  {
     cpu_blit_blit_surface,
 };
 
-HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const RECT *dst_rect_in,
-        struct wined3d_surface *src_surface, const RECT *src_rect_in, DWORD flags,
+HRESULT wined3d_surface_blt(struct wined3d_surface *dst_surface, const RECT *dst_rect,
+        struct wined3d_surface *src_surface, const RECT *src_rect, DWORD flags,
         const WINEDDBLTFX *fx, enum wined3d_texture_filter_type filter)
 {
     struct wined3d_swapchain *src_swapchain, *dst_swapchain;
     struct wined3d_device *device = dst_surface->resource.device;
     DWORD src_ds_flags, dst_ds_flags;
-    RECT src_rect, dst_rect;
     BOOL scale, convert;
 
     static const DWORD simple_blit = WINEDDBLT_ASYNC
@@ -5024,8 +4934,8 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
             | WINEDDBLT_DONOTWAIT
             | WINEDDBLT_ALPHATEST;
 
-    TRACE("dst_surface %p, dst_rect_in %s, src_surface %p, src_rect_in %s, flags %#x, fx %p, filter %s.\n",
-            dst_surface, wine_dbgstr_rect(dst_rect_in), src_surface, wine_dbgstr_rect(src_rect_in),
+    TRACE("dst_surface %p, dst_rect %s, src_surface %p, src_rect %s, flags %#x, fx %p, filter %s.\n",
+            dst_surface, wine_dbgstr_rect(dst_rect), src_surface, wine_dbgstr_rect(src_rect),
             flags, fx, debug_d3dtexturefiltertype(filter));
     TRACE("Usage is %s.\n", debug_d3dusage(dst_surface->resource.usage));
 
@@ -5066,13 +4976,11 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
         return WINEDDERR_SURFACEBUSY;
     }
 
-    surface_get_rect(dst_surface, dst_rect_in, &dst_rect);
-
-    if (dst_rect.left >= dst_rect.right || dst_rect.top >= dst_rect.bottom
-            || dst_rect.left > dst_surface->resource.width || dst_rect.left < 0
-            || dst_rect.top > dst_surface->resource.height || dst_rect.top < 0
-            || dst_rect.right > dst_surface->resource.width || dst_rect.right < 0
-            || dst_rect.bottom > dst_surface->resource.height || dst_rect.bottom < 0)
+    if (dst_rect->left >= dst_rect->right || dst_rect->top >= dst_rect->bottom
+            || dst_rect->left > dst_surface->resource.width || dst_rect->left < 0
+            || dst_rect->top > dst_surface->resource.height || dst_rect->top < 0
+            || dst_rect->right > dst_surface->resource.width || dst_rect->right < 0
+            || dst_rect->bottom > dst_surface->resource.height || dst_rect->bottom < 0)
     {
         WARN("The application gave us a bad destination rectangle.\n");
         return WINEDDERR_INVALIDRECT;
@@ -5080,21 +4988,15 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
 
     if (src_surface)
     {
-        surface_get_rect(src_surface, src_rect_in, &src_rect);
-
-        if (src_rect.left >= src_rect.right || src_rect.top >= src_rect.bottom
-                || src_rect.left > src_surface->resource.width || src_rect.left < 0
-                || src_rect.top > src_surface->resource.height || src_rect.top < 0
-                || src_rect.right > src_surface->resource.width || src_rect.right < 0
-                || src_rect.bottom > src_surface->resource.height || src_rect.bottom < 0)
+        if (src_rect->left >= src_rect->right || src_rect->top >= src_rect->bottom
+                || src_rect->left > src_surface->resource.width || src_rect->left < 0
+                || src_rect->top > src_surface->resource.height || src_rect->top < 0
+                || src_rect->right > src_surface->resource.width || src_rect->right < 0
+                || src_rect->bottom > src_surface->resource.height || src_rect->bottom < 0)
         {
-            WARN("Application gave us bad source rectangle for Blt.\n");
+            WARN("The application gave us a bad source rectangle.\n");
             return WINEDDERR_INVALIDRECT;
         }
-    }
-    else
-    {
-        memset(&src_rect, 0, sizeof(src_rect));
     }
 
     if (!fx || !(fx->dwDDFX))
@@ -5164,8 +5066,8 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
     }
 
     scale = src_surface
-            && (src_rect.right - src_rect.left != dst_rect.right - dst_rect.left
-            || src_rect.bottom - src_rect.top != dst_rect.bottom - dst_rect.top);
+            && (src_rect->right - src_rect->left != dst_rect->right - dst_rect->left
+            || src_rect->bottom - src_rect->top != dst_rect->bottom - dst_rect->top);
     convert = src_surface && src_surface->resource.format->id != dst_surface->resource.format->id;
 
     dst_ds_flags = dst_surface->container->resource.format_flags
@@ -5187,7 +5089,7 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
             if (!surface_convert_depth_to_float(dst_surface, fx->u5.dwFillDepth, &depth))
                 return WINED3DERR_INVALIDCALL;
 
-            if (SUCCEEDED(wined3d_surface_depth_fill(dst_surface, &dst_rect, depth)))
+            if (SUCCEEDED(wined3d_surface_depth_fill(dst_surface, dst_rect, depth)))
                 return WINED3D_OK;
         }
         else
@@ -5199,7 +5101,7 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
             }
 
             if (SUCCEEDED(wined3d_surface_depth_blt(src_surface, src_surface->container->resource.draw_binding,
-                    &src_rect, dst_surface, dst_surface->container->resource.draw_binding, &dst_rect)))
+                    src_rect, dst_surface, dst_surface->container->resource.draw_binding, dst_rect)))
                 return WINED3D_OK;
         }
     }
@@ -5231,7 +5133,7 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
                     palette, fx->u5.dwFillColor, &color))
                 goto fallback;
 
-            if (SUCCEEDED(surface_color_fill(dst_surface, &dst_rect, &color)))
+            if (SUCCEEDED(surface_color_fill(dst_surface, dst_rect, &color)))
                 return WINED3D_OK;
         }
         else
@@ -5264,9 +5166,9 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
                     TRACE("Not doing upload because of format conversion.\n");
                 else
                 {
-                    POINT dst_point = {dst_rect.left, dst_rect.top};
+                    POINT dst_point = {dst_rect->left, dst_rect->top};
 
-                    if (SUCCEEDED(surface_upload_from_surface(dst_surface, &dst_point, src_surface, &src_rect)))
+                    if (SUCCEEDED(surface_upload_from_surface(dst_surface, &dst_point, src_surface, src_rect)))
                     {
                         if (!wined3d_resource_is_offscreen(&dst_surface->container->resource))
                         {
@@ -5302,16 +5204,16 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
             }
 
             if (fbo_blit_supported(&device->adapter->gl_info, blit_op,
-                    &src_rect, src_surface->resource.usage, src_surface->resource.pool, src_surface->resource.format,
-                    &dst_rect, dst_surface->resource.usage, dst_surface->resource.pool, dst_surface->resource.format))
+                    src_rect, src_surface->resource.usage, src_surface->resource.pool, src_surface->resource.format,
+                    dst_rect, dst_surface->resource.usage, dst_surface->resource.pool, dst_surface->resource.format))
             {
                 struct wined3d_context *context;
                 TRACE("Using FBO blit.\n");
 
                 context = context_acquire(device, NULL);
                 surface_blt_fbo(device, context, filter,
-                        src_surface, src_surface->container->resource.draw_binding, &src_rect,
-                        dst_surface, dst_surface->container->resource.draw_binding, &dst_rect);
+                        src_surface, src_surface->container->resource.draw_binding, src_rect,
+                        dst_surface, dst_surface->container->resource.draw_binding, dst_rect);
                 context_release(context);
 
                 surface_validate_location(dst_surface, dst_surface->container->resource.draw_binding);
@@ -5321,12 +5223,12 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
             }
 
             blitter = wined3d_select_blitter(&device->adapter->gl_info, &device->adapter->d3d_info, blit_op,
-                    &src_rect, src_surface->resource.usage, src_surface->resource.pool, src_surface->resource.format,
-                    &dst_rect, dst_surface->resource.usage, dst_surface->resource.pool, dst_surface->resource.format);
+                    src_rect, src_surface->resource.usage, src_surface->resource.pool, src_surface->resource.format,
+                    dst_rect, dst_surface->resource.usage, dst_surface->resource.pool, dst_surface->resource.format);
             if (blitter)
             {
                 blitter->blit_surface(device, blit_op, filter, src_surface,
-                        &src_rect, dst_surface, &dst_rect, color_key);
+                        src_rect, dst_surface, dst_rect, color_key);
                 return WINED3D_OK;
             }
         }
@@ -5334,15 +5236,11 @@ HRESULT CDECL wined3d_surface_blt(struct wined3d_surface *dst_surface, const REC
 
 fallback:
     /* Special cases for render targets. */
-    if (SUCCEEDED(surface_blt_special(dst_surface, &dst_rect, src_surface, &src_rect, flags, fx, filter)))
+    if (SUCCEEDED(surface_blt_special(dst_surface, dst_rect, src_surface, src_rect, flags, fx, filter)))
         return WINED3D_OK;
 
 cpu:
-
-    /* For the rest call the X11 surface implementation. For render targets
-     * this should be implemented OpenGL accelerated in surface_blt_special(),
-     * other blits are rather rare. */
-    return surface_cpu_blt(dst_surface, &dst_rect, src_surface, &src_rect, flags, fx, filter);
+    return surface_cpu_blt(dst_surface, dst_rect, src_surface, src_rect, flags, fx, filter);
 }
 
 static HRESULT surface_init(struct wined3d_surface *surface, struct wined3d_texture *container,
@@ -5351,8 +5249,8 @@ static HRESULT surface_init(struct wined3d_surface *surface, struct wined3d_text
     struct wined3d_device *device = container->resource.device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     const struct wined3d_format *format = wined3d_get_format(gl_info, desc->format);
+    BOOL lockable = flags & WINED3D_TEXTURE_CREATE_MAPPABLE;
     UINT multisample_quality = desc->multisample_quality;
-    BOOL lockable = flags & WINED3D_SURFACE_MAPPABLE;
     unsigned int resource_size;
     HRESULT hr;
 
@@ -5410,7 +5308,7 @@ static HRESULT surface_init(struct wined3d_surface *surface, struct wined3d_text
     list_init(&surface->overlays);
 
     /* Flags */
-    if (flags & WINED3D_SURFACE_DISCARD)
+    if (flags & WINED3D_TEXTURE_CREATE_DISCARD)
         surface->flags |= SFLAG_DISCARD;
     if (lockable || desc->format == WINED3DFMT_D16_LOCKABLE)
         surface->resource.access_flags |= WINED3D_RESOURCE_ACCESS_CPU;
@@ -5429,7 +5327,7 @@ static HRESULT surface_init(struct wined3d_surface *surface, struct wined3d_text
 
     /* Similar to lockable rendertargets above, creating the DIB section
      * during surface initialization prevents the sysmem pointer from changing
-     * after a wined3d_surface_getdc() call. */
+     * after a wined3d_texture_get_dc() call. */
     if ((desc->usage & WINED3DUSAGE_OWNDC) && !surface->hDC
             && SUCCEEDED(surface_create_dib_section(surface)))
         surface->resource.map_binding = WINED3D_LOCATION_DIB;

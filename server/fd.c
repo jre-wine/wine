@@ -209,6 +209,8 @@ static const struct object_ops fd_ops =
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
     no_lookup_name,           /* lookup_name */
+    no_link_name,             /* link_name */
+    NULL,                     /* unlink_name */
     no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
     fd_destroy                /* destroy */
@@ -246,6 +248,8 @@ static const struct object_ops device_ops =
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
     no_lookup_name,           /* lookup_name */
+    no_link_name,             /* link_name */
+    NULL,                     /* unlink_name */
     no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
     device_destroy            /* destroy */
@@ -282,6 +286,8 @@ static const struct object_ops inode_ops =
     default_get_sd,           /* get_sd */
     default_set_sd,           /* set_sd */
     no_lookup_name,           /* lookup_name */
+    no_link_name,             /* link_name */
+    NULL,                     /* unlink_name */
     no_open_file,             /* open_file */
     no_close_handle,          /* close_handle */
     inode_destroy             /* destroy */
@@ -320,6 +326,8 @@ static const struct object_ops file_lock_ops =
     default_get_sd,             /* get_sd */
     default_set_sd,             /* set_sd */
     no_lookup_name,             /* lookup_name */
+    no_link_name,               /* link_name */
+    NULL,                       /* unlink_name */
     no_open_file,               /* open_file */
     no_close_handle,            /* close_handle */
     no_destroy                  /* destroy */
@@ -2384,11 +2392,10 @@ DECL_HANDLER(flush)
 /* open a file object */
 DECL_HANDLER(open_file_object)
 {
-    struct unicode_str name;
+    struct unicode_str name = get_req_unicode_str();
     struct directory *root = NULL;
     struct object *obj, *result;
 
-    get_req_unicode_str( &name );
     if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
     {
         if (get_error() != STATUS_OBJECT_TYPE_MISMATCH) return;

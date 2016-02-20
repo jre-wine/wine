@@ -218,11 +218,12 @@ static NTSTATUS FILE_CreateFile( PHANDLE handle, ACCESS_MASK access, POBJECT_ATT
 
     if (io->u.Status == STATUS_SUCCESS)
     {
+        static UNICODE_STRING empty_string;
         OBJECT_ATTRIBUTES unix_attr = *attr;
         data_size_t len;
         struct object_attributes *objattr;
 
-        unix_attr.ObjectName = NULL;  /* we send the unix name instead */
+        unix_attr.ObjectName = &empty_string;  /* we send the unix name instead */
         if ((io->u.Status = alloc_object_attributes( &unix_attr, &objattr, &len )))
         {
             RtlFreeAnsiString( &unix_name );
@@ -3512,6 +3513,8 @@ NTSTATUS WINAPI NtCreateNamedPipeFile( PHANDLE handle, ULONG access,
           options, pipe_type, read_mode, completion_mode, max_inst, inbound_quota,
           outbound_quota, timeout);
 
+    if (!attr) return STATUS_INVALID_PARAMETER;
+
     /* assume we only get relative timeout */
     if (timeout->QuadPart > 0)
         FIXME("Wrong time %s\n", wine_dbgstr_longlong(timeout->QuadPart));
@@ -3636,7 +3639,6 @@ NTSTATUS WINAPI NtCreateMailslotFile(PHANDLE pHandle, ULONG DesiredAccess,
 
     if (!pHandle) return STATUS_ACCESS_VIOLATION;
     if (!attr) return STATUS_INVALID_PARAMETER;
-    if (!attr->ObjectName) return STATUS_OBJECT_PATH_SYNTAX_BAD;
 
     if ((ret = alloc_object_attributes( attr, &objattr, &len ))) return ret;
 

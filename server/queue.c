@@ -178,6 +178,8 @@ static const struct object_ops msg_queue_ops =
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     no_lookup_name,            /* lookup_name */
+    no_link_name,              /* link_name */
+    NULL,                      /* unlink_name */
     no_open_file,              /* open_file */
     no_close_handle,           /* close_handle */
     msg_queue_destroy          /* destroy */
@@ -211,6 +213,8 @@ static const struct object_ops thread_input_ops =
     default_get_sd,               /* get_sd */
     default_set_sd,               /* set_sd */
     no_lookup_name,               /* lookup_name */
+    no_link_name,                 /* link_name */
+    NULL,                         /* unlink_name */
     no_open_file,                 /* open_file */
     no_close_handle,              /* close_handle */
     thread_input_destroy          /* destroy */
@@ -2581,13 +2585,21 @@ DECL_HANDLER(set_win_timer)
         }
         else
         {
+            lparam_t end_id = queue->next_timer_id;
+
             /* find a free id for it */
-            do
+            while (1)
             {
                 id = queue->next_timer_id;
                 if (--queue->next_timer_id <= 0x100) queue->next_timer_id = 0x7fff;
+
+                if (!find_timer( queue, 0, req->msg, id )) break;
+                if (queue->next_timer_id == end_id)
+                {
+                    set_win32_error( ERROR_NO_MORE_USER_HANDLES );
+                    return;
+                }
             }
-            while (find_timer( queue, 0, req->msg, id ));
         }
     }
 
@@ -3039,8 +3051,15 @@ DECL_HANDLER(set_caret_info)
     }
     if (req->flags & SET_CARET_STATE)
     {
-        if (req->state == -1) input->caret_state = !input->caret_state;
-        else input->caret_state = !!req->state;
+        switch (req->state)
+        {
+        case CARET_STATE_OFF:    input->caret_state = 0; break;
+        case CARET_STATE_ON:     input->caret_state = 1; break;
+        case CARET_STATE_TOGGLE: input->caret_state = !input->caret_state; break;
+        case CARET_STATE_ON_IF_MOVED:
+            if (req->x != reply->old_rect.left || req->y != reply->old_rect.top) input->caret_state = 1;
+            break;
+        }
     }
 }
 

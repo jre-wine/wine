@@ -68,6 +68,8 @@ static const struct object_ops mutex_ops =
     default_get_sd,            /* get_sd */
     default_set_sd,            /* set_sd */
     no_lookup_name,            /* lookup_name */
+    directory_link_name,       /* link_name */
+    default_unlink_name,       /* unlink_name */
     no_open_file,              /* open_file */
     no_close_handle,           /* close_handle */
     mutex_destroy              /* destroy */
@@ -208,14 +210,11 @@ DECL_HANDLER(create_mutex)
 {
     struct mutex *mutex;
     struct unicode_str name;
-    struct directory *root = NULL;
+    struct directory *root;
     const struct security_descriptor *sd;
-    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name );
+    const struct object_attributes *objattr = get_req_object_attributes( &sd, &name, &root );
 
     if (!objattr) return;
-
-    if (objattr->rootdir && !(root = get_directory_obj( current->process, objattr->rootdir, 0 )))
-        return;
 
     if ((mutex = create_mutex( root, &name, objattr->attributes, req->owned, sd )))
     {
@@ -233,21 +232,10 @@ DECL_HANDLER(create_mutex)
 /* open a handle to a mutex */
 DECL_HANDLER(open_mutex)
 {
-    struct unicode_str name;
-    struct directory *root = NULL;
-    struct mutex *mutex;
+    struct unicode_str name = get_req_unicode_str();
 
-    get_req_unicode_str( &name );
-    if (req->rootdir && !(root = get_directory_obj( current->process, req->rootdir, 0 )))
-        return;
-
-    if ((mutex = open_object_dir( root, &name, req->attributes, &mutex_ops )))
-    {
-        reply->handle = alloc_handle( current->process, &mutex->obj, req->access, req->attributes );
-        release_object( mutex );
-    }
-
-    if (root) release_object( root );
+    reply->handle = open_object( current->process, req->rootdir, req->access,
+                                 &mutex_ops, &name, req->attributes );
 }
 
 /* release a mutex */

@@ -636,6 +636,389 @@ static void test_basic_type(void)
     WsFreeWriter( writer );
 }
 
+static void test_simple_struct_type(void)
+{
+    static const WCHAR valueW[] = {'v','a','l','u','e',0};
+    HRESULT hr;
+    WS_XML_WRITER *writer;
+    WS_STRUCT_DESCRIPTION s;
+    WS_FIELD_DESCRIPTION f, *fields[1];
+    WS_XML_STRING localname = {6, (BYTE *)"struct"}, ns = {0, NULL};
+    struct test
+    {
+        const WCHAR *field;
+    } *test;
+
+    hr = WsCreateWriter( NULL, 0, &writer, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    memset( &f, 0, sizeof(f) );
+    f.mapping   = WS_TEXT_FIELD_MAPPING;
+    f.type      = WS_WSZ_TYPE;
+    fields[0] = &f;
+
+    memset( &s, 0, sizeof(s) );
+    s.size          = sizeof(struct test);
+    s.alignment     = TYPE_ALIGNMENT(struct test);
+    s.fields        = fields;
+    s.fieldCount    = 1;
+
+    test = HeapAlloc( GetProcessHeap(), 0, sizeof(*test) );
+    test->field  = valueW;
+    hr = WsWriteType( writer, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_STRUCT_TYPE, NULL,
+                      WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsWriteType( writer, WS_ELEMENT_CONTENT_TYPE_MAPPING, WS_STRUCT_TYPE, &s,
+                      WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteEndElement( writer, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<struct>value</struct>", __LINE__ );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteType( writer, WS_ELEMENT_TYPE_MAPPING, WS_STRUCT_TYPE, &s,
+                      WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteEndElement( writer, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<struct>value</struct>", __LINE__ );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartAttribute( writer, NULL, &localname, &ns, FALSE, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteType( writer, WS_ATTRIBUTE_TYPE_MAPPING, WS_STRUCT_TYPE, &s,
+                      WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteEndAttribute( writer, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteEndElement( writer, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<struct struct=\"value\"/>", __LINE__ );
+
+    HeapFree( GetProcessHeap(), 0, test );
+    WsFreeWriter( writer );
+}
+
+static void test_WsWriteElement(void)
+{
+    static const WCHAR testW[] = {'t','e','s','t',0};
+    HRESULT hr;
+    WS_XML_WRITER *writer;
+    WS_STRUCT_DESCRIPTION s;
+    WS_FIELD_DESCRIPTION f, *fields[1];
+    WS_ELEMENT_DESCRIPTION desc;
+    WS_XML_STRING localname = {3, (BYTE *)"str"}, ns = {0, NULL};
+    struct test { const WCHAR *str; } *test;
+
+    hr = WsCreateWriter( NULL, 0, &writer, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* text field mapping */
+    memset( &f, 0, sizeof(f) );
+    f.mapping = WS_TEXT_FIELD_MAPPING;
+    f.type    = WS_WSZ_TYPE;
+    fields[0] = &f;
+
+    memset( &s, 0, sizeof(s) );
+    s.size       = sizeof(struct test);
+    s.alignment  = TYPE_ALIGNMENT(struct test);
+    s.fields     = fields;
+    s.fieldCount = 1;
+
+    desc.elementLocalName = &localname;
+    desc.elementNs        = &ns;
+    desc.type             = WS_STRUCT_TYPE;
+    desc.typeDescription  = &s;
+
+    test = HeapAlloc( GetProcessHeap(), 0, sizeof(*test) );
+    test->str = testW;
+    hr = WsWriteElement( NULL, &desc, WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsWriteElement( writer, NULL, WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsWriteElement( writer, &desc, WS_WRITE_REQUIRED_POINTER, NULL, 0, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsWriteElement( writer, &desc, WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<str>test</str>", __LINE__ );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteElement( writer, &desc, WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<str><str>test</str>", __LINE__ );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* attribute field mapping */
+    f.mapping = WS_ATTRIBUTE_FIELD_MAPPING;
+
+    /* requires localName and ns to be set */
+    hr = WsWriteElement( writer, &desc, WS_WRITE_REQUIRED_POINTER, NULL, 0, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    f.localName = &localname;
+    f.ns        = &ns;
+    hr = WsWriteElement( writer, &desc, WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<str str=\"test\"/>", __LINE__ );
+
+    HeapFree( GetProcessHeap(), 0, test );
+    WsFreeWriter( writer );
+}
+
+static void test_WsWriteValue(void)
+{
+    HRESULT hr;
+    WS_XML_WRITER *writer;
+    WS_XML_STRING localname = {1, (BYTE *)"t"}, ns = {0, NULL};
+    ULONG i;
+    static const struct
+    {
+        WS_VALUE_TYPE type;
+        INT64         val;
+        ULONG         size;
+        const char   *result;
+        const char   *result2;
+    }
+    tests[] =
+    {
+        { WS_BOOL_VALUE_TYPE, ~0, sizeof(BOOL), "<t>true</t>", "<t t=\"true\"/>" },
+        { WS_BOOL_VALUE_TYPE, FALSE, sizeof(BOOL), "<t>false</t>", "<t t=\"false\"/>" },
+        { WS_INT8_VALUE_TYPE, -128, sizeof(INT8), "<t>-128</t>", "<t t=\"-128\"/>" },
+        { WS_INT16_VALUE_TYPE, -32768, sizeof(INT16), "<t>-32768</t>", "<t t=\"-32768\"/>" },
+        { WS_INT32_VALUE_TYPE, -2147483647 - 1, sizeof(INT32), "<t>-2147483648</t>",
+          "<t t=\"-2147483648\"/>" },
+        { WS_INT64_VALUE_TYPE, -9223372036854775807 - 1, sizeof(INT64), "<t>-9223372036854775808</t>",
+          "<t t=\"-9223372036854775808\"/>" },
+        { WS_UINT8_VALUE_TYPE, 255, sizeof(UINT8), "<t>255</t>", "<t t=\"255\"/>" },
+        { WS_UINT16_VALUE_TYPE, 65535, sizeof(UINT16), "<t>65535</t>", "<t t=\"65535\"/>" },
+        { WS_UINT32_VALUE_TYPE, ~0u, sizeof(UINT32), "<t>4294967295</t>", "<t t=\"4294967295\"/>" },
+        { WS_UINT64_VALUE_TYPE, ~0, sizeof(UINT64), "<t>18446744073709551615</t>",
+          "<t t=\"18446744073709551615\"/>" },
+    };
+
+    hr = WsCreateWriter( NULL, 0, &writer, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteValue( NULL, tests[0].type, &tests[0].val, tests[0].size, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsWriteValue( writer, tests[0].type, &tests[0].val, tests[0].size, NULL );
+    ok( hr == WS_E_INVALID_FORMAT, "got %08x\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* zero size */
+    hr = WsWriteValue( writer, tests[0].type, &tests[0].val, 0, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* NULL value */
+    hr = WsWriteValue( writer, tests[0].type, NULL, 0, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    /* element type mapping */
+    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++)
+    {
+        hr = set_output( writer );
+        ok( hr == S_OK, "got %08x\n", hr );
+
+        hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+        ok( hr == S_OK, "got %08x\n", hr );
+
+        hr = WsWriteValue( writer, tests[i].type, &tests[i].val, tests[i].size, NULL );
+        ok( hr == S_OK, "%u: got %08x\n", i, hr );
+
+        hr = WsWriteEndElement( writer, NULL );
+        ok( hr == S_OK, "got %08x\n", hr );
+        check_output( writer, tests[i].result, __LINE__ );
+    }
+
+    /* attribute type mapping */
+    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++)
+    {
+        hr = set_output( writer );
+        ok( hr == S_OK, "got %08x\n", hr );
+
+        hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+        ok( hr == S_OK, "got %08x\n", hr );
+
+        hr = WsWriteStartAttribute( writer, NULL, &localname, &ns, FALSE, NULL );
+        ok( hr == S_OK, "got %08x\n", hr );
+
+        hr = WsWriteValue( writer, tests[i].type, &tests[i].val, tests[i].size, NULL );
+        ok( hr == S_OK, "%u: got %08x\n", i, hr );
+
+        hr = WsWriteEndAttribute( writer, NULL );
+        ok( hr == S_OK, "got %08x\n", hr );
+
+        hr = WsWriteEndElement( writer, NULL );
+        ok( hr == S_OK, "got %08x\n", hr );
+        check_output( writer, tests[i].result2, __LINE__ );
+    }
+
+    WsFreeWriter( writer );
+}
+
+static void test_WsWriteAttribute(void)
+{
+    static const WCHAR testW[] = {'t','e','s','t',0};
+    HRESULT hr;
+    WS_XML_WRITER *writer;
+    WS_STRUCT_DESCRIPTION s;
+    WS_FIELD_DESCRIPTION f, *fields[1];
+    WS_ATTRIBUTE_DESCRIPTION desc;
+    WS_XML_STRING localname = {3, (BYTE *)"str"}, ns = {0, NULL};
+    struct test { const WCHAR *str; } *test;
+
+    hr = WsCreateWriter( NULL, 0, &writer, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    /* text field mapping */
+    memset( &f, 0, sizeof(f) );
+    f.mapping = WS_TEXT_FIELD_MAPPING;
+    f.type    = WS_WSZ_TYPE;
+    fields[0] = &f;
+
+    memset( &s, 0, sizeof(s) );
+    s.size       = sizeof(struct test);
+    s.alignment  = TYPE_ALIGNMENT(struct test);
+    s.fields     = fields;
+    s.fieldCount = 1;
+
+    desc.attributeLocalName = &localname;
+    desc.attributeNs        = &ns;
+    desc.type               = WS_STRUCT_TYPE;
+    desc.typeDescription    = &s;
+
+    test = HeapAlloc( GetProcessHeap(), 0, sizeof(*test) );
+    test->str = testW;
+    hr = WsWriteAttribute( NULL, &desc, WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsWriteAttribute( writer, NULL, WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsWriteAttribute( writer, &desc, WS_WRITE_REQUIRED_POINTER, NULL, 0, NULL );
+    ok( hr == E_INVALIDARG, "got %08x\n", hr );
+
+    hr = WsWriteAttribute( writer, &desc, WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == WS_E_INVALID_OPERATION, "got %08x\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteAttribute( writer, &desc, WS_WRITE_REQUIRED_POINTER, &test, sizeof(test), NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteEndElement( writer, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<str str=\"test\"/>", __LINE__ );
+
+    HeapFree( GetProcessHeap(), 0, test );
+    WsFreeWriter( writer );
+}
+
+static void test_WsWriteStartCData(void)
+{
+    HRESULT hr;
+    WS_XML_WRITER *writer;
+    WS_XML_STRING localname = {1, (BYTE *)"t"}, ns = {0, NULL};
+    WS_XML_UTF8_TEXT text;
+
+    hr = WsCreateWriter( NULL, 0, &writer, NULL ) ;
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteEndCData( writer, NULL );
+    ok( hr == WS_E_INVALID_OPERATION, "got %08x\n", hr );
+
+    hr = set_output( writer );
+    ok( hr == S_OK, "got %08x\n", hr );
+
+    hr = WsWriteStartElement( writer, NULL, &localname, &ns, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "", __LINE__ );
+
+    hr = WsWriteStartCData( writer, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<t><![CDATA[", __LINE__ );
+
+    text.text.textType = WS_XML_TEXT_TYPE_UTF8;
+    text.value.bytes = (BYTE *)"<data>";
+    text.value.length = 6;
+    hr = WsWriteText( writer, &text.text, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<t><![CDATA[<data>", __LINE__ );
+
+    hr = WsWriteEndCData( writer, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<t><![CDATA[<data>]]>", __LINE__ );
+
+    hr = WsWriteEndElement( writer, NULL );
+    ok( hr == S_OK, "got %08x\n", hr );
+    check_output( writer, "<t><![CDATA[<data>]]></t>", __LINE__ );
+
+    WsFreeWriter( writer );
+}
+
 START_TEST(writer)
 {
     test_WsCreateWriter();
@@ -646,4 +1029,9 @@ START_TEST(writer)
     test_WsWriteStartAttribute();
     test_WsWriteType();
     test_basic_type();
+    test_simple_struct_type();
+    test_WsWriteElement();
+    test_WsWriteValue();
+    test_WsWriteAttribute();
+    test_WsWriteStartCData();
 }
