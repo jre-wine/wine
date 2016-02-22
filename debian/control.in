@@ -32,6 +32,7 @@ Build-Depends:
  gettext,
  oss4-dev,
  sharutils,
+ pkg-config,
  dctrl-tools,
  khronos-api,
  unicode-data (>= 8.0-1~),

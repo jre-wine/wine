@@ -1,3 +1,18 @@
+wine-development (1.9.4-1) unstable; urgency=medium
+
+  * New upstream release 1.9.4, released Feb 19, 2016.
+    - Support for color glyphs and font fallbacks in DirectWrite.
+    - Improvements to the WebServices reader.
+    - Support for more formats in Direct3D 11.
+    - Simplified syntax and clean up of tests marked todo.
+    - Various bug fixes.
+  * Add pkg-config build dependency.
+  * Latest upstream release packaged (closes: #812627).
+  * Support recent upstream changes related to unicode.
+  * Generate vertical and collation files from unicode data at build time.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Mon, 22 Feb 2016 06:11:19 +0000
+
 wine-development (1.9.3-1) unstable; urgency=medium
 
   * New upstream release 1.9.3, released Feb 5, 2016.

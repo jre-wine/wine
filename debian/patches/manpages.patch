@@ -3,7 +3,7 @@ author: Michael Gilbert <mgilbert@debian.org>
 
 --- a/tools/makedep.c
 +++ b/tools/makedep.c
-@@ -2814,6 +2814,8 @@ static struct strarray output_sources( c
+@@ -2868,6 +2868,8 @@ static struct strarray output_sources( c
          output( "\n" );
      }
  

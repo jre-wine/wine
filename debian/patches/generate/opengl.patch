@@ -3,7 +3,7 @@ author: Michael Gilbert <mgilbert@debian.org>
 
 --- a/dlls/opengl32/make_opengl
 +++ b/dlls/opengl32/make_opengl
-@@ -401,13 +401,6 @@ if ($version eq "1.0") {
+@@ -402,13 +402,6 @@ if ($version eq "1.0") {
  }
  
  #
@@ -17,7 +17,7 @@ author: Michael Gilbert <mgilbert@debian.org>
  # Then, create the list of all OpenGL functions using the registry
  # files. This will create two hash-tables, one with all the function
  # whose category matches the one listed in '@norm_categories', the other
-@@ -731,20 +724,17 @@ sub parse_file($$)
+@@ -734,20 +727,17 @@ sub parse_file($$)
      }
  }
  

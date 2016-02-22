@@ -87,7 +87,7 @@ debian/bug-control: debian/bug-control.in
 	dh $@ --parallel --with autoreconf
 
 override_dh_auto_configure:
-	./debian/scripts/generate libs/wine/cptable.generated cpmap
+	./debian/scripts/generate libs/port/cptable.generated cpmap
 	./debian/scripts/generate server/trace.generated make_requests
 	./debian/scripts/generate server/request.generated make_requests
 	./tools/make_fir
