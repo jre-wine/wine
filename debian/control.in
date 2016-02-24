@@ -75,6 +75,8 @@ Depends:
  wine64VERSION (>= ${source:Version}) | wine32VERSION (>= ${source:Version}),
  wine64VERSION (<< ${source:Version}.1~) | wine32VERSION (<< ${source:Version}.1~),
 Suggests:
+ winetricks,
+ playonlinux,
  wineVERSION-binfmt,
  dosbox (>= 0.74-4.2~),
 Description: Windows API implementation - standard suite
