@@ -61,7 +61,7 @@ Build-Depends:
  libfontconfig1-dev,
  freebsd-glue [kfreebsd-any],
  ocl-icd-opencl-dev,
-Standards-Version: 3.9.6
+Standards-Version: 3.9.7
 Homepage: http://www.winehq.org/
 Vcs-Browser: https://anonscm.debian.org/git/pkg-wine/wine.git
 Vcs-Git: https://anonscm.debian.org/git/pkg-wine/wine.git
