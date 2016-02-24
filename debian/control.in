@@ -77,7 +77,7 @@ Depends:
 Suggests:
  winetricks,
  playonlinux,
- wineVERSION-binfmt,
+ wine-binfmt,
  dosbox (>= 0.74-4.2~),
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
