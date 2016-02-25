@@ -129,7 +129,6 @@ override_dh_auto_install-arch: $(INSTALLS)
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp server/wineserver debian/tmp/wineserver$(DEB_BUILD_ARCH_BITS)
 	dh_auto_install
-	cp loader/wine.man debian/tmp/usr/share/man/man1/wine32$(VERSION).1
 	cp loader/wine.man debian/tmp/usr/share/man/man1/wine64$(VERSION).1
 	cd debian/tmp/usr/share/man/man1 && \
 	    cp winegcc.1 winegcc$(VERSION).1 || true
