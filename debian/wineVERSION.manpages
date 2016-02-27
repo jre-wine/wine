@@ -1,1 +1,12 @@
-debian/tmp/*.1
+debian/tmp/wineVERSION.man
+debian/tmp/wineserverVERSION.man
+
+debian/tmp/msiexecVERSION.man
+debian/tmp/regeditVERSION.man
+debian/tmp/winecfgVERSION.man
+debian/tmp/winedbgVERSION.man
+debian/tmp/winebootVERSION.man
+debian/tmp/winefileVERSION.man
+debian/tmp/winepathVERSION.man
+debian/tmp/regsvr32VERSION.man
+debian/tmp/wineconsoleVERSION.man
