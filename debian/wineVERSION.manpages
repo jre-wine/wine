@@ -1,5 +1,11 @@
 debian/tmp/wineVERSION.man
+debian/tmp/wineVERSION.de.man
+debian/tmp/wineVERSION.fr.man
+debian/tmp/wineVERSION.pl.man
+
 debian/tmp/wineserverVERSION.man
+debian/tmp/wineserverVERSION.de.man
+debian/tmp/wineserverVERSION.fr.man
 
 debian/tmp/msiexecVERSION.man
 debian/tmp/regeditVERSION.man
