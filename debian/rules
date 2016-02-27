@@ -61,6 +61,7 @@ endif
 # additional files to generate
 INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/) \
          debian/bug-control \
+         debian/not-installed \
 
 debian/control: debian/control.in
 	sed s/VERSION/$(VERSION)/g < $< > $@
@@ -81,6 +82,9 @@ debian/fonts-wine$(VERSION)%: debian/fonts-wineVERSION%
 	sed s/VERSION/$(VERSION)/g < $< > $@
 
 debian/bug-control: debian/bug-control.in
+	sed s/VERSION/$(VERSION)/g < $< > $@
+
+debian/not-installed: debian/not-installed.in
 	sed s/VERSION/$(VERSION)/g < $< > $@
 
 %:
@@ -137,6 +141,9 @@ override_dh_auto_install-arch: $(INSTALLS)
 	cp loader/wine.man debian/tmp/usr/share/man/man1/wine64$(VERSION).1
 	test -f debian/tmp/$(BINDIR)/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(BINDIR)
+
+override_dh_install:
+	dh_install --fail-missing
 
 override_dh_strip:
 	dh_strip -Xwine-pthread -Xwine-kthread --ddeb-migration='libwine$(VERSION)-dbg (<< 1.9.0-1~)'
