@@ -25,7 +25,7 @@ else
 fi
 
 if test -z "$WINEDEBUG"; then
-    export WINEDEBUG=-all
+    export WINEDEBUG=fixme-all
 fi
 
 exec $wine "$@"
