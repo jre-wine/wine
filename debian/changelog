@@ -6,7 +6,6 @@ wine-development (1.9.4-2) UNRELEASED; urgency=medium
   * Explicitly specify which manpages to install.
   * Install all manpages for all installed executables.
   * Add patch to fix macro not defined errors from man.
-  * Fail to build if any file is not installed.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Sat, 27 Feb 2016 16:16:16 +0100
 
