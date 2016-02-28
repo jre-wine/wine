@@ -7,6 +7,5 @@ debian/tmp/winecfgVERSION.1
 debian/tmp/winedbgVERSION.1
 debian/tmp/winebootVERSION.1
 debian/tmp/winefileVERSION.1
-debian/tmp/winepathVERSION.1
 debian/tmp/regsvr32VERSION.1
 debian/tmp/wineconsoleVERSION.1

@@ -10,8 +10,9 @@ wine (1.8.1-3) UNRELEASED; urgency=medium
     - Update standards version.
     - Suggest winetricks and playonlinux.
     - Update copyright.
+    - Explicitly specify which manpages to install.
 
- -- Jens Reyer <jre.winesim@gmail.com>  Fri, 26 Feb 2016 19:33:05 +0100
+ -- Jens Reyer <jre.winesim@gmail.com>  Sun, 28 Feb 2016 16:42:11 +0100
 
 wine (1.8.1-2) unstable; urgency=medium
 
