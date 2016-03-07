@@ -112,16 +112,15 @@ override_dh_auto_install-indep: $(INSTALLS)
 	cp debian/scripts/wine debian/tmp/wine$(VERSION)
 	for dir in loader server programs/msiexec programs/winedbg \
 	    programs/wineconsole programs/regedit programs/regsvr32 \
-	    programs/wineboot programs/winefile programs/winecfg; do \
+	    programs/wineboot programs/winefile programs/winepath \
+	    programs/winecfg; do \
 	    ./tools/makedep $$dir; \
 	    make -C $$dir install-man; \
 	    done
-	for file in $$(find . -name \*.man); do \
-	    rename=$$(basename $$file | sed s/\\.man/$(VERSION)\\.1/); \
+	for file in $$(find . ! -path "./debian/*" -name \*.man); do \
+	    rename=$$(basename $$file | sed "s/\\./$(VERSION)./;s/UTF-8\\.//"); \
 	    cp $$file debian/tmp/$$rename || true; \
 	    done
-	rm -f debian/tmp/*UTF-8*
-	rm -f debian/tmp/winegcc$(VERSION).1
 
 override_dh_auto_install-arch: $(INSTALLS)
 	mkdir -p debian/tmp
@@ -129,9 +128,11 @@ override_dh_auto_install-arch: $(INSTALLS)
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp server/wineserver debian/tmp/wineserver$(DEB_BUILD_ARCH_BITS)
 	dh_auto_install
+	for file in $$(find . ! -path "./debian/*" -name \*.man); do \
+	    rename=$$(basename $$file | sed "s/\\./$(VERSION)./;s/UTF-8\\.//"); \
+	    cp $$file debian/tmp/$$rename || true; \
+	    done
 	cp loader/wine.man debian/tmp/usr/share/man/man1/wine64$(VERSION).1
-	cd debian/tmp/usr/share/man/man1 && \
-	    cp winegcc.1 winegcc$(VERSION).1 || true
 	test -f debian/tmp/$(BINDIR)/wine-preloader || \
 	    cp debian/scripts/wine-preloader debian/tmp/$(BINDIR)
 
