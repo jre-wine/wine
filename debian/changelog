@@ -1,3 +1,15 @@
+wine-development (1.9.5-3) unstable; urgency=medium
+
+  * Re-upload with the previous change actually applied.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 05 Mar 2016 23:32:42 +0000
+
+wine-development (1.9.5-2) unstable; urgency=medium
+
+  * Change gstreamer build dependency to libgstreamer-plugins-base1.0-dev.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 05 Mar 2016 19:51:23 +0000
+
 wine-development (1.9.5-1) unstable; urgency=medium
 
   [ Michael Gilbert ]
