@@ -3,7 +3,7 @@ wine (1.8.1-3) UNRELEASED; urgency=medium
   * Cherrypick changes from master:
     - Use minimal wineapploader script, instead of patching the upstream one.
     - Install executables to bindir usr/lib/wine-development.
-      Make wine32-tools and wine64-tools conflict with eachother.
+      Make wine32-tools and wine64-tools conflict with each other.
     - Install 32-bit winecpp.
     - Update lintian overrides.
     - Add Jens Reyer to uploaders.
@@ -11,8 +11,16 @@ wine (1.8.1-3) UNRELEASED; urgency=medium
     - Suggest winetricks and playonlinux.
     - Update copyright.
     - Explicitly specify which manpages to install.
+    - Install manpages for all installed executables.
+    - Add patch to fix macro not defined errors from man.
+    - Install winegcc script again to specify WINEBUILD.
+    - Add symlinks in /usr/bin for installed tools in wine32|64-tools.
+    - Add symlink in /usr/bin for winepath in wine.
+    - Break older wine32|64 which don't have a reverse version requirement.
+    - Re-enable "err" level output by default (closes: #816014).
+    - Drop version output (closes: #816017).
 
- -- Jens Reyer <jre.winesim@gmail.com>  Sun, 28 Feb 2016 16:42:11 +0100
+ -- Jens Reyer <jre.winesim@gmail.com>  Sun, 13 Mar 2016 02:40:12 +0100
 
 wine (1.8.1-2) unstable; urgency=medium
 
