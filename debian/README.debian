@@ -22,16 +22,18 @@ https://anonscm.debian.org/git/pkg-wine/wine.git
 
 Debugging
 =========
-Debugging information is no longer output by default.  If you are interested
-in more verbose debugging output, you can set the WINEDEBUG environment
-variable.
+Debugging information is limited to only error messages by default.  If you
+want other types of debugging output as well, you can set the WINEDEBUG
+environment variable.
 
 Examples:
-$ WINEDEBUG=err+all wine
-$ WINEDEBUG=err+all wine-development
+$ WINEDEBUG=fixme+all wine
+$ WINEDEBUG=fixme+all wine-development
 
-If you always want verbose information, you can include an
-"export WINEDEBUG=err+all" line in your ~/.bashrc file.
+If you want this to be more permanent, you can include an
+"export WINEDEBUG=fixme+all" line in your ~/.bashrc file.
+
+For more detail about WINEDEBUG options, please see the wine manpage.
 
 Old Versions
 ============
