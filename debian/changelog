@@ -1,3 +1,13 @@
+wine-development (1.9.5-4) UNRELEASED; urgency=medium
+
+  [ Jens Reyer ]
+  * Add winepath symlink and manpage in wine.
+  * Break older wine32|64 which don't have a reverse version requirement.
+  * Fix wmc and wrc symlinks.
+  * Add freetype.patch to fix font search path.
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Tue, 15 Mar 2016 16:51:04 +0100
+
 wine-development (1.9.5-3) unstable; urgency=medium
 
   * Re-upload with the previous change actually applied.
