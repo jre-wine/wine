@@ -2638,6 +2638,7 @@ WINE_CONFIG_DLL(api-ms-win-core-fibers-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-fibers-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-file-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-file-l1-2-0)
+WINE_CONFIG_DLL(api-ms-win-core-file-l1-2-1)
 WINE_CONFIG_DLL(api-ms-win-core-file-l2-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-file-l2-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-handle-l1-1-0)
@@ -2659,6 +2660,7 @@ WINE_CONFIG_DLL(api-ms-win-core-localization-obsolete-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-localregistry-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-memory-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-memory-l1-1-1)
+WINE_CONFIG_DLL(api-ms-win-core-memory-l1-1-2)
 WINE_CONFIG_DLL(api-ms-win-core-misc-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-namedpipe-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-namedpipe-l1-2-0)
@@ -2675,6 +2677,7 @@ WINE_CONFIG_DLL(api-ms-win-core-rtlsupport-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-rtlsupport-l1-2-0)
 WINE_CONFIG_DLL(api-ms-win-core-shlwapi-legacy-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-string-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-core-string-l2-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-synch-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-synch-l1-2-0)
 WINE_CONFIG_DLL(api-ms-win-core-sysinfo-l1-1-0)
@@ -2685,6 +2688,7 @@ WINE_CONFIG_DLL(api-ms-win-core-threadpool-legacy-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-timezone-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-url-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-util-l1-1-0)
+WINE_CONFIG_DLL(api-ms-win-core-version-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-winrt-error-l1-1-0)
 WINE_CONFIG_DLL(api-ms-win-core-winrt-error-l1-1-1)
 WINE_CONFIG_DLL(api-ms-win-core-winrt-l1-1-0)
@@ -3367,6 +3371,7 @@ WINE_CONFIG_TEST(dlls/wintrust/tests)
 WINE_CONFIG_DLL(wlanapi)
 WINE_CONFIG_DLL(wldap32,,[clean,implib])
 WINE_CONFIG_TEST(dlls/wldap32/tests)
+WINE_CONFIG_DLL(wmasf)
 WINE_CONFIG_DLL(wmi)
 WINE_CONFIG_DLL(wmiutils,,[clean])
 WINE_CONFIG_TEST(dlls/wmiutils/tests)
@@ -3596,15 +3601,15 @@ fi
 if test -n "$with_wine64"
 then
     WINE_APPEND_RULE(
-[all: fonts server tools $with_wine64/loader/wine $with_wine64/loader/wine-preloader
-fonts server tools:
+[all: fonts server $with_wine64/loader/wine $with_wine64/loader/wine-preloader
+fonts server:
 	\$(RM) \$[@] && \$(LN_S) $with_wine64/\$[@] \$[@]
 $with_wine64/loader/wine:
 	\$(RM) \$[@] && \$(LN_S) $ac_pwd/loader/wine \$[@]
 $with_wine64/loader/wine-preloader:
 	\$(RM) \$[@] && \$(LN_S) $ac_pwd/loader/wine-preloader \$[@]
 clean::
-	\$(RM) fonts server tools $with_wine64/loader/wine $with_wine64/loader/wine-preloader])
+	\$(RM) fonts server $with_wine64/loader/wine $with_wine64/loader/wine-preloader])
 else
     AC_SUBST(WINELOADER_INSTALL,"wine.inf")
     WINE_APPEND_RULE(

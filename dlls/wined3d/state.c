@@ -260,11 +260,11 @@ static void state_zfunc(struct wined3d_context *context, const struct wined3d_st
 static void state_ambient(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    float col[4];
+    struct wined3d_color color;
 
-    D3DCOLORTOGLFLOAT4(state->render_states[WINED3D_RS_AMBIENT], col);
-    TRACE("Setting ambient to (%f,%f,%f,%f)\n", col[0], col[1], col[2], col[3]);
-    gl_info->gl_ops.gl.p_glLightModelfv(GL_LIGHT_MODEL_AMBIENT, col);
+    wined3d_color_from_d3dcolor(&color, state->render_states[WINED3D_RS_AMBIENT]);
+    TRACE("Setting ambient to %s.\n", debug_color(&color));
+    gl_info->gl_ops.gl.p_glLightModelfv(GL_LIGHT_MODEL_AMBIENT, &color.r);
     checkGLcall("glLightModel for MODEL_AMBIENT");
 }
 
@@ -497,12 +497,12 @@ static void state_blendfactor_w(struct wined3d_context *context, const struct wi
 static void state_blendfactor(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    float col[4];
+    struct wined3d_color color;
 
     TRACE("Setting blend factor to %#x.\n", state->render_states[WINED3D_RS_BLENDFACTOR]);
 
-    D3DCOLORTOGLFLOAT4(state->render_states[WINED3D_RS_BLENDFACTOR], col);
-    GL_EXTCALL(glBlendColor(col[0], col[1], col[2], col[3]));
+    wined3d_color_from_d3dcolor(&color, state->render_states[WINED3D_RS_BLENDFACTOR]);
+    GL_EXTCALL(glBlendColor(color.r, color.g, color.b, color.a));
     checkGLcall("glBlendColor");
 }
 
@@ -712,18 +712,10 @@ static void state_specularenable(struct wined3d_context *context, const struct w
         }
     }
 
-    TRACE("diffuse {%.8e, %.8e, %.8e, %.8e}\n",
-            state->material.diffuse.r, state->material.diffuse.g,
-            state->material.diffuse.b, state->material.diffuse.a);
-    TRACE("ambient {%.8e, %.8e, %.8e, %.8e}\n",
-            state->material.ambient.r, state->material.ambient.g,
-            state->material.ambient.b, state->material.ambient.a);
-    TRACE("specular {%.8e, %.8e, %.8e, %.8e}\n",
-            state->material.specular.r, state->material.specular.g,
-            state->material.specular.b, state->material.specular.a);
-    TRACE("emissive {%.8e, %.8e, %.8e, %.8e}\n",
-            state->material.emissive.r, state->material.emissive.g,
-            state->material.emissive.b, state->material.emissive.a);
+    TRACE("diffuse %s\n", debug_color(&state->material.diffuse));
+    TRACE("ambient %s\n", debug_color(&state->material.ambient));
+    TRACE("specular %s\n", debug_color(&state->material.specular));
+    TRACE("emissive %s\n", debug_color(&state->material.emissive));
 
     gl_info->gl_ops.gl.p_glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, (float *)&state->material.ambient);
     checkGLcall("glMaterialfv(GL_AMBIENT)");
@@ -736,12 +728,12 @@ static void state_specularenable(struct wined3d_context *context, const struct w
 static void state_texfactor(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
+    struct wined3d_color color;
     unsigned int i;
 
     /* Note the texture color applies to all textures whereas
      * GL_TEXTURE_ENV_COLOR applies to active only. */
-    float col[4];
-    D3DCOLORTOGLFLOAT4(state->render_states[WINED3D_RS_TEXTUREFACTOR], col);
+    wined3d_color_from_d3dcolor(&color, state->render_states[WINED3D_RS_TEXTUREFACTOR]);
 
     /* And now the default texture color as well */
     for (i = 0; i < context->d3d_info->limits.ffp_blend_stages; ++i)
@@ -750,7 +742,7 @@ static void state_texfactor(struct wined3d_context *context, const struct wined3
          * per texture, so apply it now ready to be used! */
         context_active_texture(context, gl_info, i);
 
-        gl_info->gl_ops.gl.p_glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, &col[0]);
+        gl_info->gl_ops.gl.p_glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, &color.r);
         checkGLcall("glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, color);");
     }
 }
@@ -1179,10 +1171,10 @@ void state_fog_fragpart(struct wined3d_context *context, const struct wined3d_st
 void state_fogcolor(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
-    float col[4];
+    struct wined3d_color color;
 
-    D3DCOLORTOGLFLOAT4(state->render_states[WINED3D_RS_FOGCOLOR], col);
-    gl_info->gl_ops.gl.p_glFogfv(GL_FOG_COLOR, col);
+    wined3d_color_from_d3dcolor(&color, state->render_states[WINED3D_RS_FOGCOLOR]);
+    gl_info->gl_ops.gl.p_glFogfv(GL_FOG_COLOR, &color.r);
     checkGLcall("glFog GL_FOG_COLOR");
 }
 
@@ -1571,7 +1563,9 @@ void state_pointsprite(struct wined3d_context *context, const struct wined3d_sta
 
 static void state_wrap(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    if (state->render_states[WINED3D_RS_WRAP0]
+    static unsigned int once;
+
+    if ((state->render_states[WINED3D_RS_WRAP0]
             || state->render_states[WINED3D_RS_WRAP1]
             || state->render_states[WINED3D_RS_WRAP2]
             || state->render_states[WINED3D_RS_WRAP3]
@@ -1587,6 +1581,7 @@ static void state_wrap(struct wined3d_context *context, const struct wined3d_sta
             || state->render_states[WINED3D_RS_WRAP13]
             || state->render_states[WINED3D_RS_WRAP14]
             || state->render_states[WINED3D_RS_WRAP15])
+            && !once++)
         FIXME("(WINED3D_RS_WRAP0) Texture wrapping not yet supported.\n");
 }
 
@@ -3488,7 +3483,8 @@ static void wined3d_sampler_desc_from_sampler_states(struct wined3d_sampler_desc
     desc->address_u = wined3d_texture_address_mode(texture, sampler_states[WINED3D_SAMP_ADDRESS_U]);
     desc->address_v = wined3d_texture_address_mode(texture, sampler_states[WINED3D_SAMP_ADDRESS_V]);
     desc->address_w = wined3d_texture_address_mode(texture, sampler_states[WINED3D_SAMP_ADDRESS_W]);
-    D3DCOLORTOGLFLOAT4(sampler_states[WINED3D_SAMP_BORDER_COLOR], desc->border_color);
+    wined3d_color_from_d3dcolor((struct wined3d_color *)desc->border_color,
+            sampler_states[WINED3D_SAMP_BORDER_COLOR]);
     if (sampler_states[WINED3D_SAMP_MAG_FILTER] > WINED3D_TEXF_ANISOTROPIC)
         FIXME("Unrecognized or unsupported WINED3D_SAMP_MAG_FILTER %#x.\n",
                 sampler_states[WINED3D_SAMP_MAG_FILTER]);

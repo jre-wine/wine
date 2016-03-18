@@ -63,6 +63,7 @@ typedef LONG NTSTATUS;
 #define MS_PLATFORM_CRYPTO_PROVIDER (const WCHAR [])\
     {'M','i','c','r','o','s','o','f','t',' ','P','l','a','t','f','o','r','m',' ','C','r','y','p','t','o',' ','P','r','o','v','i','d','e','r',0}
 
+#define BCRYPT_MD5_ALGORITHM        (const WCHAR []){'M','D','5',0}
 #define BCRYPT_SHA1_ALGORITHM       (const WCHAR []){'S','H','A','1',0}
 #define BCRYPT_SHA256_ALGORITHM     (const WCHAR []){'S','H','A','2','5','6',0}
 #define BCRYPT_SHA384_ALGORITHM     (const WCHAR []){'S','H','A','3','8','4',0}
@@ -81,6 +82,7 @@ typedef PVOID BCRYPT_HASH_HANDLE;
 
 #define BCRYPT_RNG_USE_ENTROPY_IN_BUFFER 0x00000001
 #define BCRYPT_USE_SYSTEM_PREFERRED_RNG  0x00000002
+#define BCRYPT_ALG_HANDLE_HMAC_FLAG 0x00000008
 
 NTSTATUS WINAPI BCryptCloseAlgorithmProvider(BCRYPT_ALG_HANDLE, ULONG);
 NTSTATUS WINAPI BCryptCreateHash(BCRYPT_ALG_HANDLE, BCRYPT_HASH_HANDLE *, PUCHAR, ULONG, PUCHAR, ULONG, ULONG);

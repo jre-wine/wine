@@ -26,7 +26,7 @@
 
 #include "windows.h"
 #include "winternl.h"
-#include "dwrite_2.h"
+#include "dwrite_3.h"
 #include "initguid.h"
 #include "d2d1.h"
 
@@ -1055,6 +1055,7 @@ static void test_GetFontFamily(void)
     IDWriteFontCollection *collection, *collection2;
     IDWriteFontCollection *syscoll;
     IDWriteFontFamily *family, *family2;
+    IDWriteFontFamily1 *family1;
     IDWriteGdiInterop *interop;
     IDWriteFont *font, *font2;
     IDWriteFactory *factory;
@@ -1117,13 +1118,49 @@ if (0) /* crashes on native */
     ok(collection == collection2, "got %p, %p\n", collection, collection2);
     ok(collection == syscoll, "got %p, %p\n", collection, syscoll);
 
+    IDWriteFont_Release(font);
+    IDWriteFont_Release(font2);
+
+    hr = IDWriteFontFamily_QueryInterface(family, &IID_IDWriteFontFamily1, (void**)&family1);
+    if (hr == S_OK) {
+        IDWriteFontList *fontlist;
+        IDWriteFont3 *font3;
+        IDWriteFont1 *font1;
+
+        font3 = (void*)0xdeadbeef;
+        hr = IDWriteFontFamily1_GetFont(family1, ~0u, &font3);
+        ok(hr == E_FAIL, "got 0x%08x\n", hr);
+        ok(font3 == NULL, "got %p\n", font3);
+
+        hr = IDWriteFontFamily1_GetFont(family1, 0, &font3);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        hr = IDWriteFont3_QueryInterface(font3, &IID_IDWriteFont, (void**)&font);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        IDWriteFont_Release(font);
+
+        hr = IDWriteFont3_QueryInterface(font3, &IID_IDWriteFont1, (void**)&font1);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        IDWriteFont1_Release(font1);
+
+        hr = IDWriteFontFamily1_QueryInterface(family1, &IID_IDWriteFontList1, (void**)&fontlist);
+        ok(hr == E_NOINTERFACE, "got 0x%08x\n", hr);
+
+        hr = IDWriteFontFamily1_QueryInterface(family1, &IID_IDWriteFontList, (void**)&fontlist);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        IDWriteFontList_Release(fontlist);
+
+        IDWriteFont3_Release(font3);
+        IDWriteFontFamily1_Release(family1);
+    }
+    else
+        win_skip("IDWriteFontFamily1 is not supported.\n");
+
     IDWriteFontCollection_Release(syscoll);
     IDWriteFontCollection_Release(collection2);
     IDWriteFontCollection_Release(collection);
     IDWriteFontFamily_Release(family2);
     IDWriteFontFamily_Release(family);
-    IDWriteFont_Release(font);
-    IDWriteFont_Release(font2);
     IDWriteGdiInterop_Release(interop);
     IDWriteFactory_Release(factory);
 }
@@ -1577,6 +1614,7 @@ static void test_system_fontcollection(void)
 {
     IDWriteFontCollection *collection, *coll2;
     IDWriteLocalFontFileLoader *localloader;
+    IDWriteFontCollection1 *collection1;
     IDWriteFactory *factory, *factory2;
     IDWriteFontFileLoader *loader;
     IDWriteFontFamily *family;
@@ -1692,6 +1730,31 @@ static void test_system_fontcollection(void)
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(!ret, "got %d\n", ret);
     ok(i == (UINT32)-1, "got %u\n", i);
+
+    hr = IDWriteFontCollection_QueryInterface(collection, &IID_IDWriteFontCollection1, (void**)&collection1);
+    if (hr == S_OK) {
+        IDWriteFontFamily1 *family1;
+
+        hr = IDWriteFontCollection1_QueryInterface(collection1, &IID_IDWriteFontCollection, (void**)&coll2);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(coll2 == collection, "got %p, %p\n", collection, coll2);
+        IDWriteFontCollection_Release(coll2);
+
+        family1 = (void*)0xdeadbeef;
+        hr = IDWriteFontCollection1_GetFontFamily(collection1, ~0u, &family1);
+    todo_wine {
+        ok(hr == E_FAIL, "got 0x%08x\n", hr);
+        ok(family1 == NULL, "got %p\n", family1);
+    }
+        hr = IDWriteFontCollection1_GetFontFamily(collection1, 0, &family1);
+    todo_wine
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+    if (hr == S_OK)
+        IDWriteFontFamily1_Release(family1);
+        IDWriteFontCollection1_Release(collection1);
+    }
+    else
+        win_skip("IDWriteFontCollection1 is not supported.\n");
 
     IDWriteFontCollection_Release(collection);
     IDWriteFactory_Release(factory);
@@ -2415,27 +2478,91 @@ static void test_GetFontFromFontFace(void)
     DELETE_FONTFILE(path);
 }
 
-
-
 static void test_GetFirstMatchingFont(void)
 {
     DWRITE_FONT_SIMULATIONS simulations;
+    IDWriteFontCollection *collection;
+    IDWriteFontFamily *family;
     IDWriteFont *font, *font2;
     IDWriteFactory *factory;
+    HRESULT hr;
 
     factory = create_factory();
 
-    font = get_tahoma_instance(factory, DWRITE_FONT_STYLE_NORMAL);
-    font2 = get_tahoma_instance(factory, DWRITE_FONT_STYLE_NORMAL);
+    hr = IDWriteFactory_GetSystemFontCollection(factory, &collection, FALSE);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFontCollection_GetFontFamily(collection, 0, &family);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFontFamily_GetFirstMatchingFont(family, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &font);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFontFamily_GetFirstMatchingFont(family, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &font2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(font != font2, "got %p, %p\n", font, font2);
     IDWriteFont_Release(font);
     IDWriteFont_Release(font2);
+
+    IDWriteFontFamily_Release(family);
 
     font = get_tahoma_instance(factory, DWRITE_FONT_STYLE_ITALIC);
     simulations = IDWriteFont_GetSimulations(font);
     ok(simulations == DWRITE_FONT_SIMULATIONS_OBLIQUE, "%d\n", simulations);
     IDWriteFont_Release(font);
 
+    IDWriteFontCollection_Release(collection);
+    IDWriteFactory_Release(factory);
+}
+
+static void test_GetMatchingFonts(void)
+{
+    IDWriteFontCollection *collection;
+    IDWriteFontFamily *family;
+    IDWriteFactory *factory;
+    IDWriteFontList *fontlist, *fontlist2;
+    IDWriteFontList1 *fontlist1;
+    HRESULT hr;
+
+    factory = create_factory();
+
+    hr = IDWriteFactory_GetSystemFontCollection(factory, &collection, FALSE);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFontCollection_GetFontFamily(collection, 0, &family);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFontFamily_GetMatchingFonts(family, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &fontlist);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IDWriteFontFamily_GetMatchingFonts(family, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &fontlist2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(fontlist != fontlist2, "got %p, %p\n", fontlist, fontlist2);
+    IDWriteFontList_Release(fontlist2);
+
+    hr = IDWriteFontList_QueryInterface(fontlist, &IID_IDWriteFontList1, (void**)&fontlist1);
+    if (hr == S_OK) {
+        IDWriteFont3 *font;
+
+        font = (void*)0xdeadbeef;
+        hr = IDWriteFontList1_GetFont(fontlist1, ~0u, &font);
+    todo_wine {
+        ok(hr == E_FAIL, "got 0x%08x\n", hr);
+        ok(font == NULL, "got %p\n", font);
+    }
+        IDWriteFontList1_Release(fontlist1);
+    }
+    else
+        win_skip("IDWriteFontList1 is not supported.\n");
+
+    IDWriteFontList_Release(fontlist);
+    IDWriteFontFamily_Release(family);
+
+    IDWriteFontCollection_Release(collection);
     IDWriteFactory_Release(factory);
 }
 
@@ -5268,6 +5395,39 @@ static void test_TranslateColorGlyphRun(void)
     IDWriteFactory2_Release(factory2);
 }
 
+static void test_HasCharacter(void)
+{
+    IDWriteFactory3 *factory3;
+    IDWriteFactory *factory;
+    IDWriteFont3 *font3;
+    IDWriteFont *font;
+    HRESULT hr;
+    BOOL ret;
+
+    factory = create_factory();
+
+    font = get_tahoma_instance(factory, DWRITE_FONT_STYLE_NORMAL);
+    ok(font != NULL, "failed to create font\n");
+
+    /* Win8 is broken, QI claims to support IDWriteFont3, but in fact it does not */
+    hr = IDWriteFactory_QueryInterface(factory, &IID_IDWriteFactory3, (void**)&factory3);
+    if (hr == S_OK) {
+        hr = IDWriteFont_QueryInterface(font, &IID_IDWriteFont3, (void**)&font3);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+
+        ret = IDWriteFont3_HasCharacter(font3, 'A');
+        ok(ret, "got %d\n", ret);
+
+        IDWriteFont3_Release(font3);
+        IDWriteFactory3_Release(factory3);
+    }
+    else
+        skip("IDWriteFont3 is not supported.\n");
+
+    IDWriteFont_Release(font);
+    IDWriteFactory_Release(factory);
+}
+
 START_TEST(font)
 {
     IDWriteFactory *factory;
@@ -5292,6 +5452,7 @@ START_TEST(font)
     test_GetUnicodeRanges();
     test_GetFontFromFontFace();
     test_GetFirstMatchingFont();
+    test_GetMatchingFonts();
     test_GetInformationalStrings();
     test_GetGdiInterop();
     test_CreateFontFaceFromHdc();
@@ -5320,6 +5481,7 @@ START_TEST(font)
     test_IsSymbolFont();
     test_GetPaletteEntries();
     test_TranslateColorGlyphRun();
+    test_HasCharacter();
 
     IDWriteFactory_Release(factory);
 }
