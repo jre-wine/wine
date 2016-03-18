@@ -472,7 +472,7 @@ static struct fbo_entry *context_find_fbo_entry(struct wined3d_context *context,
     UINT object_count = gl_info->limits.buffers + 1;
     unsigned int i;
 
-    if (depth_stencil && render_targets && render_targets[0])
+    if (depth_stencil && render_targets[0])
     {
         if (depth_stencil->resource.width < render_targets[0]->resource.width ||
             depth_stencil->resource.height < render_targets[0]->resource.height)
@@ -2606,10 +2606,9 @@ BOOL context_apply_clear_state(struct wined3d_context *context, const struct win
      * performance incredibly. */
     gl_info->gl_ops.gl.p_glDisable(GL_BLEND);
     gl_info->gl_ops.gl.p_glEnable(GL_SCISSOR_TEST);
-    if (gl_info->supported[ARB_FRAMEBUFFER_SRGB])
+    if (rt_count && gl_info->supported[ARB_FRAMEBUFFER_SRGB])
     {
-        if (!(context->d3d_info->wined3d_creation_flags & WINED3D_SRGB_READ_WRITE_CONTROL)
-                || device->state.render_states[WINED3D_RS_SRGBWRITEENABLE])
+        if (needs_srgb_write(context, &device->state, fb))
             gl_info->gl_ops.gl.p_glEnable(GL_FRAMEBUFFER_SRGB);
         else
             gl_info->gl_ops.gl.p_glDisable(GL_FRAMEBUFFER_SRGB);
@@ -3426,8 +3425,8 @@ static void context_setup_target(struct wined3d_context *context, struct wined3d
     }
     else
     {
-        const struct wined3d_format *old = context->current_rt->resource.format;
-        const struct wined3d_format *new = target->resource.format;
+        const struct wined3d_format *old = context->current_rt->container->resource.format;
+        const struct wined3d_format *new = target->container->resource.format;
 
         if (old->id != new->id)
         {

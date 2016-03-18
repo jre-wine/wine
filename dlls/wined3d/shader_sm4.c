@@ -26,6 +26,14 @@ WINE_DECLARE_DEBUG_CHANNEL(d3d_bytecode);
 
 #define WINED3D_SM4_INSTRUCTION_MODIFIER        (0x1u << 31)
 
+#define WINED3D_SM4_MODIFIER_AOFFIMMI           0x1
+#define WINED3D_SM4_AOFFIMMI_U_SHIFT            9
+#define WINED3D_SM4_AOFFIMMI_U_MASK             (0xfu << WINED3D_SM4_AOFFIMMI_U_SHIFT)
+#define WINED3D_SM4_AOFFIMMI_V_SHIFT            13
+#define WINED3D_SM4_AOFFIMMI_V_MASK             (0xfu << WINED3D_SM4_AOFFIMMI_V_SHIFT)
+#define WINED3D_SM4_AOFFIMMI_W_SHIFT            17
+#define WINED3D_SM4_AOFFIMMI_W_MASK             (0xfu << WINED3D_SM4_AOFFIMMI_W_SHIFT)
+
 #define WINED3D_SM4_INSTRUCTION_LENGTH_SHIFT    24
 #define WINED3D_SM4_INSTRUCTION_LENGTH_MASK     (0x1fu << WINED3D_SM4_INSTRUCTION_LENGTH_SHIFT)
 
@@ -175,6 +183,11 @@ enum wined3d_sm4_opcode
     WINED3D_SM4_OP_DCL_OUTPUT_SIV       = 0x67,
     WINED3D_SM4_OP_DCL_TEMPS            = 0x68,
     WINED3D_SM4_OP_DCL_GLOBAL_FLAGS     = 0x6a,
+    WINED3D_SM5_OP_DERIV_RTX_COARSE     = 0x7a,
+    WINED3D_SM5_OP_DERIV_RTX_FINE       = 0x7b,
+    WINED3D_SM5_OP_DERIV_RTY_COARSE     = 0x7c,
+    WINED3D_SM5_OP_DERIV_RTY_FINE       = 0x7d,
+    WINED3D_SM5_OP_LD_STRUCTURED        = 0xa7,
 };
 
 enum wined3d_sm4_register_type
@@ -376,6 +389,11 @@ static const struct wined3d_sm4_opcode_info opcode_table[] =
     {WINED3D_SM4_OP_DCL_OUTPUT_SIV,         WINED3DSIH_DCL_OUTPUT_SIV,                "",     ""},
     {WINED3D_SM4_OP_DCL_TEMPS,              WINED3DSIH_DCL_TEMPS,                     "",     ""},
     {WINED3D_SM4_OP_DCL_GLOBAL_FLAGS,       WINED3DSIH_DCL_GLOBAL_FLAGS,              "",     ""},
+    {WINED3D_SM5_OP_DERIV_RTX_COARSE,       WINED3DSIH_DSX_COARSE,                    "F",    "F"},
+    {WINED3D_SM5_OP_DERIV_RTX_FINE,         WINED3DSIH_DSX_FINE,                      "F",    "F"},
+    {WINED3D_SM5_OP_DERIV_RTY_COARSE,       WINED3DSIH_DSY_COARSE,                    "F",    "F"},
+    {WINED3D_SM5_OP_DERIV_RTY_FINE,         WINED3DSIH_DSY_FINE,                      "F",    "F"},
+    {WINED3D_SM5_OP_LD_STRUCTURED,          WINED3DSIH_LD_STRUCTURED,                 "U",    "UUR"},
 };
 
 static const enum wined3d_shader_register_type register_type_table[] =
@@ -853,14 +871,40 @@ static void shader_sm4_read_instruction(void *data, const DWORD **ptr, struct wi
     ins->dst = priv->dst_param;
     ins->src_count = strlen(opcode_info->src_info);
     ins->src = priv->src_param;
+    memset(&ins->texel_offset, 0, sizeof(ins->texel_offset));
 
     p = *ptr;
     *ptr += len;
 
     if (opcode_token & WINED3D_SM4_INSTRUCTION_MODIFIER)
     {
+        static const DWORD recognized_bits = WINED3D_SM4_MODIFIER_AOFFIMMI
+                | WINED3D_SM4_AOFFIMMI_U_MASK
+                | WINED3D_SM4_AOFFIMMI_V_MASK
+                | WINED3D_SM4_AOFFIMMI_W_MASK;
         DWORD modifier = *p++;
-        FIXME("Skipping modifier 0x%08x.\n", modifier);
+        /* Bit fields are used for sign extension */
+        struct
+        {
+            int u : 4;
+            int v : 4;
+            int w : 4;
+        }
+        aoffimmi;
+
+        if (modifier & ~recognized_bits)
+        {
+            FIXME("Skipping modifier 0x%08x.\n", modifier);
+        }
+        else
+        {
+            aoffimmi.u = (modifier & WINED3D_SM4_AOFFIMMI_U_MASK) >> WINED3D_SM4_AOFFIMMI_U_SHIFT;
+            aoffimmi.v = (modifier & WINED3D_SM4_AOFFIMMI_V_MASK) >> WINED3D_SM4_AOFFIMMI_V_SHIFT;
+            aoffimmi.w = (modifier & WINED3D_SM4_AOFFIMMI_W_MASK) >> WINED3D_SM4_AOFFIMMI_W_SHIFT;
+            ins->texel_offset.u = aoffimmi.u;
+            ins->texel_offset.v = aoffimmi.v;
+            ins->texel_offset.w = aoffimmi.w;
+        }
     }
 
     if (opcode == WINED3D_SM4_OP_SHADER_DATA)

@@ -291,18 +291,13 @@ static void drawStridedSlow(const struct wined3d_device *device, struct wined3d_
 
             if (num_untracked_materials)
             {
-                DWORD diffuseColor = ((const DWORD *)ptrToCoords)[0];
+                struct wined3d_color color;
                 unsigned char i;
-                float color[4];
 
-                color[0] = D3DCOLOR_B_R(diffuseColor) / 255.0f;
-                color[1] = D3DCOLOR_B_G(diffuseColor) / 255.0f;
-                color[2] = D3DCOLOR_B_B(diffuseColor) / 255.0f;
-                color[3] = D3DCOLOR_B_A(diffuseColor) / 255.0f;
-
+                wined3d_color_from_d3dcolor(&color, *(const DWORD *)ptrToCoords);
                 for (i = 0; i < num_untracked_materials; ++i)
                 {
-                    gl_info->gl_ops.gl.p_glMaterialfv(GL_FRONT_AND_BACK, context->untracked_materials[i], color);
+                    gl_info->gl_ops.gl.p_glMaterialfv(GL_FRONT_AND_BACK, context->untracked_materials[i], &color.r);
                 }
             }
         }
@@ -622,17 +617,19 @@ void draw_primitive(struct wined3d_device *device, UINT start_idx, UINT index_co
 
     for (i = 0; i < device->adapter->gl_info.limits.buffers; ++i)
     {
-        struct wined3d_surface *target = wined3d_rendertarget_view_get_surface(device->fb.render_targets[i]);
-        if (target && target->resource.format->id != WINED3DFMT_NULL)
+        struct wined3d_rendertarget_view *rtv = device->fb.render_targets[i];
+        struct wined3d_surface *target = wined3d_rendertarget_view_get_surface(rtv);
+
+        if (target && rtv->format->id != WINED3DFMT_NULL)
         {
             if (state->render_states[WINED3D_RS_COLORWRITEENABLE])
             {
-                surface_load_location(target, context, target->container->resource.draw_binding);
-                surface_invalidate_location(target, ~target->container->resource.draw_binding);
+                surface_load_location(target, context, rtv->resource->draw_binding);
+                surface_invalidate_location(target, ~rtv->resource->draw_binding);
             }
             else
             {
-                wined3d_surface_prepare(target, context, target->container->resource.draw_binding);
+                wined3d_surface_prepare(target, context, rtv->resource->draw_binding);
             }
         }
     }
@@ -664,7 +661,7 @@ void draw_primitive(struct wined3d_device *device, UINT start_idx, UINT index_co
 
             IntersectRect(&r, &draw_rect, &current_rect);
             if (!EqualRect(&r, &draw_rect))
-                surface_load_ds_location(ds, context, location);
+                surface_load_location(ds, context, location);
             else
                 wined3d_surface_prepare(ds, context, location);
         }

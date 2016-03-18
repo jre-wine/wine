@@ -19,13 +19,8 @@
 
 #include "config.h"
 #include "wine/port.h"
-#define NONAMELESSUNION
-#include "wine/debug.h"
-#include "wine/unicode.h"
 
-#include "windef.h"
-#include "wingdi.h"
-#include "d3dx9_36_private.h"
+#include "d3dx9_private.h"
 #include "d3dcompiler.h"
 
 /* Constants for special INT/FLOAT conversation */
@@ -539,9 +534,6 @@ static void free_parameter(struct d3dx_parameter *param, BOOL element, BOOL chil
 
     TRACE("Free parameter %p, name %s, type %s, child %s\n", param, param->name,
             debug_d3dxparameter_type(param->type), child ? "yes" : "no");
-
-    if (!param)
-        return;
 
     if (param->annotations)
     {
@@ -1366,6 +1358,26 @@ static HRESULT d3dx9_base_effect_set_value(struct d3dx9_base_effect *base,
     {
         switch (param->type)
         {
+            case D3DXPT_TEXTURE:
+            case D3DXPT_TEXTURE1D:
+            case D3DXPT_TEXTURE2D:
+            case D3DXPT_TEXTURE3D:
+            case D3DXPT_TEXTURECUBE:
+            {
+                unsigned int i;
+
+                for (i = 0; i < (param->element_count ? param->element_count : 1); ++i)
+                {
+                    IUnknown *unk = ((IUnknown **)data)[i];
+                    if (unk)
+                        IUnknown_AddRef(unk);
+
+                    unk = ((IUnknown **)param->data)[i];
+                    if (unk)
+                        IUnknown_Release(unk);
+                }
+            }
+            /* fallthrough */
             case D3DXPT_VOID:
             case D3DXPT_BOOL:
             case D3DXPT_INT:
@@ -3482,11 +3494,13 @@ static HRESULT WINAPI ID3DXEffectImpl_FindNextValidTechnique(ID3DXEffect* iface,
 
 static BOOL WINAPI ID3DXEffectImpl_IsParameterUsed(ID3DXEffect* iface, D3DXHANDLE parameter, D3DXHANDLE technique)
 {
-    struct ID3DXEffectImpl *This = impl_from_ID3DXEffect(iface);
+    struct ID3DXEffectImpl *effect = impl_from_ID3DXEffect(iface);
+    struct d3dx_parameter *param = get_valid_parameter(&effect->base_effect, parameter);
 
-    FIXME("(%p)->(%p, %p): stub\n", This, parameter, technique);
+    FIXME("iface %p, parameter %p, technique %p stub.\n", iface, parameter, technique);
+    TRACE("param %p (%s).\n", param, param ? debugstr_a(param->name) : "");
 
-    return FALSE;
+    return TRUE;
 }
 
 static HRESULT WINAPI ID3DXEffectImpl_Begin(ID3DXEffect *iface, UINT *passes, DWORD flags)

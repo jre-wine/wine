@@ -80,7 +80,11 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_DP4                           */ "dp4",
     /* WINED3DSIH_DST                           */ "dst",
     /* WINED3DSIH_DSX                           */ "dsx",
+    /* WINED3DSIH_DSX_COARSE                    */ "deriv_rtx_coarse",
+    /* WINED3DSIH_DSX_FINE                      */ "deriv_rtx_fine",
     /* WINED3DSIH_DSY                           */ "dsy",
+    /* WINED3DSIH_DSY_COARSE                    */ "deriv_rty_coarse",
+    /* WINED3DSIH_DSY_FINE                      */ "deriv_rty_fine",
     /* WINED3DSIH_ELSE                          */ "else",
     /* WINED3DSIH_EMIT                          */ "emit",
     /* WINED3DSIH_ENDIF                         */ "endif",
@@ -109,6 +113,7 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_ITOF                          */ "itof",
     /* WINED3DSIH_LABEL                         */ "label",
     /* WINED3DSIH_LD                            */ "ld",
+    /* WINED3DSIH_LD_STRUCTURED                 */ "ld_structured",
     /* WINED3DSIH_LIT                           */ "lit",
     /* WINED3DSIH_LOG                           */ "log",
     /* WINED3DSIH_LOGP                          */ "logp",
@@ -2090,6 +2095,9 @@ static void shader_trace_init(const struct wined3d_shader_frontend *fe, void *fe
                     default: shader_addline(&buffer, "_unrecognized(%#x)", ins.flags);
                 }
             }
+
+            if (wined3d_shader_instruction_has_texel_offset(&ins))
+                shader_addline(&buffer, "(%d,%d,%d)", ins.texel_offset.u, ins.texel_offset.v, ins.texel_offset.w);
 
             for (i = 0; i < ins.dst_count; ++i)
             {

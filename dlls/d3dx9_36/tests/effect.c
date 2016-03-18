@@ -2389,6 +2389,43 @@ static void test_effect_parameter_value(IDirect3DDevice9 *device)
     }
 }
 
+static void test_effect_setvalue_object(IDirect3DDevice9 *device)
+{
+    ID3DXEffect *effect;
+    D3DXHANDLE parameter;
+    IDirect3DTexture9 *texture;
+    IDirect3DTexture9 *texture_set;
+    HRESULT hr;
+    ULONG count;
+
+    hr = D3DXCreateEffect(device, test_effect_parameter_value_blob_object,
+            sizeof(test_effect_parameter_value_blob_object), NULL, NULL, 0, NULL, &effect, NULL);
+    ok(hr == D3D_OK, "Got result %#x, expected 0 (D3D_OK).\n", hr);
+
+    parameter = effect->lpVtbl->GetParameterByName(effect, NULL, "tex");
+    ok(parameter != NULL, "GetParameterByName failed, got %p\n", parameter);
+
+    texture = NULL;
+    hr = D3DXCreateTexture(device, D3DX_DEFAULT, D3DX_DEFAULT, D3DX_DEFAULT, 0, 0, D3DPOOL_DEFAULT, &texture);
+    ok(hr == D3D_OK, "Got result %#x, expected 0 (D3D_OK).\n", hr);
+    hr = effect->lpVtbl->SetValue(effect, parameter, &texture, sizeof(texture));
+    ok(hr == D3D_OK, "Got result %#x, expected 0 (D3D_OK).\n", hr);
+    texture_set = NULL;
+    hr = effect->lpVtbl->GetValue(effect, parameter, &texture_set, sizeof(texture_set));
+    ok(hr == D3D_OK, "Got result %#x, expected 0 (D3D_OK).\n", hr);
+    ok(texture == texture_set, "Texture does not match.\n");
+
+    count = IDirect3DTexture9_Release(texture_set);
+    ok(count == 2, "Got reference count %u, expected 2.\n", count);
+    texture_set = NULL;
+    hr = effect->lpVtbl->SetValue(effect, parameter, &texture_set, sizeof(texture_set));
+    ok(hr == D3D_OK, "Got result %#x, expected 0 (D3D_OK).\n", hr);
+    count = IDirect3DTexture9_Release(texture);
+    ok(!count, "Got reference count %u, expected 0.\n", count);
+
+    effect->lpVtbl->Release(effect);
+}
+
 /*
  * fxc.exe /Tfx_2_0
  */
@@ -2867,7 +2904,7 @@ static void test_effect_states(IDirect3DDevice9 *device)
     hr = IDirect3DDevice9_GetLightEnable(device, 2, &bval);
     ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
     if (hr == D3D_OK)
-        ok(!bval, "Got result %u, expected 0.", bval);
+        ok(!bval, "Got result %u, expected 0.\n", bval);
 
     hr = IDirect3DDevice9_SetTransform(device, D3DTS_WORLDMATRIX(1), &test_mat);
     hr = effect->lpVtbl->Begin(effect, &npasses, 0);
@@ -2964,8 +3001,7 @@ static void test_effect_states(IDirect3DDevice9 *device)
     hr = IDirect3DDevice9_SetRenderState(device, D3DRS_BLENDOP, 3);
     ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
 
-    if (effect)
-        effect->lpVtbl->Release(effect);
+    effect->lpVtbl->Release(effect);
 
     hr = IDirect3DDevice9_GetRenderState(device, D3DRS_BLENDOP, &value);
     ok(hr == D3D_OK, "Got result %x, expected 0 (D3D_OK).\n", hr);
@@ -3008,6 +3044,7 @@ START_TEST(effect)
     test_create_effect_and_pool(device);
     test_create_effect_compiler();
     test_effect_parameter_value(device);
+    test_effect_setvalue_object(device);
     test_effect_variable_names(device);
     test_effect_compilation_errors(device);
     test_effect_states(device);
