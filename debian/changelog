@@ -1,11 +1,18 @@
-wine-development (1.9.5-4) UNRELEASED; urgency=medium
+wine-development (1.9.6-1) unstable; urgency=medium
+
+  [ Michael Gilbert ]
+  * New upstream release 1.9.6, released Mar 18, 2016.
+    - Better video card detection when using Mesa.
+    - Support for Shader Model 5 shaders.
+    - C++ exception handling improvements.
+    - Various bug fixes.
 
   [ Jens Reyer ]
   * Add winepath symlink and manpage in wine.
   * Break older wine32|64 which don't have a reverse version requirement.
   * Fix wmc and wrc symlinks.
 
- -- Jens Reyer <jre.winesim@gmail.com>  Tue, 15 Mar 2016 16:51:04 +0100
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 18 Mar 2016 22:09:24 +0000
 
 wine-development (1.9.5-3) unstable; urgency=medium
 
