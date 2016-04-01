@@ -1,3 +1,15 @@
+wine-development (1.9.7-1) unstable; urgency=medium
+
+  * New upstream release 1.9.7, released Apr 1, 2016.
+    - More work towards the WineD3D command stream.
+    - More support for Shader Model 5 shaders.
+    - C++ exception handling on x86-64.
+    - Support for Windows-style static import libraries.
+    - Performance fixes in the XML writer.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Fri, 01 Apr 2016 19:51:23 +0000
+
 wine-development (1.9.6-1) unstable; urgency=medium
 
   [ Michael Gilbert ]
