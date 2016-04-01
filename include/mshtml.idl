@@ -10724,6 +10724,24 @@ methods:
 }
 
 /*****************************************************************************
+ *    IHTMLHtmlElement interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3050f81c-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLHtmlElement : IDispatch
+{
+    [propput, id(DISPID_IHTMLHTMLELEMENT_VERSION), displaybind, bindable]
+    HRESULT version([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLHTMLELEMENT_VERSION), displaybind, bindable]
+    HRESULT version([out, retval] BSTR *p);
+}
+
+/*****************************************************************************
  *    IHTMLHeadElement interface
  */
 [
@@ -10853,6 +10871,26 @@ interface IHTMLMetaElement3 : IDispatch
 
     [propget, id(DISPID_IHTMLMETAELEMENT3_IE8_URL)]
     HRESULT url([out, retval] BSTR *p);
+}
+
+/*****************************************************************************
+ *    DispHTMLHtmlElement interface
+ */
+[
+    hidden,
+    uuid(3050f560-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispHTMLHtmlElement
+{
+properties:
+methods:
+    WINE_HTMLELEMENT_DISPINTERFACE_DECL;
+
+    [propput, id(DISPID_IHTMLHTMLELEMENT_VERSION), displaybind, bindable]
+    void version(BSTR v);
+
+    [propget, id(DISPID_IHTMLHTMLELEMENT_VERSION), displaybind, bindable]
+    BSTR version();
 }
 
 /*****************************************************************************
@@ -17800,6 +17838,56 @@ interface IHTMLObjectElement2 : IDispatch
 
     [propget, id(DISPID_IHTMLOBJECTELEMENT2_DATA), hidden]
     HRESULT data([out, retval] BSTR *p);
+}
+
+/*****************************************************************************
+ *    IHTMLDivElement interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(3050f200-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IHTMLDivElement : IDispatch
+{
+    [propput, id(DISPID_IHTMLDIVELEMENT_ALIGN), displaybind, bindable]
+    HRESULT align([in] BSTR v);
+
+    [propget, id(DISPID_IHTMLDIVELEMENT_ALIGN), displaybind, bindable]
+    HRESULT align([out, retval] BSTR *p);
+
+    [propput, id(DISPID_IHTMLDIVELEMENT_NOWRAP), displaybind, bindable]
+    HRESULT noWrap([in] VARIANT_BOOL v);
+
+    [propget, id(DISPID_IHTMLDIVELEMENT_NOWRAP), displaybind, bindable]
+    HRESULT noWrap([out, retval] VARIANT_BOOL *p);
+}
+
+/*****************************************************************************
+ *    DispHTMLDivElement dispinterface
+ */
+[
+    hidden,
+    uuid(3050f50c-98b5-11cf-bb82-00aa00bdce0b)
+]
+dispinterface DispHTMLDivElement
+{
+properties:
+methods:
+    WINE_HTMLELEMENT_DISPINTERFACE_DECL;
+
+    [propput, id(DISPID_IHTMLDIVELEMENT_ALIGN), displaybind, bindable]
+    void align(BSTR v);
+
+    [propget, id(DISPID_IHTMLDIVELEMENT_ALIGN), displaybind, bindable]
+    BSTR align();
+
+    [propput, id(DISPID_IHTMLDIVELEMENT_NOWRAP), displaybind, bindable]
+    void noWrap(VARIANT_BOOL v);
+
+    [propget, id(DISPID_IHTMLDIVELEMENT_NOWRAP), displaybind, bindable]
+    VARIANT_BOOL noWrap();
 }
 
 /*****************************************************************************

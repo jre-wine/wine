@@ -2312,6 +2312,11 @@ static void test_shared_isolated(void)
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWriteFactory, (IUnknown**)&shared2);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(shared == shared2, "got %p, and %p\n", shared, shared2);
+    IDWriteFactory_Release(shared2);
+
+    hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IUnknown, (IUnknown**)&shared2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(shared == shared2, "got %p, and %p\n", shared, shared2);
 
     IDWriteFactory_Release(shared);
     IDWriteFactory_Release(shared2);
@@ -2328,6 +2333,10 @@ static void test_shared_isolated(void)
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED, &IID_IDWriteFactory, (IUnknown**)&isolated2);
     ok(hr == S_OK, "got 0x%08x\n", hr);
     ok(isolated != isolated2, "got %p, and %p\n", isolated, isolated2);
+    IDWriteFactory_Release(isolated2);
+
+    hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED, &IID_IUnknown, (IUnknown**)&isolated2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     IDWriteFactory_Release(isolated2);
 
     hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED+1, &IID_IDWriteFactory, (IUnknown**)&isolated2);
@@ -2913,6 +2922,15 @@ static void test_TryGetFontTable(void)
 
     IDWriteFontFace_ReleaseFontTable(fontface, context2);
     IDWriteFontFace_ReleaseFontTable(fontface, context);
+
+    /* table does not exist */
+    exists = TRUE;
+    context = (void*)0xdeadbeef;
+    table = (void*)0xdeadbeef;
+    hr = IDWriteFontFace_TryGetFontTable(fontface, 0xabababab, &table, &size, &context, &exists);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(exists == FALSE, "got %d\n", exists);
+    ok(context == NULL && table == NULL, "got context %p, table pointer %p\n", context, table);
 
     IDWriteFontFace_Release(fontface);
     IDWriteFontFile_Release(file);
@@ -5416,13 +5434,14 @@ static void test_HasCharacter(void)
         ok(hr == S_OK, "got 0x%08x\n", hr);
 
         ret = IDWriteFont3_HasCharacter(font3, 'A');
+    todo_wine
         ok(ret, "got %d\n", ret);
 
         IDWriteFont3_Release(font3);
         IDWriteFactory3_Release(factory3);
     }
     else
-        skip("IDWriteFont3 is not supported.\n");
+        win_skip("IDWriteFont3 is not supported.\n");
 
     IDWriteFont_Release(font);
     IDWriteFactory_Release(factory);

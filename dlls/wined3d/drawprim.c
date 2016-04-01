@@ -625,7 +625,8 @@ void draw_primitive(struct wined3d_device *device, UINT start_idx, UINT index_co
             if (state->render_states[WINED3D_RS_COLORWRITEENABLE])
             {
                 surface_load_location(target, context, rtv->resource->draw_binding);
-                surface_invalidate_location(target, ~rtv->resource->draw_binding);
+                wined3d_texture_invalidate_location(target->container,
+                        rtv->sub_resource_idx, ~rtv->resource->draw_binding);
             }
             else
             {
@@ -652,7 +653,7 @@ void draw_primitive(struct wined3d_device *device, UINT start_idx, UINT index_co
             if (!context->render_offscreen && ds != device->onscreen_depth_stencil)
                 device_switch_onscreen_ds(device, context, ds);
 
-            if (ds->locations & location)
+            if (surface_get_sub_resource(ds)->locations & location)
                 SetRect(&current_rect, 0, 0, ds->ds_current_size.cx, ds->ds_current_size.cy);
             else
                 SetRectEmpty(&current_rect);
