@@ -23,6 +23,7 @@ wine (1.8.1-3) UNRELEASED; urgency=medium
   * Set fontdir /usr/share/wine/fonts.
   * Add fontdir.patch to take into account the build time configuration
     (closes: #814844).
+  * Install wine's TrueType fonts (closes: #818925).
 
  -- Jens Reyer <jre.winesim@gmail.com>  Sun, 13 Mar 2016 02:40:12 +0100
 
