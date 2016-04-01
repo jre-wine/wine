@@ -676,7 +676,6 @@ AC_SUBST(LDEXECFLAGS,"")
 LIBEXT="so"
 DLLEXT=".so"
 IMPLIBEXT="def"
-STATIC_IMPLIBEXT="def.a"
 WINE_PATH_SONAME_TOOLS
 WINE_CONFIG_HELPERS
 
@@ -691,7 +690,6 @@ case $host_os in
     LIBEXT="dll"
     DLLEXT=""
     IMPLIBEXT="a"
-    STATIC_IMPLIBEXT="a"
     dnl Disable modules that can't be used on Windows
     enable_iphlpapi=${enable_iphlpapi:-no}
     enable_kernel32=${enable_kernel32:-no}
@@ -897,18 +895,23 @@ case $host_os in
 
       case $host_cpu in
         *i[[3456789]]86* | x86_64)
-          WINE_TRY_CFLAGS([-Wl,--section-start,.interp=0x7bf00400],
+          WINE_TRY_CFLAGS([-Wl,-Ttext-segment=0x7bc00000],
                           [case $host_os in
-                           freebsd* | kfreebsd*-gnu) LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x60000400" ;;
-                           *) LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x7bf00400" ;;
-                           esac
-                          ])
-          WINE_TRY_CFLAGS([-Wl,-Ttext-segment=0x7bc00000],[:],
-                          [AC_PATH_PROG(PRELINK, prelink, false, [/sbin /usr/sbin $PATH])
+                           freebsd* | kfreebsd*-gnu) LDEXECFLAGS="$LDEXECFLAGS -Wl,-Ttext-segment=0x60000000" ;;
+                           *) LDEXECFLAGS="$LDEXECFLAGS -Wl,-Ttext-segment=0x7c000000" ;;
+                           esac],
+                          [WINE_TRY_CFLAGS([-Wl,--section-start,.interp=0x7c000400],
+                                           [case $host_os in
+                                              freebsd* | kfreebsd*-gnu) LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x60000400" ;;
+                                              *) LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x7c000400" ;;
+                                           esac])
+                           AC_PATH_PROG(PRELINK, prelink, false, [/sbin /usr/sbin $PATH])
                            if test "x$PRELINK" = xfalse
                            then
                                WINE_WARNING([prelink not found and linker does not support relocation, base address of core dlls won't be set correctly.])
                            fi])
+          WINE_TRY_CFLAGS([-Wl,-z,max-page-size=0x1000],
+                          [LDEXECFLAGS="$LDEXECFLAGS -Wl,-z,max-page-size=0x1000"])
           ;;
       esac
 
@@ -2513,6 +2516,8 @@ then
 fi
 
 AC_CHECK_FUNCS(\
+	asinh \
+	asinhf \
 	cbrt \
 	cbrtf \
 	erf \
@@ -2991,6 +2996,7 @@ WINE_CONFIG_TEST(dlls/jscript/tests)
 WINE_CONFIG_DLL(jsproxy,,[implib])
 WINE_CONFIG_DLL(kernel32,,[clean,implib])
 WINE_CONFIG_TEST(dlls/kernel32/tests)
+WINE_CONFIG_DLL(kernelbase)
 WINE_CONFIG_DLL(keyboard.drv16,enable_win16)
 WINE_CONFIG_DLL(krnl386.exe16,enable_win16,[implib],[kernel])
 WINE_CONFIG_DLL(ksuser)
@@ -3262,7 +3268,8 @@ WINE_CONFIG_DLL(svrapi)
 WINE_CONFIG_DLL(sxs,,[implib])
 WINE_CONFIG_TEST(dlls/sxs/tests)
 WINE_CONFIG_DLL(system.drv16,enable_win16)
-WINE_CONFIG_DLL(t2embed)
+WINE_CONFIG_DLL(t2embed,,[implib])
+WINE_CONFIG_TEST(dlls/t2embed/tests)
 WINE_CONFIG_DLL(tapi32,,[implib])
 WINE_CONFIG_DLL(taskschd,,[clean])
 WINE_CONFIG_TEST(dlls/taskschd/tests)

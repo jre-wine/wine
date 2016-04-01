@@ -129,9 +129,9 @@
 @ stub acoshl
 @ cdecl asin(double) ucrtbase.asin
 @ cdecl -arch=arm,x86_64 asinf(float) ucrtbase.asinf
-@ stub asinh
-@ stub asinhf
-@ stub asinhl
+@ cdecl asinh(double double) ucrtbase.asinh
+@ cdecl asinhf(float float) ucrtbase.asinhf
+@ cdecl asinhl(double double) ucrtbase.asinhl
 @ cdecl atan(double) ucrtbase.atan
 @ cdecl atan2(double double) ucrtbase.atan2
 @ cdecl -arch=arm,x86_64 atan2f(float float) ucrtbase.atan2f
@@ -252,7 +252,7 @@
 @ cdecl fmod(double double) ucrtbase.fmod
 @ cdecl -arch=arm,x86_64 fmodf(float float) ucrtbase.fmodf
 @ cdecl frexp(double ptr) ucrtbase.frexp
-@ stub hypot
+@ cdecl hypot(double double) ucrtbase.hypot
 @ stub ilogb
 @ stub ilogbf
 @ stub ilogbl

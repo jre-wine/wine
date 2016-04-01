@@ -59,20 +59,20 @@ struct wined3d_cs_present
     enum wined3d_cs_op opcode;
     HWND dst_window_override;
     struct wined3d_swapchain *swapchain;
-    const RECT *src_rect;
-    const RECT *dst_rect;
+    RECT src_rect;
+    RECT dst_rect;
     DWORD flags;
 };
 
 struct wined3d_cs_clear
 {
     enum wined3d_cs_op opcode;
-    DWORD rect_count;
-    const RECT *rects;
     DWORD flags;
-    const struct wined3d_color *color;
+    struct wined3d_color color;
     float depth;
     DWORD stencil;
+    unsigned int rect_count;
+    RECT rects[1];
 };
 
 struct wined3d_cs_draw
@@ -95,13 +95,13 @@ struct wined3d_cs_set_predication
 struct wined3d_cs_set_viewport
 {
     enum wined3d_cs_op opcode;
-    const struct wined3d_viewport *viewport;
+    struct wined3d_viewport viewport;
 };
 
 struct wined3d_cs_set_scissor_rect
 {
     enum wined3d_cs_op opcode;
-    const RECT *rect;
+    RECT rect;
 };
 
 struct wined3d_cs_set_rendertarget_view
@@ -229,14 +229,14 @@ struct wined3d_cs_set_transform
 {
     enum wined3d_cs_op opcode;
     enum wined3d_transform_state state;
-    const struct wined3d_matrix *matrix;
+    struct wined3d_matrix matrix;
 };
 
 struct wined3d_cs_set_clip_plane
 {
     enum wined3d_cs_op opcode;
     UINT plane_idx;
-    const struct wined3d_vec4 *plane;
+    struct wined3d_vec4 plane;
 };
 
 struct wined3d_cs_set_material
@@ -258,7 +258,7 @@ static void wined3d_cs_exec_present(struct wined3d_cs *cs, const void *data)
     swapchain = op->swapchain;
     wined3d_swapchain_set_window(swapchain, op->dst_window_override);
 
-    swapchain->swapchain_ops->swapchain_present(swapchain, op->src_rect, op->dst_rect, op->flags);
+    swapchain->swapchain_ops->swapchain_present(swapchain, &op->src_rect, &op->dst_rect, op->flags);
 }
 
 void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *swapchain,
@@ -270,8 +270,8 @@ void wined3d_cs_emit_present(struct wined3d_cs *cs, struct wined3d_swapchain *sw
     op->opcode = WINED3D_CS_OP_PRESENT;
     op->dst_window_override = dst_window_override;
     op->swapchain = swapchain;
-    op->src_rect = src_rect;
-    op->dst_rect = dst_rect;
+    op->src_rect = *src_rect;
+    op->dst_rect = *dst_rect;
     op->flags = flags;
 
     cs->ops->submit(cs);
@@ -287,7 +287,7 @@ static void wined3d_cs_exec_clear(struct wined3d_cs *cs, const void *data)
     wined3d_get_draw_rect(&device->state, &draw_rect);
     device_clear_render_targets(device, device->adapter->gl_info.limits.buffers,
             &device->fb, op->rect_count, op->rects, &draw_rect, op->flags,
-            op->color, op->depth, op->stencil);
+            &op->color, op->depth, op->stencil);
 }
 
 void wined3d_cs_emit_clear(struct wined3d_cs *cs, DWORD rect_count, const RECT *rects,
@@ -295,14 +295,14 @@ void wined3d_cs_emit_clear(struct wined3d_cs *cs, DWORD rect_count, const RECT *
 {
     struct wined3d_cs_clear *op;
 
-    op = cs->ops->require_space(cs, sizeof(*op));
+    op = cs->ops->require_space(cs, FIELD_OFFSET(struct wined3d_cs_clear, rects[rect_count]));
     op->opcode = WINED3D_CS_OP_CLEAR;
-    op->rect_count = rect_count;
-    op->rects = rects;
     op->flags = flags;
-    op->color = color;
+    op->color = *color;
     op->depth = depth;
     op->stencil = stencil;
+    op->rect_count = rect_count;
+    memcpy(op->rects, rects, sizeof(*rects) * rect_count);
 
     cs->ops->submit(cs);
 }
@@ -355,7 +355,7 @@ static void wined3d_cs_exec_set_viewport(struct wined3d_cs *cs, const void *data
 {
     const struct wined3d_cs_set_viewport *op = data;
 
-    cs->state.viewport = *op->viewport;
+    cs->state.viewport = op->viewport;
     device_invalidate_state(cs->device, STATE_VIEWPORT);
 }
 
@@ -365,7 +365,7 @@ void wined3d_cs_emit_set_viewport(struct wined3d_cs *cs, const struct wined3d_vi
 
     op = cs->ops->require_space(cs, sizeof(*op));
     op->opcode = WINED3D_CS_OP_SET_VIEWPORT;
-    op->viewport = viewport;
+    op->viewport = *viewport;
 
     cs->ops->submit(cs);
 }
@@ -374,7 +374,7 @@ static void wined3d_cs_exec_set_scissor_rect(struct wined3d_cs *cs, const void *
 {
     const struct wined3d_cs_set_scissor_rect *op = data;
 
-    cs->state.scissor_rect = *op->rect;
+    cs->state.scissor_rect = op->rect;
     device_invalidate_state(cs->device, STATE_SCISSORRECT);
 }
 
@@ -384,7 +384,7 @@ void wined3d_cs_emit_set_scissor_rect(struct wined3d_cs *cs, const RECT *rect)
 
     op = cs->ops->require_space(cs, sizeof(*op));
     op->opcode = WINED3D_CS_OP_SET_SCISSOR_RECT;
-    op->rect = rect;
+    op->rect = *rect;
 
     cs->ops->submit(cs);
 }
@@ -634,6 +634,7 @@ void wined3d_cs_emit_set_constant_buffer(struct wined3d_cs *cs, enum wined3d_sha
 
 static void wined3d_cs_exec_set_texture(struct wined3d_cs *cs, const void *data)
 {
+    const struct wined3d_gl_info *gl_info = &cs->device->adapter->gl_info;
     const struct wined3d_d3d_info *d3d_info = &cs->device->adapter->d3d_info;
     const struct wined3d_cs_set_texture *op = data;
     struct wined3d_texture *prev;
@@ -653,7 +654,8 @@ static void wined3d_cs_exec_set_texture(struct wined3d_cs *cs, const void *data)
             op->texture->sampler = op->stage;
 
         if (!prev || op->texture->target != prev->target
-                || !is_same_fixup(new_format->color_fixup, old_format->color_fixup)
+                || (!is_same_fixup(new_format->color_fixup, old_format->color_fixup)
+                && !(can_use_texture_swizzle(gl_info, new_format) && can_use_texture_swizzle(gl_info, old_format)))
                 || (new_fmt_flags & WINED3DFMT_FLAG_SHADOW) != (old_fmt_flags & WINED3DFMT_FLAG_SHADOW))
             device_invalidate_state(cs->device, STATE_SHADER(WINED3D_SHADER_TYPE_PIXEL));
 
@@ -854,7 +856,7 @@ static void wined3d_cs_exec_set_transform(struct wined3d_cs *cs, const void *dat
 {
     const struct wined3d_cs_set_transform *op = data;
 
-    cs->state.transforms[op->state] = *op->matrix;
+    cs->state.transforms[op->state] = op->matrix;
     if (op->state < WINED3D_TS_WORLD_MATRIX(cs->device->adapter->d3d_info.limits.ffp_vertex_blend_matrices))
         device_invalidate_state(cs->device, STATE_TRANSFORM(op->state));
 }
@@ -867,7 +869,7 @@ void wined3d_cs_emit_set_transform(struct wined3d_cs *cs, enum wined3d_transform
     op = cs->ops->require_space(cs, sizeof(*op));
     op->opcode = WINED3D_CS_OP_SET_TRANSFORM;
     op->state = state;
-    op->matrix = matrix;
+    op->matrix = *matrix;
 
     cs->ops->submit(cs);
 }
@@ -876,7 +878,7 @@ static void wined3d_cs_exec_set_clip_plane(struct wined3d_cs *cs, const void *da
 {
     const struct wined3d_cs_set_clip_plane *op = data;
 
-    cs->state.clip_planes[op->plane_idx] = *op->plane;
+    cs->state.clip_planes[op->plane_idx] = op->plane;
     device_invalidate_state(cs->device, STATE_CLIPPLANE(op->plane_idx));
 }
 
@@ -887,7 +889,7 @@ void wined3d_cs_emit_set_clip_plane(struct wined3d_cs *cs, UINT plane_idx, const
     op = cs->ops->require_space(cs, sizeof(*op));
     op->opcode = WINED3D_CS_OP_SET_CLIP_PLANE;
     op->plane_idx = plane_idx;
-    op->plane = plane;
+    op->plane = *plane;
 
     cs->ops->submit(cs);
 }
