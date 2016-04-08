@@ -33,6 +33,7 @@ CONFLAGS=--with-gnutls \
          --without-gphoto \
          --without-gstreamer \
          --disable-tests \
+         --enable-maintainer-mode \
          --libdir=/$(LIBDIR) \
          --bindir=/$(BINDIR) \
          --mandir=/$(MANDIR) \
