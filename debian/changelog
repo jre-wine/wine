@@ -26,6 +26,7 @@ wine (1.8.1-3) UNRELEASED; urgency=medium
   * Install wine's TrueType fonts (closes: #818925).
   * Build wine in maintainer mode.
   * Don't error out on build warnings.
+  * Add TrueType fonts to clean to regenerate them.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Sun, 13 Mar 2016 02:40:12 +0100
 
