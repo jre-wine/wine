@@ -19,6 +19,7 @@ wine (1.8.1-3) UNRELEASED; urgency=medium
     - Re-enable "err" level output by default (closes: #816014).
     - Drop version output (closes: #816017).
     - wineserver script: Drop obsolete script variable.
+  * In the VCS-* fields point to the stretch git branch.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Sun, 13 Mar 2016 02:40:12 +0100
 

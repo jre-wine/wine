@@ -63,8 +63,8 @@ Build-Depends:
  ocl-icd-opencl-dev,
 Standards-Version: 3.9.7
 Homepage: http://www.winehq.org/
-Vcs-Browser: https://anonscm.debian.org/git/pkg-wine/wine.git
-Vcs-Git: https://anonscm.debian.org/git/pkg-wine/wine.git
+Vcs-Browser: https://anonscm.debian.org/git/pkg-wine/wine.git/?h=stretch
+Vcs-Git: https://anonscm.debian.org/git/pkg-wine/wine.git -b stretch
 
 Package: wineVERSION
 Architecture: all
