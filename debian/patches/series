@@ -3,6 +3,7 @@ makefile.patch
 kfreebsd.patch
 sfnt2fon.patch
 manpages.patch
+version-string.patch
 
 disable/shlib-exit-calls.patch
 disable/external-installers.patch
