@@ -7,7 +7,7 @@ wine32=$bindir/wine
 wine64=$bindir/wine64
 
 wine32_hint () {
-    echo "it looks like wine32 is not installed.  this is not supported, you should install it."
+    echo "it looks like $(echo $script | sed s/wine/wine32/) is missing, you should install it."
     if [ "$(dpkg --print-architecture)" = "amd64" -a "$(dpkg --print-foreign-architectures | grep -cx "i386")" -ne 1 ]; then
         echo "multiarch needs to be enabled first.  as root, please"
         echo "execute \"dpkg --add-architecture i386 && apt-get update &&"
