@@ -81,7 +81,7 @@ static const char *arb_get_helper_value(enum wined3d_shader_type shader, enum ar
 {
     if (shader != WINED3D_SHADER_TYPE_VERTEX && shader != WINED3D_SHADER_TYPE_PIXEL)
     {
-        ERR("Unsupported shader type '%s'.\n.", debug_shader_type(shader));
+        ERR("Unsupported shader type '%s'.\n", debug_shader_type(shader));
         return "bad";
     }
 
@@ -5282,8 +5282,10 @@ static const SHADER_HANDLER shader_arb_instruction_handler_table[WINED3DSIH_TABL
     /* WINED3DSIH_FTOI                             */ NULL,
     /* WINED3DSIH_FTOU                             */ NULL,
     /* WINED3DSIH_GE                               */ NULL,
+    /* WINED3DSIH_HS_CONTROL_POINT_PHASE           */ NULL,
     /* WINED3DSIH_HS_DECLS                         */ NULL,
     /* WINED3DSIH_HS_FORK_PHASE                    */ NULL,
+    /* WINED3DSIH_HS_JOIN_PHASE                    */ NULL,
     /* WINED3DSIH_IADD                             */ NULL,
     /* WINED3DSIH_IEQ                              */ NULL,
     /* WINED3DSIH_IF                               */ NULL /* Hardcoded into the shader */,
@@ -5373,6 +5375,7 @@ static const SHADER_HANDLER shader_arb_instruction_handler_table[WINED3DSIH_TABL
     /* WINED3DSIH_TEXREG2RGB                       */ pshader_hw_texreg2rgb,
     /* WINED3DSIH_UDIV                             */ NULL,
     /* WINED3DSIH_UGE                              */ NULL,
+    /* WINED3DSIH_ULT                              */ NULL,
     /* WINED3DSIH_USHR                             */ NULL,
     /* WINED3DSIH_UTOF                             */ NULL,
     /* WINED3DSIH_XOR                              */ NULL,
@@ -7678,8 +7681,6 @@ static GLuint arbfp_gen_plain_shader(struct arbfp_blit_priv *priv,
 static HRESULT arbfp_blit_set(void *blit_priv, struct wined3d_context *context, const struct wined3d_surface *surface,
         const struct wined3d_color_key *color_key)
 {
-    GLuint shader;
-    float size[4] = {(float) surface->pow2Width, (float) surface->pow2Height, 1.0f, 1.0f};
     const struct wined3d_texture *texture = surface->container;
     struct arbfp_blit_priv *priv = blit_priv;
     enum complex_fixup fixup;
@@ -7688,6 +7689,13 @@ static HRESULT arbfp_blit_set(void *blit_priv, struct wined3d_context *context, 
     struct arbfp_blit_type type;
     struct arbfp_blit_desc *desc;
     struct wined3d_color float_color_key[2];
+    struct wined3d_vec4 size;
+    GLuint shader;
+
+    size.x = wined3d_texture_get_level_pow2_width(texture, surface->texture_level);
+    size.y = wined3d_texture_get_level_pow2_height(texture, surface->texture_level);
+    size.z = 1.0f;
+    size.w = 1.0f;
 
     if (is_complex_fixup(texture->resource.format->color_fixup))
         fixup = get_complex_fixup(texture->resource.format->color_fixup);
@@ -7784,7 +7792,7 @@ err_out:
     checkGLcall("glEnable(GL_FRAGMENT_PROGRAM_ARB)");
     GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, shader));
     checkGLcall("glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, shader)");
-    GL_EXTCALL(glProgramLocalParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARBFP_BLIT_PARAM_SIZE, size));
+    GL_EXTCALL(glProgramLocalParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, ARBFP_BLIT_PARAM_SIZE, &size.x));
     checkGLcall("glProgramLocalParameter4fvARB");
     if (type.use_color_key)
     {

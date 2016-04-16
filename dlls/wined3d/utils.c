@@ -250,6 +250,23 @@ static const struct wined3d_typed_format_info typed_formats[] =
     {WINED3DFMT_B8G8R8X8_UNORM,         WINED3DFMT_B8G8R8X8_TYPELESS,     "uuu"},
 };
 
+struct wined3d_format_ddi_info
+{
+    enum wined3d_format_id id;
+    D3DDDIFORMAT ddi_format;
+};
+
+static const struct wined3d_format_ddi_info ddi_formats[] =
+{
+    {WINED3DFMT_B8G8R8_UNORM,       D3DDDIFMT_R8G8B8},
+    {WINED3DFMT_B8G8R8A8_UNORM,     D3DDDIFMT_A8R8G8B8},
+    {WINED3DFMT_B8G8R8X8_UNORM,     D3DDDIFMT_X8R8G8B8},
+    {WINED3DFMT_B5G6R5_UNORM,       D3DDDIFMT_R5G6B5},
+    {WINED3DFMT_B5G5R5X1_UNORM,     D3DDDIFMT_X1R5G5B5},
+    {WINED3DFMT_B5G5R5A1_UNORM,     D3DDDIFMT_A1R5G5B5},
+    {WINED3DFMT_P8_UINT,            D3DDDIFMT_P8},
+};
+
 struct wined3d_format_base_flags
 {
     enum wined3d_format_id id;
@@ -261,17 +278,6 @@ struct wined3d_format_base_flags
  * resource size. */
 static const struct wined3d_format_base_flags format_base_flags[] =
 {
-    {WINED3DFMT_P8_UINT,            WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B8G8R8_UNORM,       WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B8G8R8A8_UNORM,     WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B8G8R8X8_UNORM,     WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B5G6R5_UNORM,       WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B5G5R5X1_UNORM,     WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B5G5R5A1_UNORM,     WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B4G4R4A4_UNORM,     WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B4G4R4X4_UNORM,     WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_R8G8B8A8_UNORM,     WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_R8G8B8X8_UNORM,     WINED3DFMT_FLAG_GETDC},
     {WINED3DFMT_ATI1N,              WINED3DFMT_FLAG_BROKEN_PITCH},
     {WINED3DFMT_ATI2N,              WINED3DFMT_FLAG_BROKEN_PITCH},
     {WINED3DFMT_R11G11B10_FLOAT,    WINED3DFMT_FLAG_FLOAT},
@@ -1661,6 +1667,19 @@ static BOOL init_format_base_info(struct wined3d_gl_info *gl_info)
         }
 
         format_set_flag(format, flags);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(ddi_formats); ++i)
+    {
+        int fmt_idx = get_format_idx(ddi_formats[i].id);
+
+        if (fmt_idx == -1)
+        {
+            ERR("Format %s (%#x) not found.\n", debug_d3dformat(ddi_formats[i].id), ddi_formats[i].id);
+            goto fail;
+        }
+
+        gl_info->formats[fmt_idx].ddi_format = ddi_formats[i].ddi_format;
     }
 
     for (i = 0; i < ARRAY_SIZE(format_base_flags); ++i)
@@ -4364,18 +4383,20 @@ static void compute_texture_matrix(const struct wined3d_gl_info *gl_info, const 
                 /* case WINED3D_TTFF_COUNT1: Won't ever get here. */
                 case WINED3D_TTFF_COUNT2:
                     mat._13 = mat._23 = mat._33 = mat._43 = 0.0f;
-                /* OpenGL divides the first 3 vertex coord by the 4th by default,
-                * which is essentially the same as D3DTTFF_PROJECTED. Make sure that
-                * the 4th coord evaluates to 1.0 to eliminate that.
-                *
-                * If the fixed function pipeline is used, the 4th value remains unused,
-                * so there is no danger in doing this. With vertex shaders we have a
-                * problem. Should an app hit that problem, the code here would have to
-                * check for pixel shaders, and the shader has to undo the default gl divide.
-                *
-                * A more serious problem occurs if the app passes 4 coordinates in, and the
-                * 4th is != 1.0(opengl default). This would have to be fixed in drawStridedSlow
-                * or a replacement shader. */
+                /* OpenGL divides the first 3 vertex coordinates by the 4th by
+                 * default, which is essentially the same as D3DTTFF_PROJECTED.
+                 * Make sure that the 4th coordinate evaluates to 1.0 to
+                 * eliminate that.
+                 *
+                 * If the fixed function pipeline is used, the 4th value
+                 * remains unused, so there is no danger in doing this. With
+                 * vertex shaders we have a problem. Should an application hit
+                 * that problem, the code here would have to check for pixel
+                 * shaders, and the shader has to undo the default GL divide.
+                 *
+                 * A more serious problem occurs if the application passes 4
+                 * coordinates in, and the 4th is != 1.0 (OpenGL default).
+                 * This would have to be fixed with immediate mode draws. */
                 default:
                     mat._14 = mat._24 = mat._34 = 0.0f; mat._44 = 1.0f;
             }
@@ -5442,7 +5463,6 @@ const char *wined3d_debug_location(DWORD location)
     LOCATION_TO_STR(WINED3D_LOCATION_DISCARDED);
     LOCATION_TO_STR(WINED3D_LOCATION_SYSMEM);
     LOCATION_TO_STR(WINED3D_LOCATION_USER_MEMORY);
-    LOCATION_TO_STR(WINED3D_LOCATION_DIB);
     LOCATION_TO_STR(WINED3D_LOCATION_BUFFER);
     LOCATION_TO_STR(WINED3D_LOCATION_TEXTURE_RGB);
     LOCATION_TO_STR(WINED3D_LOCATION_TEXTURE_SRGB);

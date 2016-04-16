@@ -25,6 +25,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
+#include "winreg.h"
 #include "t2embapi.h"
 #include "wine/debug.h"
 
@@ -100,11 +101,74 @@ LONG WINAPI TTGetEmbeddingType(HDC hDC, ULONG *status)
     return E_NONE;
 }
 
+LONG WINAPI TTIsEmbeddingEnabledForFacename(LPCSTR facename, BOOL *enabled)
+{
+    static const WCHAR exclusionlistW[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
+        'S','h','a','r','e','d',' ','T','o','o','l','s','\\','t','2','e','m','b','e','d',0};
+    DWORD index;
+    HKEY hkey;
+    LONG ret;
+
+    TRACE("(%s %p)\n", debugstr_a(facename), enabled);
+
+    if (!facename)
+        return E_FACENAMEINVALID;
+
+    if (!enabled)
+        return E_PBENABLEDINVALID;
+
+    *enabled = TRUE;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, exclusionlistW, 0, GENERIC_READ, &hkey))
+        return E_NONE;
+
+    *enabled = TRUE;
+    ret = ERROR_SUCCESS;
+    index = 0;
+    while (ret != ERROR_NO_MORE_ITEMS)
+    {
+        DWORD name_len, value_len, value, type;
+        CHAR name[LF_FACESIZE];
+
+        name_len = sizeof(name)/sizeof(*name);
+        value_len = sizeof(value);
+        ret = RegEnumValueA(hkey, index++, name, &name_len, NULL, &type, (BYTE*)&value, &value_len);
+        if (ret || type != REG_DWORD)
+            continue;
+
+        if (!lstrcmpiA(name, facename))
+        {
+            *enabled = !!value;
+            break;
+        }
+    }
+    RegCloseKey(hkey);
+
+    return E_NONE;
+}
+
 LONG WINAPI TTIsEmbeddingEnabled(HDC hDC, BOOL *enabled)
 {
-    FIXME("(%p %p) stub\n", hDC, enabled);
-    if (enabled) *enabled = FALSE;
-    return E_API_NOTIMPL;
+    OUTLINETEXTMETRICA *otm;
+    LONG ret;
+    UINT len;
+
+    TRACE("(%p %p)\n", hDC, enabled);
+
+    if (!hDC)
+        return E_HDCINVALID;
+
+    len = GetOutlineTextMetricsA(hDC, 0, NULL);
+    if (!len)
+        return E_ERRORACCESSINGFACENAME;
+
+    otm = HeapAlloc(GetProcessHeap(), 0, len);
+    if (!otm)
+        return E_NOFREEMEMORY;
+
+    GetOutlineTextMetricsA(hDC, len, otm);
+    ret = TTIsEmbeddingEnabledForFacename(otm->otmpFaceName, enabled);
+    HeapFree(GetProcessHeap(), 0, otm);
+    return ret;
 }
 
 LONG WINAPI TTDeleteEmbeddedFont(HANDLE hFontReference, ULONG flags, ULONG *status)

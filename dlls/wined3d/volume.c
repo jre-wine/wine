@@ -79,15 +79,17 @@ void wined3d_volume_upload_data(struct wined3d_volume *volume, const struct wine
     const struct wined3d_gl_info *gl_info = context->gl_info;
     struct wined3d_texture *texture = volume->container;
     const struct wined3d_format *format = texture->resource.format;
-    UINT width = volume->resource.width;
-    UINT height = volume->resource.height;
-    UINT depth = volume->resource.depth;
+    unsigned int width, height, depth;
     const void *mem = data->addr;
     void *converted_mem = NULL;
 
     TRACE("volume %p, context %p, level %u, format %s (%#x).\n",
             volume, context, volume->texture_level, debug_d3dformat(format->id),
             format->id);
+
+    width = wined3d_texture_get_level_width(texture, volume->texture_level);
+    height = wined3d_texture_get_level_height(texture, volume->texture_level);
+    depth = wined3d_texture_get_level_depth(texture, volume->texture_level);
 
     if (format->convert)
     {
@@ -355,14 +357,6 @@ done:
     return TRUE;
 }
 
-/* Context activation is done by the caller. */
-void wined3d_volume_load(struct wined3d_volume *volume, struct wined3d_context *context, BOOL srgb_mode)
-{
-    wined3d_texture_prepare_texture(volume->container, context, srgb_mode);
-    wined3d_volume_load_location(volume, context,
-            srgb_mode ? WINED3D_LOCATION_TEXTURE_SRGB : WINED3D_LOCATION_TEXTURE_RGB);
-}
-
 void wined3d_volume_cleanup(struct wined3d_volume *volume)
 {
     TRACE("volume %p.\n", volume);
@@ -446,15 +440,6 @@ HRESULT wined3d_volume_init(struct wined3d_volume *volume, struct wined3d_textur
     const struct wined3d_format *format = wined3d_get_format(gl_info, desc->format);
     HRESULT hr;
     UINT size;
-
-    /* TODO: Write tests for other resources and move this check
-     * to resource_init, if applicable. */
-    if (desc->usage & WINED3DUSAGE_DYNAMIC
-            && (desc->pool == WINED3D_POOL_MANAGED || desc->pool == WINED3D_POOL_SCRATCH))
-    {
-        WARN("Attempted to create a DYNAMIC texture in pool %s.\n", debug_d3dpool(desc->pool));
-        return WINED3DERR_INVALIDCALL;
-    }
 
     size = wined3d_format_calculate_size(format, device->surface_alignment, desc->width, desc->height, desc->depth);
 

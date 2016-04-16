@@ -1245,6 +1245,7 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTS350M,    "NVIDIA GeForce GTS 350M",          DRIVER_NVIDIA_GEFORCE8,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_410M,       "NVIDIA GeForce 410M",              DRIVER_NVIDIA_GEFORCE8,  512},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT420,      "NVIDIA GeForce GT 420",            DRIVER_NVIDIA_GEFORCE8,  2048},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT425M,     "NVIDIA GeForce GT 425M",           DRIVER_NVIDIA_GEFORCE8,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT430,      "NVIDIA GeForce GT 430",            DRIVER_NVIDIA_GEFORCE8,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT440,      "NVIDIA GeForce GT 440",            DRIVER_NVIDIA_GEFORCE8,  1024},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTS450,     "NVIDIA GeForce GTS 450",           DRIVER_NVIDIA_GEFORCE8,  1024},
@@ -1283,6 +1284,9 @@ static const struct gpu_description gpu_description_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX770,     "NVIDIA GeForce GTX 770",           DRIVER_NVIDIA_GEFORCE8,  2048},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX780,     "NVIDIA GeForce GTX 780",           DRIVER_NVIDIA_GEFORCE8,  3072},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX780TI,   "NVIDIA GeForce GTX 780 Ti",        DRIVER_NVIDIA_GEFORCE8,  3072},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTXTITAN,   "NVIDIA GeForce GTX TITAN Black",   DRIVER_NVIDIA_GEFORCE8,  6144},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_820M,       "NVIDIA GeForce 820M",              DRIVER_NVIDIA_GEFORCE8,  2048},
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_830M,       "NVIDIA GeForce 830M",              DRIVER_NVIDIA_GEFORCE8,  2048},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX860M,    "NVIDIA GeForce GTX 860M",          DRIVER_NVIDIA_GEFORCE8,  2048},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX950,     "NVIDIA GeForce GTX 950",           DRIVER_NVIDIA_GEFORCE8,  2048},
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX950M,    "NVIDIA GeForce GTX 950M",          DRIVER_NVIDIA_GEFORCE8,  4096},
@@ -1747,7 +1751,10 @@ cards_nvidia_binary[] =
     {"GTX 950M",                    CARD_NVIDIA_GEFORCE_GTX950M},   /* GeForce 900 - midend mobile */
     {"GTX 950",                     CARD_NVIDIA_GEFORCE_GTX950},    /* GeForce 900 - midend */
     {"GTX 860M",                    CARD_NVIDIA_GEFORCE_GTX860M},   /* GeForce 800 - mobile */
+    {"GeForce 830M",                CARD_NVIDIA_GEFORCE_830M},      /* GeForce 800 - mobile */
+    {"GeForce 820M",                CARD_NVIDIA_GEFORCE_820M},      /* GeForce 800 - mobile */
     {"GTX 780 Ti",                  CARD_NVIDIA_GEFORCE_GTX780TI},  /* Geforce 700 - highend */
+    {"GTX TITAN Black",             CARD_NVIDIA_GEFORCE_GTXTITAN},  /* Geforce 700 - highend */
     {"GTX 780",                     CARD_NVIDIA_GEFORCE_GTX780},    /* Geforce 700 - highend */
     {"GTX 770M",                    CARD_NVIDIA_GEFORCE_GTX770M},   /* Geforce 700 - midend high mobile */
     {"GTX 770",                     CARD_NVIDIA_GEFORCE_GTX770},    /* Geforce 700 - highend */
@@ -1786,6 +1793,7 @@ cards_nvidia_binary[] =
     {"GTS 450",                     CARD_NVIDIA_GEFORCE_GTS450},    /* Geforce 400 - midend low */
     {"GT 440",                      CARD_NVIDIA_GEFORCE_GT440},     /* Geforce 400 - lowend */
     {"GT 430",                      CARD_NVIDIA_GEFORCE_GT430},     /* Geforce 400 - lowend */
+    {"GT 425M",                     CARD_NVIDIA_GEFORCE_GT425M},    /* Geforce 400 - lowend mobile */
     {"GT 420",                      CARD_NVIDIA_GEFORCE_GT420},     /* Geforce 400 - lowend */
     {"410M",                        CARD_NVIDIA_GEFORCE_410M},      /* Geforce 400 - lowend mobile */
     {"GT 330",                      CARD_NVIDIA_GEFORCE_GT330},     /* Geforce 300 - highend */
@@ -1972,6 +1980,7 @@ cards_intel[] =
     {"Ivybridge Server",            CARD_INTEL_IVBS},
     {"Ivybridge Mobile",            CARD_INTEL_IVBM},
     {"Ivybridge Desktop",           CARD_INTEL_IVBD},
+    {"HD Graphics 4000",            CARD_INTEL_IVBD},   /* MacOS */
     /* Sandybridge */
     {"Sandybridge Server",          CARD_INTEL_SNBS},
     {"Sandybridge Mobile",          CARD_INTEL_SNBM},
@@ -2110,6 +2119,7 @@ cards_nvidia_mesa[] =
     {"NVE4",                        CARD_NVIDIA_GEFORCE_GTX680},
     /* Fermi */
     {"NVD9",                        CARD_NVIDIA_GEFORCE_GT520},
+    {"NVD7",                        CARD_NVIDIA_GEFORCE_820M},
     {"NVCF",                        CARD_NVIDIA_GEFORCE_GTX550},
     {"NVCE",                        CARD_NVIDIA_GEFORCE_GTX560},
     {"NVC8",                        CARD_NVIDIA_GEFORCE_GTX570},
@@ -5594,9 +5604,15 @@ static void WINE_GLAPI invalid_texcoord_func(GLenum unit, const void *data)
     DebugBreak();
 }
 
-/* Helper functions for providing vertex data to opengl. The arrays are initialized based on
- * the extension detection and are used in drawStridedSlow
- */
+static void WINE_GLAPI invalid_generic_attrib_func(GLuint idx, const void *data)
+{
+    ERR("Invalid attribute function called.\n");
+    DebugBreak();
+}
+
+/* Helper functions for providing vertex data to OpenGL. The arrays are
+ * initialised based on the extension detection and are used in
+ * draw_primitive_immediate_mode(). */
 static void WINE_GLAPI position_d3dcolor(const void *data)
 {
     DWORD pos = *((const DWORD *)data);
@@ -5650,6 +5666,47 @@ static void WINE_GLAPI specular_d3dcolor(const void *data)
 static void WINE_GLAPI warn_no_specular_func(const void *data)
 {
     WARN("GL_EXT_secondary_color not supported\n");
+}
+
+static void WINE_GLAPI generic_d3dcolor(GLuint idx, const void *data)
+{
+    DWORD color = *((const DWORD *)data);
+
+    context_get_current()->gl_info->gl_ops.ext.p_glVertexAttrib4Nub(idx,
+            D3DCOLOR_B_R(color), D3DCOLOR_B_G(color),
+            D3DCOLOR_B_B(color), D3DCOLOR_B_A(color));
+}
+
+static void WINE_GLAPI generic_short2n(GLuint idx, const void *data)
+{
+    const GLshort s[] = {((const GLshort *)data)[0], ((const GLshort *)data)[1], 0, 1};
+
+    context_get_current()->gl_info->gl_ops.ext.p_glVertexAttrib4Nsv(idx, s);
+}
+
+static void WINE_GLAPI generic_ushort2n(GLuint idx, const void *data)
+{
+    const GLushort s[] = {((const GLushort *)data)[0], ((const GLushort *)data)[1], 0, 1};
+
+    context_get_current()->gl_info->gl_ops.ext.p_glVertexAttrib4Nusv(idx, s);
+}
+
+static void WINE_GLAPI generic_float16_2(GLuint idx, const void *data)
+{
+    float x = float_16_to_32(((const unsigned short *)data) + 0);
+    float y = float_16_to_32(((const unsigned short *)data) + 1);
+
+    context_get_current()->gl_info->gl_ops.ext.p_glVertexAttrib2f(idx, x, y);
+}
+
+static void WINE_GLAPI generic_float16_4(GLuint idx, const void *data)
+{
+    float x = float_16_to_32(((const unsigned short *)data) + 0);
+    float y = float_16_to_32(((const unsigned short *)data) + 1);
+    float z = float_16_to_32(((const unsigned short *)data) + 2);
+    float w = float_16_to_32(((const unsigned short *)data) + 3);
+
+    context_get_current()->gl_info->gl_ops.ext.p_glVertexAttrib4f(idx, x, y, z, w);
 }
 
 static void wined3d_adapter_init_ffp_attrib_ops(struct wined3d_adapter *adapter)
@@ -5777,6 +5834,39 @@ static void wined3d_adapter_init_ffp_attrib_ops(struct wined3d_adapter *adapter)
         ops->texcoord[WINED3D_FFP_EMIT_FLOAT16_4] = invalid_texcoord_func;
     }
     ops->texcoord[WINED3D_FFP_EMIT_INVALID]   = invalid_texcoord_func;
+
+    ops->generic[WINED3D_FFP_EMIT_FLOAT1]     = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib1fv;
+    ops->generic[WINED3D_FFP_EMIT_FLOAT2]     = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib2fv;
+    ops->generic[WINED3D_FFP_EMIT_FLOAT3]     = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib3fv;
+    ops->generic[WINED3D_FFP_EMIT_FLOAT4]     = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib4fv;
+    if (gl_info->supported[ARB_VERTEX_ARRAY_BGRA])
+        ops->generic[WINED3D_FFP_EMIT_D3DCOLOR] = generic_d3dcolor;
+    else
+        ops->generic[WINED3D_FFP_EMIT_D3DCOLOR] =
+                (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib4Nubv;
+    ops->generic[WINED3D_FFP_EMIT_UBYTE4]     = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib4ubv;
+    ops->generic[WINED3D_FFP_EMIT_SHORT2]     = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib2sv;
+    ops->generic[WINED3D_FFP_EMIT_SHORT4]     = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib4sv;
+    ops->generic[WINED3D_FFP_EMIT_UBYTE4N]    = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib4Nubv;
+    ops->generic[WINED3D_FFP_EMIT_SHORT2N]    = generic_short2n;
+    ops->generic[WINED3D_FFP_EMIT_SHORT4N]    = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib4Nsv;
+    ops->generic[WINED3D_FFP_EMIT_USHORT2N]   = generic_ushort2n;
+    ops->generic[WINED3D_FFP_EMIT_USHORT4N]   = (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib4Nusv;
+    ops->generic[WINED3D_FFP_EMIT_UDEC3]      = invalid_generic_attrib_func;
+    ops->generic[WINED3D_FFP_EMIT_DEC3N]      = invalid_generic_attrib_func;
+    if (gl_info->supported[NV_HALF_FLOAT] && gl_info->supported[NV_VERTEX_PROGRAM])
+    {
+        ops->generic[WINED3D_FFP_EMIT_FLOAT16_2] =
+                (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib2hvNV;
+        ops->generic[WINED3D_FFP_EMIT_FLOAT16_4] =
+                (wined3d_generic_attrib_func)gl_info->gl_ops.ext.p_glVertexAttrib4hvNV;
+    }
+    else
+    {
+        ops->generic[WINED3D_FFP_EMIT_FLOAT16_2] = generic_float16_2;
+        ops->generic[WINED3D_FFP_EMIT_FLOAT16_4] = generic_float16_4;
+    }
+    ops->generic[WINED3D_FFP_EMIT_INVALID]    = invalid_generic_attrib_func;
 }
 
 static void wined3d_adapter_init_fb_cfgs(struct wined3d_adapter *adapter, HDC dc)

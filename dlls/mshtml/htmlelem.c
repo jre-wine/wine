@@ -3858,7 +3858,7 @@ static HRESULT WINAPI HTMLElement4_put_onfocusin(IHTMLElement4 *iface, VARIANT v
 {
     HTMLElement *This = impl_from_IHTMLElement4(iface);
 
-    FIXME("(%p)->(%s) semi-stub\n", This, debugstr_variant(&v));
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
 
     return set_node_event(&This->node, EVENTID_FOCUSIN, &v);
 }
@@ -3875,15 +3875,19 @@ static HRESULT WINAPI HTMLElement4_get_onfocusin(IHTMLElement4 *iface, VARIANT *
 static HRESULT WINAPI HTMLElement4_put_onfocusout(IHTMLElement4 *iface, VARIANT v)
 {
     HTMLElement *This = impl_from_IHTMLElement4(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_variant(&v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
+
+    return set_node_event(&This->node, EVENTID_FOCUSOUT, &v);
 }
 
 static HRESULT WINAPI HTMLElement4_get_onfocusout(IHTMLElement4 *iface, VARIANT *p)
 {
     HTMLElement *This = impl_from_IHTMLElement4(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_node_event(&This->node, EVENTID_FOCUSOUT, p);
 }
 
 static const IHTMLElement4Vtbl HTMLElement4Vtbl = {
@@ -4112,7 +4116,7 @@ HRESULT HTMLElement_handle_event(HTMLDOMNode *iface, DWORD eid, nsIDOMEvent *eve
             switch(code) {
             case VK_F1: /* DOM_VK_F1 */
                 TRACE("F1 pressed\n");
-                fire_event(This->node.doc, EVENTID_HELP, TRUE, This->node.nsnode, NULL, NULL);
+                fire_event(This->node.doc, EVENTID_HELP, TRUE, &This->node, NULL, NULL);
                 *prevent_default = TRUE;
             }
 
