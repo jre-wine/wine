@@ -2324,9 +2324,9 @@
 @ cdecl rand() MSVCRT_rand
 @ cdecl rand_s(ptr) MSVCRT_rand_s
 @ cdecl realloc(ptr long) MSVCRT_realloc
-@ stub remainder
-@ stub remainderf
-@ stub remainderl
+@ cdecl remainder(double double) MSVCR120_remainder
+@ cdecl remainderf(float float) MSVCR120_remainderf
+@ cdecl remainderl(double double) MSVCR120_remainderl
 @ cdecl remove(str) MSVCRT_remove
 @ stub remquo
 @ stub remquof
@@ -2339,12 +2339,12 @@
 @ cdecl round(double) MSVCR120_round
 @ cdecl roundf(float) MSVCR120_roundf
 @ cdecl roundl(double) MSVCR120_roundl
-@ stub scalbln
-@ stub scalblnf
-@ stub scalblnl
-@ stub scalbn
-@ stub scalbnf
-@ stub scalbnl
+@ cdecl scalbln(double long) MSVCRT__scalb
+@ cdecl scalblnf(float long) MSVCRT__scalbf
+@ cdecl scalblnl(double long) MSVCR120_scalbnl
+@ cdecl scalbn(double long) MSVCRT__scalb
+@ cdecl scalbnf(float long) MSVCRT__scalbf
+@ cdecl scalbnl(double long) MSVCR120_scalbnl
 @ varargs scanf(str) MSVCRT_scanf
 @ varargs scanf_s(str) MSVCRT_scanf_s
 @ cdecl setbuf(ptr ptr) MSVCRT_setbuf

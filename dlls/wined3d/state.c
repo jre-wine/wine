@@ -42,7 +42,7 @@ WINE_DECLARE_DEBUG_CHANNEL(d3d_shader);
 
 static void state_undefined(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
 {
-    ERR("Undefined state.\n");
+    ERR("Undefined state %s (%#x).\n", debug_d3dstate(state_id), state_id);
 }
 
 void state_nop(struct wined3d_context *context, const struct wined3d_state *state, DWORD state_id)
@@ -1126,10 +1126,10 @@ void state_fog_fragpart(struct wined3d_context *context, const struct wined3d_st
                     /* drop through */
 
                 case WINED3D_FOG_NONE:
-                    /* Both are none? According to msdn the alpha channel of the specular
-                     * color contains a fog factor. Set it in drawStridedSlow.
-                     * Same happens with Vertexfog on transformed vertices
-                     */
+                    /* Both are none? According to msdn the alpha channel of
+                     * the specular colour contains a fog factor. Set it in
+                     * draw_primitive_immediate_mode(). Same happens with
+                     * vertex fog on transformed vertices. */
                     new_source = FOGSOURCE_COORD;
                     gl_info->gl_ops.gl.p_glFogi(GL_FOG_MODE, GL_LINEAR);
                     checkGLcall("glFogi(GL_FOG_MODE, GL_LINEAR)");
@@ -4204,11 +4204,13 @@ static void load_vertex_data(struct wined3d_context *context,
                     warned = TRUE;
                 }
             }
-        } else {
-            /* TODO: support blends in drawStridedSlow
-             * No need to write a FIXME here, this is done after the general vertex decl decoding
-             */
-            WARN("unsupported blending in openGl\n");
+        }
+        else
+        {
+            /* TODO: Support vertex blending in immediate mode draws. No need
+             * to write a FIXME here, this is done after the general vertex
+             * declaration decoding. */
+            WARN("Vertex blending not supported.\n");
         }
     }
     else

@@ -304,9 +304,9 @@
 @ stub norml
 @ cdecl pow(double double) ucrtbase.pow
 @ cdecl -arch=arm,x86_64 powf(float float) ucrtbase.powf
-@ stub remainder
-@ stub remainderf
-@ stub remainderl
+@ cdecl remainder(double double) ucrtbase.remainder
+@ cdecl remainderf(float float) ucrtbase.remainderf
+@ cdecl remainderl(double double) ucrtbase.remainderl
 @ stub remquo
 @ stub remquof
 @ stub remquol
@@ -316,12 +316,12 @@
 @ cdecl round(double) ucrtbase.round
 @ cdecl roundf(float) ucrtbase.roundf
 @ cdecl roundl(double) ucrtbase.roundl
-@ stub scalbln
-@ stub scalblnf
-@ stub scalblnl
-@ stub scalbn
-@ stub scalbnf
-@ stub scalbnl
+@ cdecl scalbln(double long) ucrtbase.scalbln
+@ cdecl scalblnf(float long) ucrtbase.scalblnf
+@ cdecl scalblnl(double long) ucrtbase.scalblnl
+@ cdecl scalbn(double long) ucrtbase.scalbn
+@ cdecl scalbnf(float long) ucrtbase.scalbnf
+@ cdecl scalbnl(double long) ucrtbase.scalbnl
 @ cdecl sin(double) ucrtbase.sin
 @ cdecl -arch=arm,x86_64 sinf(float) ucrtbase.sinf
 @ cdecl sinh(double) ucrtbase.sinh

@@ -140,8 +140,8 @@
 @ cdecl __pxcptinfoptrs() MSVCRT___pxcptinfoptrs
 @ stub __report_gsfailure
 @ cdecl __setusermatherr(ptr) MSVCRT___setusermatherr
-@ stub __std_exception_copy
-@ stub __std_exception_destroy
+@ cdecl __std_exception_copy(ptr ptr) MSVCRT___std_exception_copy
+@ cdecl __std_exception_destroy(ptr) MSVCRT___std_exception_destroy
 @ cdecl __std_type_info_compare(ptr ptr) MSVCRT_type_info_compare
 @ stub __std_type_info_destroy_list
 @ stub __std_type_info_hash
@@ -150,7 +150,7 @@
 @ stub __stdio_common_vfprintf_p
 @ stub __stdio_common_vfprintf_s
 @ stub __stdio_common_vfscanf
-@ stub __stdio_common_vfwprintf
+@ cdecl __stdio_common_vfwprintf(int64 ptr ptr ptr ptr) MSVCRT__stdio_common_vfwprintf
 @ stub __stdio_common_vfwprintf_p
 @ stub __stdio_common_vfwprintf_s
 @ stub __stdio_common_vfwscanf
@@ -230,7 +230,7 @@
 @ cdecl _commit(long) MSVCRT__commit
 @ cdecl _configthreadlocale(long)
 @ cdecl _configure_narrow_argv(long)
-@ stub _configure_wide_argv
+@ cdecl _configure_wide_argv(long)
 @ cdecl _control87(long long)
 @ cdecl _controlfp(long long)
 @ cdecl _controlfp_s(ptr long long)
@@ -366,7 +366,7 @@
 @ cdecl _get_fmode(ptr) MSVCRT__get_fmode
 @ cdecl _get_heap_handle()
 @ cdecl _get_initial_narrow_environment()
-@ stub _get_initial_wide_environment
+@ cdecl _get_initial_wide_environment()
 @ cdecl _get_invalid_parameter_handler()
 @ stub _get_narrow_winmain_command_line
 @ cdecl _get_osfhandle(long) MSVCRT__get_osfhandle
@@ -420,7 +420,7 @@
 @ cdecl _i64tow_s(int64 ptr long long) MSVCRT__i64tow_s
 @ cdecl _initialize_narrow_environment()
 @ stub _initialize_onexit_table
-@ stub _initialize_wide_environment
+@ cdecl _initialize_wide_environment()
 @ cdecl _initterm(ptr ptr)
 @ cdecl _initterm_e(ptr ptr)
 @ cdecl _invalid_parameter_noinfo()
@@ -2458,9 +2458,9 @@
 @ cdecl rand() MSVCRT_rand
 @ cdecl rand_s(ptr) MSVCRT_rand_s
 @ cdecl realloc(ptr long) MSVCRT_realloc
-@ stub remainder
-@ stub remainderf
-@ stub remainderl
+@ cdecl remainder(double double) MSVCR120_remainder
+@ cdecl remainderf(float float) MSVCR120_remainderf
+@ cdecl remainderl(double double) MSVCR120_remainderl
 @ cdecl remove(str) MSVCRT_remove
 @ stub remquo
 @ stub remquof
@@ -2473,12 +2473,12 @@
 @ cdecl round(double) MSVCR120_round
 @ cdecl roundf(float) MSVCR120_roundf
 @ cdecl roundl(double) MSVCR120_roundl
-@ stub scalbln
-@ stub scalblnf
-@ stub scalblnl
-@ stub scalbn
-@ stub scalbnf
-@ stub scalbnl
+@ cdecl scalbln(double long) MSVCRT__scalb
+@ cdecl scalblnf(float long) MSVCRT__scalbf
+@ cdecl scalblnl(double long) MSVCR120_scalbnl
+@ cdecl scalbn(double long) MSVCRT__scalb
+@ cdecl scalbnf(float long) MSVCRT__scalbf
+@ cdecl scalbnl(double long) MSVCR120_scalbnl
 @ stub set_terminate
 @ stub set_unexpected
 @ cdecl setbuf(ptr ptr) MSVCRT_setbuf

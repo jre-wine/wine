@@ -1582,7 +1582,6 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
     HGLRC ctx, share_ctx;
     int pixel_format;
     unsigned int s;
-    int swap_interval;
     DWORD state;
     HDC hdc = 0;
     BOOL hdc_is_private = FALSE;
@@ -1836,36 +1835,6 @@ struct wined3d_context *context_create(struct wined3d_swapchain *swapchain,
             GL_EXTCALL(glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_PERFORMANCE,
                     GL_DONT_CARE, 0, NULL, GL_TRUE));
         }
-    }
-
-    switch (swapchain->desc.swap_interval)
-    {
-        case WINED3DPRESENT_INTERVAL_IMMEDIATE:
-            swap_interval = 0;
-            break;
-        case WINED3DPRESENT_INTERVAL_DEFAULT:
-        case WINED3DPRESENT_INTERVAL_ONE:
-            swap_interval = 1;
-            break;
-        case WINED3DPRESENT_INTERVAL_TWO:
-            swap_interval = 2;
-            break;
-        case WINED3DPRESENT_INTERVAL_THREE:
-            swap_interval = 3;
-            break;
-        case WINED3DPRESENT_INTERVAL_FOUR:
-            swap_interval = 4;
-            break;
-        default:
-            FIXME("Unknown swap interval %#x.\n", swapchain->desc.swap_interval);
-            swap_interval = 1;
-    }
-
-    if (gl_info->supported[WGL_EXT_SWAP_CONTROL])
-    {
-        if (!GL_EXTCALL(wglSwapIntervalEXT(swap_interval)))
-            ERR("wglSwapIntervalEXT failed to set swap interval %d for context %p, last error %#x\n",
-                swap_interval, ret, GetLastError());
     }
 
     gl_info->gl_ops.gl.p_glGetIntegerv(GL_AUX_BUFFERS, &ret->aux_buffers);
@@ -2538,7 +2507,7 @@ static BOOL context_validate_rt_config(UINT rt_count, struct wined3d_rendertarge
 }
 
 /* Context activation is done by the caller. */
-BOOL context_apply_clear_state(struct wined3d_context *context, const struct wined3d_device *device,
+BOOL context_apply_clear_state(struct wined3d_context *context, const struct wined3d_state *state,
         UINT rt_count, const struct wined3d_fb_state *fb)
 {
     struct wined3d_rendertarget_view **rts = fb->render_targets;
@@ -2547,8 +2516,8 @@ BOOL context_apply_clear_state(struct wined3d_context *context, const struct win
     DWORD rt_mask = 0, *cur_mask;
     UINT i;
 
-    if (isStateDirty(context, STATE_FRAMEBUFFER) || fb != &device->fb
-            || rt_count != context->gl_info->limits.buffers)
+    if (isStateDirty(context, STATE_FRAMEBUFFER) || fb != state->fb
+            || rt_count != gl_info->limits.buffers)
     {
         if (!context_validate_rt_config(rt_count, rts, dsv))
             return FALSE;
@@ -2565,7 +2534,7 @@ BOOL context_apply_clear_state(struct wined3d_context *context, const struct win
                     if (rts[i] && rts[i]->format->id != WINED3DFMT_NULL)
                         rt_mask |= (1u << i);
                 }
-                while (i < context->gl_info->limits.buffers)
+                while (i < gl_info->limits.buffers)
                 {
                     context->blit_targets[i] = NULL;
                     ++i;
@@ -2632,7 +2601,7 @@ BOOL context_apply_clear_state(struct wined3d_context *context, const struct win
     gl_info->gl_ops.gl.p_glEnable(GL_SCISSOR_TEST);
     if (rt_count && gl_info->supported[ARB_FRAMEBUFFER_SRGB])
     {
-        if (needs_srgb_write(context, &device->state, fb))
+        if (needs_srgb_write(context, state, fb))
             gl_info->gl_ops.gl.p_glEnable(GL_FRAMEBUFFER_SRGB);
         else
             gl_info->gl_ops.gl.p_glDisable(GL_FRAMEBUFFER_SRGB);
@@ -3132,7 +3101,8 @@ static void context_update_stream_info(struct wined3d_context *context, const st
          * sources. In most sane cases the pointer - offset will still be > 0,
          * otherwise it will wrap around to some big value. Hope that with the
          * indices the driver wraps it back internally. If not,
-         * drawStridedSlow is needed, including a vertex buffer path. */
+         * draw_primitive_immediate_mode() is needed, including a vertex buffer
+         * path. */
         if (state->load_base_vertex_index < 0)
         {
             WARN_(d3d_perf)("load_base_vertex_index is < 0 (%d), not using VBOs.\n",
@@ -3163,7 +3133,7 @@ static void context_update_stream_info(struct wined3d_context *context, const st
     {
         if (state->vertex_declaration->half_float_conv_needed && !stream_info->all_vbo)
         {
-            TRACE("Using drawStridedSlow with vertex shaders for FLOAT16 conversion.\n");
+            TRACE("Using immediate mode draw with vertex shaders for FLOAT16 conversion.\n");
             context->use_immediate_mode_draw = TRUE;
         }
         else
@@ -3348,9 +3318,9 @@ static void context_bind_shader_resources(struct wined3d_context *context, const
 }
 
 /* Context activation is done by the caller. */
-BOOL context_apply_draw_state(struct wined3d_context *context, struct wined3d_device *device)
+BOOL context_apply_draw_state(struct wined3d_context *context,
+        const struct wined3d_device *device, const struct wined3d_state *state)
 {
-    const struct wined3d_state *state = &device->state;
     const struct StateEntry *state_table = context->state_table;
     const struct wined3d_fb_state *fb = state->fb;
     unsigned int i;

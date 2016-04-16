@@ -35,9 +35,8 @@ WINE_DECLARE_DEBUG_CHANNEL(d3d_perf);
 
 #define MAXLOCKCOUNT 50 /* After this amount of locks do not free the sysmem copy. */
 
-static const DWORD surface_simple_locations =
-        WINED3D_LOCATION_SYSMEM | WINED3D_LOCATION_USER_MEMORY
-        | WINED3D_LOCATION_DIB | WINED3D_LOCATION_BUFFER;
+static const DWORD surface_simple_locations = WINED3D_LOCATION_SYSMEM
+        | WINED3D_LOCATION_USER_MEMORY | WINED3D_LOCATION_BUFFER;
 
 void wined3d_surface_cleanup(struct wined3d_surface *surface)
 {
@@ -80,12 +79,8 @@ void wined3d_surface_cleanup(struct wined3d_surface *surface)
         context_release(context);
     }
 
-    if (surface->flags & SFLAG_DIBSECTION)
-    {
-        DeleteDC(surface->hDC);
-        DeleteObject(surface->dib.DIBsection);
-        surface->dib.bitmap_data = NULL;
-    }
+    if (surface->dc)
+        wined3d_surface_destroy_dc(surface);
 
     if (surface->overlay_dest)
         list_remove(&surface->overlay_entry);
@@ -277,10 +272,12 @@ static void surface_get_rect(const struct wined3d_surface *surface, const RECT *
         *rect_out = *rect_in;
     else
     {
+        const struct wined3d_texture *texture = surface->container;
+
         rect_out->left = 0;
         rect_out->top = 0;
-        rect_out->right = surface->resource.width;
-        rect_out->bottom = surface->resource.height;
+        rect_out->right = wined3d_texture_get_level_width(texture, surface->texture_level);
+        rect_out->bottom = wined3d_texture_get_level_height(texture, surface->texture_level);
     }
 }
 
@@ -346,110 +343,100 @@ static void get_color_masks(const struct wined3d_format *format, DWORD *masks)
     masks[2] = ((1u << format->blue_size) - 1) << format->blue_offset;
 }
 
-HRESULT surface_create_dib_section(struct wined3d_surface *surface)
+void wined3d_surface_destroy_dc(struct wined3d_surface *surface)
 {
+    unsigned int sub_resource_idx = surface_get_sub_resource_idx(surface);
+    struct wined3d_texture *texture = surface->container;
+    struct wined3d_device *device = texture->resource.device;
+    const struct wined3d_gl_info *gl_info = NULL;
+    D3DKMT_DESTROYDCFROMMEMORY destroy_desc;
+    struct wined3d_context *context = NULL;
+    struct wined3d_bo_address data;
+    NTSTATUS status;
+
+    if (!surface->dc)
+    {
+        ERR("Surface %p has no DC.\n", surface);
+        return;
+    }
+
+    TRACE("dc %p, bitmap %p.\n", surface->dc, surface->bitmap);
+
+    destroy_desc.hDc = surface->dc;
+    destroy_desc.hBitmap = surface->bitmap;
+    if ((status = D3DKMTDestroyDCFromMemory(&destroy_desc)))
+        ERR("Failed to destroy dc, status %#x.\n", status);
+    surface->dc = NULL;
+    surface->bitmap = NULL;
+
+    if (device->d3d_initialized)
+    {
+        context = context_acquire(device, NULL);
+        gl_info = context->gl_info;
+    }
+
+    wined3d_texture_get_memory(texture, sub_resource_idx, &data, surface->resource.map_binding);
+    wined3d_texture_unmap_bo_address(&data, gl_info, GL_PIXEL_UNPACK_BUFFER);
+
+    if (context)
+        context_release(context);
+}
+
+HRESULT wined3d_surface_create_dc(struct wined3d_surface *surface)
+{
+    unsigned int sub_resource_idx = surface_get_sub_resource_idx(surface);
     struct wined3d_texture *texture = surface->container;
     const struct wined3d_format *format = texture->resource.format;
-    unsigned int format_flags = texture->resource.format_flags;
+    struct wined3d_device *device = texture->resource.device;
+    const struct wined3d_gl_info *gl_info = NULL;
+    struct wined3d_context *context = NULL;
     unsigned int row_pitch, slice_pitch;
-    BITMAPINFO *b_info;
-    DWORD *masks;
+    struct wined3d_bo_address data;
+    D3DKMT_CREATEDCFROMMEMORY desc;
+    NTSTATUS status;
 
     TRACE("surface %p.\n", surface);
 
-    if (!(format_flags & WINED3DFMT_FLAG_GETDC))
+    if (!format->ddi_format)
     {
-        WARN("Cannot use GetDC on a %s surface.\n", debug_d3dformat(format->id));
+        WARN("Cannot create a DC for format %s.\n", debug_d3dformat(format->id));
         return WINED3DERR_INVALIDCALL;
     }
 
-    switch (format->byte_count)
-    {
-        case 2:
-        case 4:
-            /* Allocate extra space to store the RGB bit masks. */
-            b_info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET(BITMAPINFO, bmiColors[3]));
-            break;
-
-        case 3:
-            b_info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, FIELD_OFFSET(BITMAPINFO, bmiColors[0]));
-            break;
-
-        default:
-            /* Allocate extra space for a palette. */
-            b_info = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                    FIELD_OFFSET(BITMAPINFO, bmiColors[1u << (format->byte_count * 8)]));
-            break;
-    }
-
-    if (!b_info)
-        return E_OUTOFMEMORY;
-
-    b_info->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     wined3d_texture_get_pitch(texture, surface->texture_level, &row_pitch, &slice_pitch);
-    b_info->bmiHeader.biWidth = row_pitch / format->byte_count;
-    b_info->bmiHeader.biHeight = 0 - surface->resource.height;
-    b_info->bmiHeader.biSizeImage = slice_pitch;
-    b_info->bmiHeader.biPlanes = 1;
-    b_info->bmiHeader.biBitCount = format->byte_count * 8;
 
-    b_info->bmiHeader.biXPelsPerMeter = 0;
-    b_info->bmiHeader.biYPelsPerMeter = 0;
-    b_info->bmiHeader.biClrUsed = 0;
-    b_info->bmiHeader.biClrImportant = 0;
-
-    /* Get the bit masks */
-    masks = (DWORD *)b_info->bmiColors;
-    switch (format->id)
+    if (device->d3d_initialized)
     {
-        case WINED3DFMT_B8G8R8_UNORM:
-            b_info->bmiHeader.biCompression = BI_RGB;
-            break;
-
-        case WINED3DFMT_B5G5R5X1_UNORM:
-        case WINED3DFMT_B5G5R5A1_UNORM:
-        case WINED3DFMT_B4G4R4A4_UNORM:
-        case WINED3DFMT_B4G4R4X4_UNORM:
-        case WINED3DFMT_B2G3R3_UNORM:
-        case WINED3DFMT_B2G3R3A8_UNORM:
-        case WINED3DFMT_R10G10B10A2_UNORM:
-        case WINED3DFMT_R8G8B8A8_UNORM:
-        case WINED3DFMT_R8G8B8X8_UNORM:
-        case WINED3DFMT_B10G10R10A2_UNORM:
-        case WINED3DFMT_B5G6R5_UNORM:
-        case WINED3DFMT_R16G16B16A16_UNORM:
-            b_info->bmiHeader.biCompression = BI_BITFIELDS;
-            get_color_masks(format, masks);
-            break;
-
-        default:
-            /* Don't know palette */
-            b_info->bmiHeader.biCompression = BI_RGB;
-            break;
+        context = context_acquire(device, NULL);
+        gl_info = context->gl_info;
     }
 
-    TRACE("Creating a DIB section with size %dx%dx%d, size=%d.\n",
-            b_info->bmiHeader.biWidth, b_info->bmiHeader.biHeight,
-            b_info->bmiHeader.biBitCount, b_info->bmiHeader.biSizeImage);
-    surface->dib.DIBsection = CreateDIBSection(0, b_info, DIB_RGB_COLORS, &surface->dib.bitmap_data, 0, 0);
+    wined3d_texture_get_memory(texture, sub_resource_idx, &data, surface->resource.map_binding);
+    desc.pMemory = wined3d_texture_map_bo_address(&data, surface->resource.size,
+            gl_info, GL_PIXEL_UNPACK_BUFFER, 0);
 
-    if (!surface->dib.DIBsection)
+    if (context)
+        context_release(context);
+
+    desc.Format = format->ddi_format;
+    desc.Width = wined3d_texture_get_level_width(texture, surface->texture_level);
+    desc.Height = wined3d_texture_get_level_height(texture, surface->texture_level);
+    desc.Pitch = row_pitch;
+    desc.hDeviceDc = CreateCompatibleDC(NULL);
+    desc.pColorTable = NULL;
+
+    status = D3DKMTCreateDCFromMemory(&desc);
+    DeleteDC(desc.hDeviceDc);
+    if (status)
     {
-        ERR("Failed to create DIB section.\n");
-        HeapFree(GetProcessHeap(), 0, b_info);
-        return HRESULT_FROM_WIN32(GetLastError());
+        WARN("Failed to create DC, status %#x.\n", status);
+        return WINED3DERR_INVALIDCALL;
     }
 
-    TRACE("DIBSection at %p.\n", surface->dib.bitmap_data);
-    surface->dib.bitmap_size = b_info->bmiHeader.biSizeImage;
+    surface->dc = desc.hDc;
+    surface->bitmap = desc.hBitmap;
 
-    HeapFree(GetProcessHeap(), 0, b_info);
-
-    /* Now allocate a DC. */
-    surface->hDC = CreateCompatibleDC(0);
-    SelectObject(surface->hDC, surface->dib.DIBsection);
-
-    surface->flags |= SFLAG_DIBSECTION;
+    TRACE("Created DC %p, bitmap %p for surface %p.\n", surface->dc, surface->bitmap, surface);
 
     return WINED3D_OK;
 }
@@ -475,7 +462,7 @@ static void surface_evict_sysmem(struct wined3d_surface *surface)
     unsigned int sub_resource_idx = surface_get_sub_resource_idx(surface);
     struct wined3d_texture *texture = surface->container;
 
-    if (surface->resource.map_count || texture->download_count > MAXLOCKCOUNT
+    if (texture->sub_resources[sub_resource_idx].map_count || texture->download_count > MAXLOCKCOUNT
             || texture->flags & (WINED3D_TEXTURE_CONVERTED | WINED3D_TEXTURE_PIN_SYSMEM))
         return;
 
@@ -485,9 +472,13 @@ static void surface_evict_sysmem(struct wined3d_surface *surface)
 
 static BOOL surface_is_full_rect(const struct wined3d_surface *surface, const RECT *r)
 {
-    if ((r->left && r->right) || abs(r->right - r->left) != surface->resource.width)
+    unsigned int t;
+
+    t = wined3d_texture_get_level_width(surface->container, surface->texture_level);
+    if ((r->left && r->right) || abs(r->right - r->left) != t)
         return FALSE;
-    if ((r->top && r->bottom) || abs(r->bottom - r->top) != surface->resource.height)
+    t = wined3d_texture_get_level_height(surface->container, surface->texture_level);
+    if ((r->top && r->bottom) || abs(r->bottom - r->top) != t)
         return FALSE;
     return TRUE;
 }
@@ -881,27 +872,10 @@ static void surface_unload(struct wined3d_resource *resource)
 
     if (resource->pool == WINED3D_POOL_DEFAULT)
     {
-        /* Default pool resources are supposed to be destroyed before Reset is called.
-         * Implicit resources stay however. So this means we have an implicit render target
-         * or depth stencil. The content may be destroyed, but we still have to tear down
-         * opengl resources, so we cannot leave early.
-         *
-         * Put the surfaces into sysmem, and reset the content. The D3D content is undefined,
-         * but we can't set the sysmem INDRAWABLE because when we're rendering the swapchain
-         * or the depth stencil into an FBO the texture or render buffer will be removed
-         * and all flags get lost */
-        if (resource->usage & WINED3DUSAGE_DEPTHSTENCIL)
-        {
-            wined3d_texture_validate_location(texture, sub_resource_idx, WINED3D_LOCATION_DISCARDED);
-            wined3d_texture_invalidate_location(texture, sub_resource_idx, ~WINED3D_LOCATION_DISCARDED);
-        }
-        else
-        {
-            surface_prepare_system_memory(surface);
-            memset(surface->resource.heap_memory, 0, surface->resource.size);
-            wined3d_texture_validate_location(texture, sub_resource_idx, WINED3D_LOCATION_SYSMEM);
-            wined3d_texture_invalidate_location(texture, sub_resource_idx, ~WINED3D_LOCATION_SYSMEM);
-        }
+        /* We should only get here on device reset/teardown for implicit
+         * resources. */
+        wined3d_texture_validate_location(texture, sub_resource_idx, WINED3D_LOCATION_DISCARDED);
+        wined3d_texture_invalidate_location(texture, sub_resource_idx, ~WINED3D_LOCATION_DISCARDED);
     }
     else
     {
@@ -1048,8 +1022,8 @@ static void surface_download_data(struct wined3d_surface *surface, const struct 
         if (texture->flags & WINED3D_TEXTURE_COND_NP2_EMULATED)
         {
             const BYTE *src_data;
+            unsigned int h, y;
             BYTE *dst_data;
-            UINT y;
             /*
              * Some games (e.g. warhammer 40k) don't work properly with the odd pitches, preventing
              * the surface pitch from being used to box non-power2 textures. Instead we have to use a hack to
@@ -1098,7 +1072,8 @@ static void surface_download_data(struct wined3d_surface *surface, const struct 
             src_data = mem;
             dst_data = data.addr;
             TRACE("Repacking the surface data from pitch %u to pitch %u.\n", src_row_pitch, dst_row_pitch);
-            for (y = 0; y < surface->resource.height; ++y)
+            h = wined3d_texture_get_level_height(texture, surface->texture_level);
+            for (y = 0; y < h; ++y)
             {
                 memcpy(dst_data, src_data, dst_row_pitch);
                 src_data += src_row_pitch;
@@ -1117,6 +1092,7 @@ void wined3d_surface_upload_data(struct wined3d_surface *surface, const struct w
         const struct wined3d_format *format, const RECT *src_rect, UINT src_pitch, const POINT *dst_point,
         BOOL srgb, const struct wined3d_const_bo_address *data)
 {
+    unsigned int sub_resource_idx = surface_get_sub_resource_idx(surface);
     struct wined3d_texture *texture = surface->container;
     UINT update_w = src_rect->right - src_rect->left;
     UINT update_h = src_rect->bottom - src_rect->top;
@@ -1125,7 +1101,7 @@ void wined3d_surface_upload_data(struct wined3d_surface *surface, const struct w
             surface, gl_info, debug_d3dformat(format->id), wine_dbgstr_rect(src_rect), src_pitch,
             wine_dbgstr_point(dst_point), srgb, data->buffer_object, data->addr);
 
-    if (surface->resource.map_count)
+    if (texture->sub_resources[sub_resource_idx].map_count)
     {
         WARN("Uploading a surface that is currently mapped, setting WINED3D_TEXTURE_PIN_SYSMEM.\n");
         texture->flags |= WINED3D_TEXTURE_PIN_SYSMEM;
@@ -1280,7 +1256,8 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
 
     if (!src_rect)
     {
-        SetRect(&r, 0, 0, src_surface->resource.width, src_surface->resource.height);
+        SetRect(&r, 0, 0, wined3d_texture_get_level_width(src_texture, src_surface->texture_level),
+                wined3d_texture_get_level_height(src_texture, src_surface->texture_level));
         src_rect = &r;
     }
     else if (src_rect->left < 0 || src_rect->left >= src_rect->right
@@ -1290,8 +1267,8 @@ HRESULT surface_upload_from_surface(struct wined3d_surface *dst_surface, const P
         return WINED3DERR_INVALIDCALL;
     }
 
-    dst_w = dst_surface->resource.width;
-    dst_h = dst_surface->resource.height;
+    dst_w = wined3d_texture_get_level_width(dst_texture, dst_surface->texture_level);
+    dst_h = wined3d_texture_get_level_height(dst_texture, dst_surface->texture_level);
 
     update_w = src_rect->right - src_rect->left;
     update_h = src_rect->bottom - src_rect->top;
@@ -1412,27 +1389,6 @@ void surface_set_compatible_renderbuffer(struct wined3d_surface *surface, const 
     }
 
     checkGLcall("set_compatible_renderbuffer");
-}
-
-/* Context activation is done by the caller. */
-void surface_load(struct wined3d_surface *surface, struct wined3d_context *context, BOOL srgb)
-{
-    DWORD location = srgb ? WINED3D_LOCATION_TEXTURE_SRGB : WINED3D_LOCATION_TEXTURE_RGB;
-
-    TRACE("surface %p, srgb %#x.\n", surface, srgb);
-
-    if (surface->container->resource.pool == WINED3D_POOL_SCRATCH)
-        ERR("Not supported on scratch surfaces.\n");
-
-    if (surface_get_sub_resource(surface)->locations & location)
-    {
-        TRACE("surface is already in texture\n");
-        return;
-    }
-    TRACE("Reloading because surface is dirty.\n");
-
-    surface_load_location(surface, context, location);
-    surface_evict_sysmem(surface);
 }
 
 /* See also float_16_to_32() in wined3d_private.h */
@@ -1698,27 +1654,31 @@ static inline const struct d3dfmt_converter_desc *find_converter(enum wined3d_fo
 }
 
 static struct wined3d_texture *surface_convert_format(struct wined3d_texture *src_texture,
-        unsigned int sub_resource_idx, enum wined3d_format_id format)
+        unsigned int sub_resource_idx, const struct wined3d_format *dst_format)
 {
-    struct wined3d_map_desc src_map, dst_map;
-    const struct d3dfmt_converter_desc *conv;
+    const struct wined3d_format *src_format = src_texture->resource.format;
+    struct wined3d_device *device = src_texture->resource.device;
+    const struct d3dfmt_converter_desc *conv = NULL;
     struct wined3d_texture *dst_texture;
     struct wined3d_resource_desc desc;
+    struct wined3d_map_desc src_map;
 
-    if (!(conv = find_converter(src_texture->resource.format->id, format)))
+    if (!(conv = find_converter(src_format->id, dst_format->id)) && (!device->d3d_initialized
+            || !is_identity_fixup(src_format->color_fixup) || src_format->convert
+            || !is_identity_fixup(dst_format->color_fixup) || dst_format->convert))
     {
         FIXME("Cannot find a conversion function from format %s to %s.\n",
-                debug_d3dformat(src_texture->resource.format->id), debug_d3dformat(format));
+                debug_d3dformat(src_format->id), debug_d3dformat(dst_format->id));
         return NULL;
     }
 
     /* FIXME: Multisampled conversion? */
     wined3d_resource_get_desc(src_texture->sub_resources[sub_resource_idx].resource, &desc);
     desc.resource_type = WINED3D_RTYPE_TEXTURE_2D;
-    desc.format = format;
+    desc.format = dst_format->id;
     desc.usage = 0;
     desc.pool = WINED3D_POOL_SCRATCH;
-    if (FAILED(wined3d_texture_create(src_texture->resource.device, &desc, 1,
+    if (FAILED(wined3d_texture_create(device, &desc, 1,
             WINED3D_TEXTURE_CREATE_MAPPABLE | WINED3D_TEXTURE_CREATE_DISCARD,
             NULL, NULL, &wined3d_null_parent_ops, &dst_texture)))
     {
@@ -1727,8 +1687,6 @@ static struct wined3d_texture *surface_convert_format(struct wined3d_texture *sr
     }
 
     memset(&src_map, 0, sizeof(src_map));
-    memset(&dst_map, 0, sizeof(dst_map));
-
     if (FAILED(wined3d_resource_map(&src_texture->resource, sub_resource_idx,
             &src_map, NULL, WINED3D_MAP_READONLY)))
     {
@@ -1736,17 +1694,45 @@ static struct wined3d_texture *surface_convert_format(struct wined3d_texture *sr
         wined3d_texture_decref(dst_texture);
         return NULL;
     }
-    if (FAILED(wined3d_resource_map(&dst_texture->resource, 0, &dst_map, NULL, 0)))
+    if (conv)
     {
-        ERR("Failed to map the destination texture.\n");
-        wined3d_resource_unmap(&src_texture->resource, sub_resource_idx);
-        wined3d_texture_decref(dst_texture);
-        return NULL;
+        struct wined3d_map_desc dst_map;
+
+        memset(&dst_map, 0, sizeof(dst_map));
+        if (FAILED(wined3d_resource_map(&dst_texture->resource, 0, &dst_map, NULL, 0)))
+        {
+            ERR("Failed to map the destination texture.\n");
+            wined3d_resource_unmap(&src_texture->resource, sub_resource_idx);
+            wined3d_texture_decref(dst_texture);
+            return NULL;
+        }
+
+        conv->convert(src_map.data, dst_map.data, src_map.row_pitch, dst_map.row_pitch, desc.width, desc.height);
+
+        wined3d_resource_unmap(&dst_texture->resource, 0);
     }
+    else
+    {
+        struct wined3d_bo_address data = {0, src_map.data};
+        RECT src_rect = {0, 0, desc.width, desc.height};
+        const struct wined3d_gl_info *gl_info;
+        struct wined3d_context *context;
+        POINT dst_point = {0, 0};
 
-    conv->convert(src_map.data, dst_map.data, src_map.row_pitch, dst_map.row_pitch, desc.width, desc.height);
+        TRACE("Using upload conversion.\n");
+        context = context_acquire(device, NULL);
+        gl_info = context->gl_info;
 
-    wined3d_resource_unmap(&dst_texture->resource, 0);
+        wined3d_texture_prepare_texture(dst_texture, context, FALSE);
+        wined3d_texture_bind_and_dirtify(dst_texture, context, FALSE);
+        wined3d_surface_upload_data(dst_texture->sub_resources[0].u.surface, gl_info, src_format,
+                &src_rect, src_map.row_pitch, &dst_point, FALSE, wined3d_const_bo_address(&data));
+
+        context_release(context);
+
+        wined3d_texture_validate_location(dst_texture, 0, WINED3D_LOCATION_TEXTURE_RGB);
+        wined3d_texture_invalidate_location(dst_texture, 0, ~WINED3D_LOCATION_TEXTURE_RGB);
+    }
     wined3d_resource_unmap(&src_texture->resource, sub_resource_idx);
 
     return dst_texture;
@@ -1820,6 +1806,7 @@ static void read_from_framebuffer(struct wined3d_surface *surface,
     struct wined3d_context *context = old_ctx;
     struct wined3d_surface *restore_rt = NULL;
     unsigned int row_pitch, slice_pitch;
+    unsigned int width, height;
     BYTE *mem;
     BYTE *row, *top, *bottom;
     int i;
@@ -1871,8 +1858,9 @@ static void read_from_framebuffer(struct wined3d_surface *surface,
     gl_info->gl_ops.gl.p_glPixelStorei(GL_PACK_ROW_LENGTH, row_pitch / texture->resource.format->byte_count);
     checkGLcall("glPixelStorei");
 
-    gl_info->gl_ops.gl.p_glReadPixels(0, 0,
-            surface->resource.width, surface->resource.height,
+    width = wined3d_texture_get_level_width(texture, surface->texture_level);
+    height = wined3d_texture_get_level_height(texture, surface->texture_level);
+    gl_info->gl_ops.gl.p_glReadPixels(0, 0, width, height,
             texture->resource.format->glFormat,
             texture->resource.format->glType, data.addr);
     checkGLcall("glReadPixels");
@@ -1898,8 +1886,8 @@ static void read_from_framebuffer(struct wined3d_surface *surface,
             mem = data.addr;
 
         top = mem;
-        bottom = mem + row_pitch * (surface->resource.height - 1);
-        for (i = 0; i < surface->resource.height / 2; i++)
+        bottom = mem + row_pitch * (height - 1);
+        for (i = 0; i < height / 2; i++)
         {
             memcpy(row, top, row_pitch);
             memcpy(top, bottom, row_pitch);
@@ -1959,7 +1947,8 @@ void surface_load_fb_texture(struct wined3d_surface *surface, BOOL srgb, struct 
     checkGLcall("glReadBuffer");
 
     gl_info->gl_ops.gl.p_glCopyTexSubImage2D(surface->texture_target, surface->texture_level,
-            0, 0, 0, 0, surface->resource.width, surface->resource.height);
+            0, 0, 0, 0, wined3d_texture_get_level_width(texture, surface->texture_level),
+            wined3d_texture_get_level_height(texture, surface->texture_level));
     checkGLcall("glCopyTexSubImage2D");
 
     if (restore_rt)
@@ -2041,6 +2030,7 @@ static void fb_copy_to_texture_direct(struct wined3d_surface *dst_surface, struc
     struct wined3d_context *context;
     BOOL upsidedown = FALSE;
     RECT dst_rect = *dst_rect_in;
+    unsigned int src_height;
 
     /* Make sure that the top pixel is always above the bottom pixel, and keep a separate upside down flag
      * glCopyTexSubImage is a bit picky about the parameters we pass to it
@@ -2087,6 +2077,7 @@ static void fb_copy_to_texture_direct(struct wined3d_surface *dst_surface, struc
         ERR("Texture filtering not supported in direct blit\n");
     }
 
+    src_height = wined3d_texture_get_level_height(src_texture, src_surface->texture_level);
     if (upsidedown
             && !((xrel - 1.0f < -eps) || (xrel - 1.0f > eps))
             && !((yrel - 1.0f < -eps) || (yrel - 1.0f > eps)))
@@ -2094,13 +2085,13 @@ static void fb_copy_to_texture_direct(struct wined3d_surface *dst_surface, struc
         /* Upside down copy without stretching is nice, one glCopyTexSubImage call will do. */
         gl_info->gl_ops.gl.p_glCopyTexSubImage2D(dst_surface->texture_target, dst_surface->texture_level,
                 dst_rect.left /*xoffset */, dst_rect.top /* y offset */,
-                src_rect->left, src_surface->resource.height - src_rect->bottom,
+                src_rect->left, src_height - src_rect->bottom,
                 dst_rect.right - dst_rect.left, dst_rect.bottom - dst_rect.top);
     }
     else
     {
         LONG row;
-        UINT yoffset = src_surface->resource.height - src_rect->top + dst_rect.top - 1;
+        UINT yoffset = src_height - src_rect->top + dst_rect.top - 1;
         /* I have to process this row by row to swap the image,
          * otherwise it would be upside down, so stretching in y direction
          * doesn't cost extra time
@@ -2150,9 +2141,8 @@ static void fb_copy_to_texture_hwstretch(struct wined3d_surface *dst_surface, st
     struct wined3d_device *device = dst_texture->resource.device;
     GLuint src, backup = 0;
     float left, right, top, bottom; /* Texture coordinates */
-    UINT fbwidth = src_surface->resource.width;
-    UINT fbheight = src_surface->resource.height;
     const struct wined3d_gl_info *gl_info;
+    unsigned int src_width, src_height;
     struct wined3d_context *context;
     GLenum drawBuffer = GL_BACK;
     GLenum offscreen_buffer;
@@ -2170,6 +2160,8 @@ static void fb_copy_to_texture_hwstretch(struct wined3d_surface *dst_surface, st
     wined3d_texture_load(dst_texture, context, FALSE);
 
     offscreen_buffer = context_get_offscreen_gl_buffer(context);
+    src_width = wined3d_texture_get_level_width(src_texture, src_surface->texture_level);
+    src_height = wined3d_texture_get_level_height(src_texture, src_surface->texture_level);
 
     src_offscreen = wined3d_resource_is_offscreen(&src_texture->resource);
     noBackBufferBackup = src_offscreen && wined3d_settings.offscreen_rendering_mode == ORM_FBO;
@@ -2236,7 +2228,7 @@ static void fb_copy_to_texture_hwstretch(struct wined3d_surface *dst_surface, st
     }
 
     /* TODO: Only back up the part that will be overwritten */
-    gl_info->gl_ops.gl.p_glCopyTexSubImage2D(texture_target, 0, 0, 0, 0, 0, fbwidth, fbheight);
+    gl_info->gl_ops.gl.p_glCopyTexSubImage2D(texture_target, 0, 0, 0, 0, 0, src_width, src_height);
 
     checkGLcall("glCopyTexSubImage2D");
 
@@ -2266,7 +2258,7 @@ static void fb_copy_to_texture_hwstretch(struct wined3d_surface *dst_surface, st
         gl_info->gl_ops.gl.p_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, src_surface->pow2Width,
                 src_surface->pow2Height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
         checkGLcall("glTexImage2D");
-        gl_info->gl_ops.gl.p_glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, fbwidth, fbheight);
+        gl_info->gl_ops.gl.p_glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, src_width, src_height);
 
         gl_info->gl_ops.gl.p_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         checkGLcall("glTexParameteri");
@@ -2290,13 +2282,13 @@ static void fb_copy_to_texture_hwstretch(struct wined3d_surface *dst_surface, st
 
     if (!upsidedown)
     {
-        top = src_surface->resource.height - src_rect->top;
-        bottom = src_surface->resource.height - src_rect->bottom;
+        top = src_height - src_rect->top;
+        bottom = src_height - src_rect->bottom;
     }
     else
     {
-        top = src_surface->resource.height - src_rect->bottom;
-        bottom = src_surface->resource.height - src_rect->top;
+        top = src_height - src_rect->bottom;
+        bottom = src_height - src_rect->top;
     }
 
     if (src_texture->flags & WINED3D_TEXTURE_NORMALIZED_COORDS)
@@ -2376,20 +2368,20 @@ static void fb_copy_to_texture_hwstretch(struct wined3d_surface *dst_surface, st
         gl_info->gl_ops.gl.p_glBegin(GL_QUADS);
             /* top left */
             gl_info->gl_ops.gl.p_glTexCoord2f(0.0f, 0.0f);
-            gl_info->gl_ops.gl.p_glVertex2i(0, fbheight);
+            gl_info->gl_ops.gl.p_glVertex2i(0, src_height);
 
             /* bottom left */
-            gl_info->gl_ops.gl.p_glTexCoord2f(0.0f, (float)fbheight / (float)src_surface->pow2Height);
+            gl_info->gl_ops.gl.p_glTexCoord2f(0.0f, (float)src_height / (float)src_surface->pow2Height);
             gl_info->gl_ops.gl.p_glVertex2i(0, 0);
 
             /* bottom right */
-            gl_info->gl_ops.gl.p_glTexCoord2f((float)fbwidth / (float)src_surface->pow2Width,
-                    (float)fbheight / (float)src_surface->pow2Height);
-            gl_info->gl_ops.gl.p_glVertex2i(fbwidth, 0);
+            gl_info->gl_ops.gl.p_glTexCoord2f((float)src_width / (float)src_surface->pow2Width,
+                    (float)src_height / (float)src_surface->pow2Height);
+            gl_info->gl_ops.gl.p_glVertex2i(src_width, 0);
 
             /* top right */
-            gl_info->gl_ops.gl.p_glTexCoord2f((float)fbwidth / (float)src_surface->pow2Width, 0.0f);
-            gl_info->gl_ops.gl.p_glVertex2i(fbwidth, fbheight);
+            gl_info->gl_ops.gl.p_glTexCoord2f((float)src_width / (float)src_surface->pow2Width, 0.0f);
+            gl_info->gl_ops.gl.p_glVertex2i(src_width, src_height);
         gl_info->gl_ops.gl.p_glEnd();
     }
     gl_info->gl_ops.gl.p_glDisable(texture_target);
@@ -2424,9 +2416,10 @@ static void fb_copy_to_texture_hwstretch(struct wined3d_surface *dst_surface, st
  * origin, while D3D has a top-left origin. */
 void surface_translate_drawable_coords(const struct wined3d_surface *surface, HWND window, RECT *rect)
 {
+    struct wined3d_texture *texture = surface->container;
     UINT drawable_height;
 
-    if (surface->container->swapchain && surface->container == surface->container->swapchain->front_buffer)
+    if (texture->swapchain && texture == texture->swapchain->front_buffer)
     {
         POINT offset = {0, 0};
         RECT windowsize;
@@ -2439,7 +2432,7 @@ void surface_translate_drawable_coords(const struct wined3d_surface *surface, HW
     }
     else
     {
-        drawable_height = surface->resource.height;
+        drawable_height = wined3d_texture_get_level_height(texture, surface->texture_level);
     }
 
     rect->top = drawable_height - rect->top;
@@ -2638,6 +2631,7 @@ static HRESULT surface_blt_special(struct wined3d_surface *dst_surface, const RE
 
     if ((src_swapchain || src_surface == rt) && !dst_swapchain)
     {
+        unsigned int src_width, src_height;
         /* Blit from render target to texture */
         BOOL stretchx;
 
@@ -2671,8 +2665,10 @@ static HRESULT surface_blt_special(struct wined3d_surface *dst_surface, const RE
          *    back buffer. This is slower than reading line per line, thus not used for flipping
          * -> If the app wants a scaled image with a dest rect that is bigger than the fb, it has to be copied
          *    pixel by pixel. */
-        if (!stretchx || dst_rect->right - dst_rect->left > src_surface->resource.width
-                || dst_rect->bottom - dst_rect->top > src_surface->resource.height)
+        src_width = wined3d_texture_get_level_width(src_texture, src_surface->texture_level);
+        src_height = wined3d_texture_get_level_height(src_texture, src_surface->texture_level);
+        if (!stretchx || dst_rect->right - dst_rect->left > src_width
+                || dst_rect->bottom - dst_rect->top > src_height)
         {
             TRACE("No stretching in x direction, using direct framebuffer -> texture copy.\n");
             fb_copy_to_texture_direct(dst_surface, src_surface, src_rect, dst_rect, filter);
@@ -2793,8 +2789,8 @@ static void surface_load_ds_location(struct wined3d_surface *surface, struct win
     }
     else
     {
-        w = surface->resource.width;
-        h = surface->resource.height;
+        w = wined3d_texture_get_level_width(surface->container, surface->texture_level);
+        h = wined3d_texture_get_level_height(surface->container, surface->texture_level);
     }
 
     if (surface->current_renderbuffer)
@@ -2825,7 +2821,7 @@ static void surface_load_ds_location(struct wined3d_surface *surface, struct win
         /* Note that we use depth_blt here as well, rather than glCopyTexImage2D
          * directly on the FBO texture. That's because we need to flip. */
         context_apply_fbo_state_blit(context, GL_FRAMEBUFFER,
-                surface_from_resource(wined3d_texture_get_sub_resource(context->swapchain->front_buffer, 0)),
+                context->swapchain->front_buffer->sub_resources[0].u.surface,
                 NULL, WINED3D_LOCATION_DRAWABLE);
         if (surface->texture_target == GL_TEXTURE_RECTANGLE_ARB)
         {
@@ -2871,7 +2867,7 @@ static void surface_load_ds_location(struct wined3d_surface *surface, struct win
         TRACE("Copying depth texture to onscreen depth buffer.\n");
 
         context_apply_fbo_state_blit(context, GL_FRAMEBUFFER,
-                surface_from_resource(wined3d_texture_get_sub_resource(context->swapchain->front_buffer, 0)),
+                context->swapchain->front_buffer->sub_resources[0].u.surface,
                 NULL, WINED3D_LOCATION_DRAWABLE);
         surface_depth_blt(surface, context, texture->texture_rgb.name,
                 0, surface->pow2Height - h, w, h, surface->texture_target);
@@ -2894,7 +2890,6 @@ static DWORD resource_access_from_location(DWORD location)
     {
         case WINED3D_LOCATION_SYSMEM:
         case WINED3D_LOCATION_USER_MEMORY:
-        case WINED3D_LOCATION_DIB:
         case WINED3D_LOCATION_BUFFER:
             return WINED3D_RESOURCE_ACCESS_CPU;
 
@@ -3017,8 +3012,7 @@ static HRESULT surface_load_drawable(struct wined3d_surface *surface,
 static HRESULT surface_load_texture(struct wined3d_surface *surface,
         struct wined3d_context *context, BOOL srgb)
 {
-    unsigned int width, src_row_pitch, src_slice_pitch, dst_row_pitch, dst_slice_pitch;
-    const RECT src_rect = {0, 0, surface->resource.width, surface->resource.height};
+    unsigned int width, height, src_row_pitch, src_slice_pitch, dst_row_pitch, dst_slice_pitch;
     unsigned int sub_resource_idx = surface_get_sub_resource_idx(surface);
     const struct wined3d_gl_info *gl_info = context->gl_info;
     struct wined3d_texture *texture = surface->container;
@@ -3029,6 +3023,7 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
     struct wined3d_format format;
     POINT dst_point = {0, 0};
     BYTE *mem = NULL;
+    RECT src_rect;
 
     sub_resource = surface_get_sub_resource(surface);
     if (wined3d_settings.offscreen_rendering_mode != ORM_FBO
@@ -3039,6 +3034,10 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
 
         return WINED3D_OK;
     }
+
+    width = wined3d_texture_get_level_width(texture, surface->texture_level);
+    height = wined3d_texture_get_level_height(texture, surface->texture_level);
+    SetRect(&src_rect, 0, 0, width, height);
 
     if (sub_resource->locations & (WINED3D_LOCATION_TEXTURE_SRGB | WINED3D_LOCATION_TEXTURE_RGB)
             && (texture->resource.format_flags & WINED3DFMT_FLAG_FBO_ATTACHABLE_SRGB)
@@ -3065,10 +3064,9 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
         DWORD src_location = sub_resource->locations & WINED3D_LOCATION_RB_RESOLVED ?
                 WINED3D_LOCATION_RB_RESOLVED : WINED3D_LOCATION_RB_MULTISAMPLE;
         DWORD dst_location = srgb ? WINED3D_LOCATION_TEXTURE_SRGB : WINED3D_LOCATION_TEXTURE_RGB;
-        RECT rect = {0, 0, surface->resource.width, surface->resource.height};
 
         surface_blt_fbo(device, context, WINED3D_TEXF_POINT, surface, src_location,
-                &rect, surface, dst_location, &rect);
+                &src_rect, surface, dst_location, &src_rect);
 
         return WINED3D_OK;
     }
@@ -3107,8 +3105,6 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
     wined3d_texture_bind_and_dirtify(texture, context, srgb);
     wined3d_texture_get_pitch(texture, surface->texture_level, &src_row_pitch, &src_slice_pitch);
 
-    width = surface->resource.width;
-
     format = *texture->resource.format;
     if ((conversion = wined3d_format_get_color_key_conversion(texture, TRUE)))
         format = *wined3d_get_format(gl_info, conversion->dst_format);
@@ -3120,11 +3116,7 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
     {
         TRACE("Removing the pbo attached to surface %p.\n", surface);
 
-        if (surface->flags & SFLAG_DIBSECTION)
-            surface->resource.map_binding = WINED3D_LOCATION_DIB;
-        else
-            surface->resource.map_binding = WINED3D_LOCATION_SYSMEM;
-
+        surface->resource.map_binding = WINED3D_LOCATION_SYSMEM;
         surface_load_location(surface, context, surface->resource.map_binding);
         wined3d_texture_remove_buffer_object(texture, sub_resource_idx, gl_info);
     }
@@ -3133,8 +3125,6 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
     if (format.convert)
     {
         /* This code is entered for texture formats which need a fixup. */
-        UINT height = surface->resource.height;
-
         format.byte_count = format.conv_byte_count;
         wined3d_format_calculate_pitch(&format, 1, width, height, &dst_row_pitch, &dst_slice_pitch);
 
@@ -3153,7 +3143,6 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
     {
         /* This code is only entered for color keying fixups */
         struct wined3d_palette *palette = NULL;
-        UINT height = surface->resource.height;
 
         wined3d_format_calculate_pitch(&format, device->surface_alignment,
                 width, height, &dst_row_pitch, &dst_slice_pitch);
@@ -3184,7 +3173,10 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
 static void surface_load_renderbuffer(struct wined3d_surface *surface, struct wined3d_context *context,
         DWORD dst_location)
 {
-    const RECT rect = {0, 0, surface->resource.width, surface->resource.height};
+    struct wined3d_texture *texture = surface->container;
+    const RECT rect = {0, 0,
+            wined3d_texture_get_level_width(texture, surface->texture_level),
+            wined3d_texture_get_level_height(texture, surface->texture_level)};
     DWORD locations = surface_get_sub_resource(surface)->locations;
     DWORD src_location;
 
@@ -3197,7 +3189,7 @@ static void surface_load_renderbuffer(struct wined3d_surface *surface, struct wi
     else /* surface_blt_fbo will load the source location if necessary. */
         src_location = WINED3D_LOCATION_TEXTURE_RGB;
 
-    surface_blt_fbo(surface->container->resource.device, context, WINED3D_TEXF_POINT,
+    surface_blt_fbo(texture->resource.device, context, WINED3D_TEXF_POINT,
             surface, src_location, &rect, surface, dst_location, &rect);
 }
 
@@ -3207,14 +3199,17 @@ HRESULT surface_load_location(struct wined3d_surface *surface, struct wined3d_co
     unsigned int sub_resource_idx = surface_get_sub_resource_idx(surface);
     struct wined3d_texture *texture = surface->container;
     struct wined3d_texture_sub_resource *sub_resource;
+    unsigned int surface_w, surface_h;
     HRESULT hr;
 
     TRACE("surface %p, location %s.\n", surface, wined3d_debug_location(location));
 
+    surface_w = wined3d_texture_get_level_width(texture, surface->texture_level);
+    surface_h = wined3d_texture_get_level_height(texture, surface->texture_level);
+
     sub_resource = &texture->sub_resources[sub_resource_idx];
     if (sub_resource->locations & location && (!(texture->resource.usage & WINED3DUSAGE_DEPTHSTENCIL)
-            || (surface->ds_current_size.cx == surface->resource.width
-            && surface->ds_current_size.cy == surface->resource.height)))
+            || (surface->ds_current_size.cx == surface_w && surface->ds_current_size.cy == surface_h)))
     {
         TRACE("Location (%#x) is already up to date.\n", location);
         return WINED3D_OK;
@@ -3260,7 +3255,6 @@ HRESULT surface_load_location(struct wined3d_surface *surface, struct wined3d_co
 
     switch (location)
     {
-        case WINED3D_LOCATION_DIB:
         case WINED3D_LOCATION_USER_MEMORY:
         case WINED3D_LOCATION_SYSMEM:
         case WINED3D_LOCATION_BUFFER:
@@ -3294,8 +3288,8 @@ done:
 
     if (texture->resource.usage & WINED3DUSAGE_DEPTHSTENCIL)
     {
-        surface->ds_current_size.cx = surface->resource.width;
-        surface->ds_current_size.cy = surface->resource.height;
+        surface->ds_current_size.cx = surface_w;
+        surface->ds_current_size.cy = surface_h;
     }
 
     if (location != WINED3D_LOCATION_SYSMEM && (sub_resource->locations & WINED3D_LOCATION_SYSMEM))
@@ -3658,7 +3652,7 @@ static HRESULT surface_cpu_blt(struct wined3d_texture *dst_texture, unsigned int
         {
             if (dst_texture->resource.format->id != src_texture->resource.format->id)
             {
-                if (!(converted_texture = surface_convert_format(src_texture, src_sub_resource_idx, dst_format->id)))
+                if (!(converted_texture = surface_convert_format(src_texture, src_sub_resource_idx, dst_format)))
                 {
                     /* The conv function writes a FIXME */
                     WARN("Cannot convert source surface format to dest format.\n");
@@ -4153,6 +4147,8 @@ HRESULT wined3d_surface_blt(struct wined3d_surface *dst_surface, const RECT *dst
     struct wined3d_device *device = dst_texture->resource.device;
     struct wined3d_swapchain *src_swapchain, *dst_swapchain;
     struct wined3d_texture *src_texture = NULL;
+    unsigned int dst_w, dst_h, src_w, src_h;
+    unsigned int src_sub_resource_idx = 0;
     DWORD src_ds_flags, dst_ds_flags;
     BOOL scale, convert;
 
@@ -4182,34 +4178,44 @@ HRESULT wined3d_surface_blt(struct wined3d_surface *dst_surface, const RECT *dst
                 fx->src_color_key.color_space_high_value);
     }
 
-    if (dst_surface->resource.map_count || (src_surface && src_surface->resource.map_count))
+    if (src_surface)
+    {
+        src_texture = src_surface->container;
+        src_sub_resource_idx = surface_get_sub_resource_idx(src_surface);
+    }
+
+    if (dst_texture->sub_resources[dst_sub_resource_idx].map_count
+            || (src_texture && src_texture->sub_resources[src_sub_resource_idx].map_count))
     {
         WARN("Surface is busy, returning WINEDDERR_SURFACEBUSY.\n");
         return WINEDDERR_SURFACEBUSY;
     }
 
+    dst_w = wined3d_texture_get_level_width(dst_texture, dst_surface->texture_level);
+    dst_h = wined3d_texture_get_level_height(dst_texture, dst_surface->texture_level);
     if (dst_rect->left >= dst_rect->right || dst_rect->top >= dst_rect->bottom
-            || dst_rect->left > dst_surface->resource.width || dst_rect->left < 0
-            || dst_rect->top > dst_surface->resource.height || dst_rect->top < 0
-            || dst_rect->right > dst_surface->resource.width || dst_rect->right < 0
-            || dst_rect->bottom > dst_surface->resource.height || dst_rect->bottom < 0)
+            || dst_rect->left > dst_w || dst_rect->left < 0
+            || dst_rect->top > dst_h || dst_rect->top < 0
+            || dst_rect->right > dst_w || dst_rect->right < 0
+            || dst_rect->bottom > dst_h || dst_rect->bottom < 0)
     {
         WARN("The application gave us a bad destination rectangle.\n");
         return WINEDDERR_INVALIDRECT;
     }
 
-    if (src_surface)
+    if (src_texture)
     {
+        src_w = wined3d_texture_get_level_width(src_texture, src_surface->texture_level);
+        src_h = wined3d_texture_get_level_height(src_texture, src_surface->texture_level);
         if (src_rect->left >= src_rect->right || src_rect->top >= src_rect->bottom
-                || src_rect->left > src_surface->resource.width || src_rect->left < 0
-                || src_rect->top > src_surface->resource.height || src_rect->top < 0
-                || src_rect->right > src_surface->resource.width || src_rect->right < 0
-                || src_rect->bottom > src_surface->resource.height || src_rect->bottom < 0)
+                || src_rect->left > src_w || src_rect->left < 0
+                || src_rect->top > src_h || src_rect->top < 0
+                || src_rect->right > src_w || src_rect->right < 0
+                || src_rect->bottom > src_h || src_rect->bottom < 0)
         {
             WARN("The application gave us a bad source rectangle.\n");
             return WINEDDERR_INVALIDRECT;
         }
-        src_texture = src_surface->container;
     }
 
     if (!fx || !(fx->fx))
@@ -4259,7 +4265,7 @@ HRESULT wined3d_surface_blt(struct wined3d_surface *dst_surface, const RECT *dst
         goto fallback;
     }
 
-    if (src_surface)
+    if (src_texture)
         src_swapchain = src_texture->swapchain;
     else
         src_swapchain = NULL;
@@ -4277,14 +4283,14 @@ HRESULT wined3d_surface_blt(struct wined3d_surface *dst_surface, const RECT *dst
         goto fallback;
     }
 
-    scale = src_surface
+    scale = src_texture
             && (src_rect->right - src_rect->left != dst_rect->right - dst_rect->left
             || src_rect->bottom - src_rect->top != dst_rect->bottom - dst_rect->top);
-    convert = src_surface && src_texture->resource.format->id != dst_texture->resource.format->id;
+    convert = src_texture && src_texture->resource.format->id != dst_texture->resource.format->id;
 
     dst_ds_flags = dst_texture->resource.format_flags
             & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL);
-    if (src_surface)
+    if (src_texture)
         src_ds_flags = src_texture->resource.format_flags
                 & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL);
     else
@@ -4323,12 +4329,12 @@ HRESULT wined3d_surface_blt(struct wined3d_surface *dst_surface, const RECT *dst
         const struct blit_shader *blitter;
 
         dst_sub_resource = surface_get_sub_resource(dst_surface);
-        src_sub_resource = src_surface ? surface_get_sub_resource(src_surface) : NULL;
+        src_sub_resource = src_texture ? &src_texture->sub_resources[src_sub_resource_idx] : NULL;
 
         /* In principle this would apply to depth blits as well, but we don't
          * implement those in the CPU blitter at the moment. */
         if ((dst_sub_resource->locations & dst_surface->resource.map_binding)
-                && (!src_surface || (src_sub_resource->locations & src_surface->resource.map_binding)))
+                && (!src_texture || (src_sub_resource->locations & src_surface->resource.map_binding)))
         {
             if (scale)
                 TRACE("Not doing sysmem blit because of scaling.\n");
@@ -4458,71 +4464,20 @@ fallback:
         return WINED3D_OK;
 
 cpu:
-    return surface_cpu_blt(dst_texture, surface_get_sub_resource_idx(dst_surface), &dst_box,
-            src_texture, src_texture ? surface_get_sub_resource_idx(src_surface) : 0, &src_box, flags, fx, filter);
+    return surface_cpu_blt(dst_texture, dst_sub_resource_idx, &dst_box,
+            src_texture, src_sub_resource_idx, &src_box, flags, fx, filter);
 }
 
 HRESULT wined3d_surface_init(struct wined3d_surface *surface, struct wined3d_texture *container,
-        const struct wined3d_resource_desc *desc, GLenum target, unsigned int level, unsigned int layer, DWORD flags)
+        const struct wined3d_resource_desc *desc, GLenum target, unsigned int level, unsigned int layer)
 {
     unsigned int sub_resource_idx = layer * container->level_count + level;
     struct wined3d_device *device = container->resource.device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     const struct wined3d_format *format = wined3d_get_format(gl_info, desc->format);
-    BOOL lockable = flags & WINED3D_TEXTURE_CREATE_MAPPABLE;
     UINT multisample_quality = desc->multisample_quality;
     unsigned int resource_size;
     HRESULT hr;
-
-    if (container->flags & WINED3D_TEXTURE_COND_NP2_EMULATED)
-    {
-        unsigned int pow2_width = 1, pow2_height = 1;
-
-        /* Find the nearest pow2 match. */
-        while (pow2_width < desc->width)
-            pow2_width <<= 1;
-        while (pow2_height < desc->height)
-            pow2_height <<= 1;
-
-        surface->pow2Width = pow2_width;
-        surface->pow2Height = pow2_height;
-    }
-    else
-    {
-        surface->pow2Width = desc->width;
-        surface->pow2Height = desc->height;
-    }
-
-    /* Quick lockable sanity check.
-     * TODO: remove this after surfaces, usage and lockability have been debugged properly
-     * this function is too deep to need to care about things like this.
-     * Levels need to be checked too, since they all affect what can be done. */
-    switch (desc->pool)
-    {
-        case WINED3D_POOL_MANAGED:
-            if (desc->usage & WINED3DUSAGE_DYNAMIC)
-                FIXME("Called with a pool of MANAGED and a usage of DYNAMIC which are mutually exclusive.\n");
-            break;
-
-        case WINED3D_POOL_DEFAULT:
-            if (lockable && !(desc->usage & (WINED3DUSAGE_DYNAMIC
-                    | WINED3DUSAGE_RENDERTARGET | WINED3DUSAGE_DEPTHSTENCIL)))
-                WARN("Creating a lockable surface with a POOL of DEFAULT, that doesn't specify DYNAMIC usage.\n");
-            break;
-
-        case WINED3D_POOL_SCRATCH:
-        case WINED3D_POOL_SYSTEM_MEM:
-            break;
-
-        default:
-            FIXME("Unknown pool %#x.\n", desc->pool);
-            break;
-    };
-
-    if (desc->usage & WINED3DUSAGE_RENDERTARGET && desc->pool != WINED3D_POOL_DEFAULT)
-        FIXME("Trying to create a render target that isn't in the default pool.\n");
-
-    /* FIXME: Check that the format is supported by the device. */
 
     resource_size = wined3d_format_calculate_size(format, device->surface_alignment, desc->width, desc->height, 1);
     if (!resource_size)
@@ -4535,8 +4490,11 @@ HRESULT wined3d_surface_init(struct wined3d_surface *surface, struct wined3d_tex
         WARN("Failed to initialize resource, returning %#x.\n", hr);
         return hr;
     }
+    surface->resource.access_flags = container->resource.access_flags;
 
     surface->container = container;
+    surface->pow2Width = wined3d_texture_get_level_pow2_width(container, level);
+    surface->pow2Height = wined3d_texture_get_level_pow2_height(container, level);
     surface->texture_target = target;
     surface->texture_level = level;
     surface->texture_layer = layer;
@@ -4544,38 +4502,12 @@ HRESULT wined3d_surface_init(struct wined3d_surface *surface, struct wined3d_tex
     list_init(&surface->renderbuffers);
     list_init(&surface->overlays);
 
-    /* Flags */
-    if (flags & WINED3D_TEXTURE_CREATE_DISCARD)
-        surface->flags |= SFLAG_DISCARD;
-    if (lockable || desc->format == WINED3DFMT_D16_LOCKABLE)
-        surface->resource.access_flags |= WINED3D_RESOURCE_ACCESS_CPU;
-
     wined3d_texture_validate_location(container, sub_resource_idx, WINED3D_LOCATION_SYSMEM);
     if (container->resource.usage & WINED3DUSAGE_DEPTHSTENCIL)
         container->sub_resources[sub_resource_idx].locations = WINED3D_LOCATION_DISCARDED;
 
     if (wined3d_texture_use_pbo(container, gl_info))
         surface->resource.map_binding = WINED3D_LOCATION_BUFFER;
-
-    /* Similar to lockable rendertargets above, creating the DIB section
-     * during surface initialization prevents the sysmem pointer from changing
-     * after a wined3d_texture_get_dc() call. */
-    if ((desc->usage & WINED3DUSAGE_OWNDC) || (device->wined3d->flags & WINED3D_NO3D))
-    {
-        if (FAILED(hr = surface_create_dib_section(surface)))
-        {
-            wined3d_surface_cleanup(surface);
-            return hr;
-        }
-        surface->resource.map_binding = WINED3D_LOCATION_DIB;
-    }
-
-    if (surface->resource.map_binding == WINED3D_LOCATION_DIB)
-    {
-        wined3d_resource_free_sysmem(&surface->resource);
-        wined3d_texture_validate_location(container, sub_resource_idx, WINED3D_LOCATION_DIB);
-        wined3d_texture_invalidate_location(container, sub_resource_idx, WINED3D_LOCATION_SYSMEM);
-    }
 
     return hr;
 }
@@ -4595,11 +4527,6 @@ void wined3d_surface_prepare(struct wined3d_surface *surface, struct wined3d_con
         case WINED3D_LOCATION_USER_MEMORY:
             if (!texture->user_memory)
                 ERR("Map binding is set to WINED3D_LOCATION_USER_MEMORY but surface->user_memory is NULL.\n");
-            break;
-
-        case WINED3D_LOCATION_DIB:
-            if (!surface->dib.bitmap_data)
-                ERR("Map binding is set to WINED3D_LOCATION_DIB but surface->dib.bitmap_data is NULL.\n");
             break;
 
         case WINED3D_LOCATION_BUFFER:
