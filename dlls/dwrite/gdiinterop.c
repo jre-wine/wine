@@ -33,7 +33,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 
 struct gdiinterop {
-    IDWriteGdiInterop IDWriteGdiInterop_iface;
+    IDWriteGdiInterop1 IDWriteGdiInterop1_iface;
     IDWriteFactory3 *factory;
 };
 
@@ -105,9 +105,9 @@ static inline struct rendertarget *impl_from_ID2D1SimplifiedGeometrySink(ID2D1Si
     return CONTAINING_RECORD(iface, struct rendertarget, ID2D1SimplifiedGeometrySink_iface);
 }
 
-static inline struct gdiinterop *impl_from_IDWriteGdiInterop(IDWriteGdiInterop *iface)
+static inline struct gdiinterop *impl_from_IDWriteGdiInterop1(IDWriteGdiInterop1 *iface)
 {
-    return CONTAINING_RECORD(iface, struct gdiinterop, IDWriteGdiInterop_iface);
+    return CONTAINING_RECORD(iface, struct gdiinterop, IDWriteGdiInterop1_iface);
 }
 
 static HRESULT WINAPI rendertarget_sink_QueryInterface(ID2D1SimplifiedGeometrySink *iface, REFIID riid, void **obj)
@@ -583,17 +583,18 @@ static HRESULT create_rendertarget(IDWriteFactory *factory, HDC hdc, UINT32 widt
     return S_OK;
 }
 
-static HRESULT WINAPI gdiinterop_QueryInterface(IDWriteGdiInterop *iface, REFIID riid, void **obj)
+static HRESULT WINAPI gdiinterop_QueryInterface(IDWriteGdiInterop1 *iface, REFIID riid, void **obj)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), obj);
 
-    if (IsEqualIID(riid, &IID_IDWriteGdiInterop) ||
+    if (IsEqualIID(riid, &IID_IDWriteGdiInterop1) ||
+        IsEqualIID(riid, &IID_IDWriteGdiInterop) ||
         IsEqualIID(riid, &IID_IUnknown))
     {
         *obj = iface;
-        IDWriteGdiInterop_AddRef(iface);
+        IDWriteGdiInterop1_AddRef(iface);
         return S_OK;
     }
 
@@ -601,71 +602,34 @@ static HRESULT WINAPI gdiinterop_QueryInterface(IDWriteGdiInterop *iface, REFIID
     return E_NOINTERFACE;
 }
 
-static ULONG WINAPI gdiinterop_AddRef(IDWriteGdiInterop *iface)
+static ULONG WINAPI gdiinterop_AddRef(IDWriteGdiInterop1 *iface)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
     TRACE("(%p)\n", This);
     return IDWriteFactory3_AddRef(This->factory);
 }
 
-static ULONG WINAPI gdiinterop_Release(IDWriteGdiInterop *iface)
+static ULONG WINAPI gdiinterop_Release(IDWriteGdiInterop1 *iface)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
     TRACE("(%p)\n", This);
     return IDWriteFactory3_Release(This->factory);
 }
 
-static HRESULT WINAPI gdiinterop_CreateFontFromLOGFONT(IDWriteGdiInterop *iface,
+static HRESULT WINAPI gdiinterop_CreateFontFromLOGFONT(IDWriteGdiInterop1 *iface,
     LOGFONTW const *logfont, IDWriteFont **font)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
-    IDWriteFontCollection *collection;
-    IDWriteFontFamily *family;
-    DWRITE_FONT_STYLE style;
-    BOOL exists = FALSE;
-    UINT32 index;
-    HRESULT hr;
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
 
     TRACE("(%p)->(%p %p)\n", This, logfont, font);
 
-    *font = NULL;
-
-    if (!logfont) return E_INVALIDARG;
-
-    hr = IDWriteFactory2_GetSystemFontCollection((IDWriteFactory2*)This->factory, &collection, FALSE);
-    if (FAILED(hr)) {
-        ERR("failed to get system font collection: 0x%08x.\n", hr);
-        return hr;
-    }
-
-    hr = IDWriteFontCollection_FindFamilyName(collection, logfont->lfFaceName, &index, &exists);
-    if (FAILED(hr)) {
-        IDWriteFontCollection_Release(collection);
-        goto done;
-    }
-
-    if (!exists) {
-        hr = DWRITE_E_NOFONT;
-        goto done;
-    }
-
-    hr = IDWriteFontCollection_GetFontFamily(collection, index, &family);
-    if (FAILED(hr))
-        goto done;
-
-    style = logfont->lfItalic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
-    hr = IDWriteFontFamily_GetFirstMatchingFont(family, logfont->lfWeight, DWRITE_FONT_STRETCH_NORMAL, style, font);
-    IDWriteFontFamily_Release(family);
-
-done:
-    IDWriteFontCollection_Release(collection);
-    return hr;
+    return IDWriteGdiInterop1_CreateFontFromLOGFONT(iface, logfont, NULL, font);
 }
 
-static HRESULT WINAPI gdiinterop_ConvertFontToLOGFONT(IDWriteGdiInterop *iface,
+static HRESULT WINAPI gdiinterop_ConvertFontToLOGFONT(IDWriteGdiInterop1 *iface,
     IDWriteFont *font, LOGFONTW *logfont, BOOL *is_systemfont)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
     static const WCHAR enusW[] = {'e','n','-','u','s',0};
     DWRITE_FONT_SIMULATIONS simulations;
     IDWriteFontCollection *collection;
@@ -718,11 +682,11 @@ static HRESULT WINAPI gdiinterop_ConvertFontToLOGFONT(IDWriteGdiInterop *iface,
     return hr;
 }
 
-static HRESULT WINAPI gdiinterop_ConvertFontFaceToLOGFONT(IDWriteGdiInterop *iface,
+static HRESULT WINAPI gdiinterop_ConvertFontFaceToLOGFONT(IDWriteGdiInterop1 *iface,
     IDWriteFontFace *fontface, LOGFONTW *logfont)
 {
     static const WCHAR enusW[] = {'e','n','-','u','s',0};
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
     IDWriteLocalizedStrings *familynames;
     DWRITE_FONT_SIMULATIONS simulations;
     DWRITE_FONT_FACE_TYPE face_type;
@@ -803,10 +767,10 @@ struct font_fileinfo {
 extern BOOL WINAPI GetFontRealizationInfo(HDC hdc, struct font_realization_info *info);
 extern BOOL WINAPI GetFontFileInfo(DWORD instance_id, DWORD unknown, struct font_fileinfo *info, DWORD size, DWORD *needed);
 
-static HRESULT WINAPI gdiinterop_CreateFontFaceFromHdc(IDWriteGdiInterop *iface,
+static HRESULT WINAPI gdiinterop_CreateFontFaceFromHdc(IDWriteGdiInterop1 *iface,
     HDC hdc, IDWriteFontFace **fontface)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
     struct font_realization_info info;
     struct font_fileinfo *fileinfo;
     DWRITE_FONT_FILE_TYPE filetype;
@@ -867,15 +831,92 @@ static HRESULT WINAPI gdiinterop_CreateFontFaceFromHdc(IDWriteGdiInterop *iface,
     return hr;
 }
 
-static HRESULT WINAPI gdiinterop_CreateBitmapRenderTarget(IDWriteGdiInterop *iface,
+static HRESULT WINAPI gdiinterop_CreateBitmapRenderTarget(IDWriteGdiInterop1 *iface,
     HDC hdc, UINT32 width, UINT32 height, IDWriteBitmapRenderTarget **target)
 {
-    struct gdiinterop *This = impl_from_IDWriteGdiInterop(iface);
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
     TRACE("(%p)->(%p %u %u %p)\n", This, hdc, width, height, target);
     return create_rendertarget((IDWriteFactory*)This->factory, hdc, width, height, target);
 }
 
-static const struct IDWriteGdiInteropVtbl gdiinteropvtbl = {
+static HRESULT WINAPI gdiinterop1_CreateFontFromLOGFONT(IDWriteGdiInterop1 *iface,
+    LOGFONTW const *logfont, IDWriteFontCollection *collection, IDWriteFont **font)
+{
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
+    IDWriteFontFamily *family;
+    DWRITE_FONT_STYLE style;
+    BOOL exists = FALSE;
+    UINT32 index;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p %p %p)\n", This, logfont, collection, font);
+
+    *font = NULL;
+
+    if (!logfont) return E_INVALIDARG;
+
+    if (collection)
+        IDWriteFontCollection_AddRef(collection);
+    else {
+        hr = IDWriteFactory2_GetSystemFontCollection((IDWriteFactory2*)This->factory, &collection, FALSE);
+        if (FAILED(hr)) {
+            ERR("failed to get system font collection: 0x%08x.\n", hr);
+            return hr;
+        }
+    }
+
+    hr = IDWriteFontCollection_FindFamilyName(collection, logfont->lfFaceName, &index, &exists);
+    if (FAILED(hr))
+        goto done;
+
+    if (!exists) {
+        hr = DWRITE_E_NOFONT;
+        goto done;
+    }
+
+    hr = IDWriteFontCollection_GetFontFamily(collection, index, &family);
+    if (FAILED(hr))
+        goto done;
+
+    style = logfont->lfItalic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL;
+    hr = IDWriteFontFamily_GetFirstMatchingFont(family, logfont->lfWeight, DWRITE_FONT_STRETCH_NORMAL, style, font);
+    IDWriteFontFamily_Release(family);
+
+done:
+    IDWriteFontCollection_Release(collection);
+    return hr;
+}
+
+static HRESULT WINAPI gdiinterop1_GetFontSignature_(IDWriteGdiInterop1 *iface, IDWriteFontFace *fontface,
+    FONTSIGNATURE *fontsig)
+{
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
+
+    FIXME("(%p)->(%p %p): stub\n", This, fontface, fontsig);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI gdiinterop1_GetFontSignature(IDWriteGdiInterop1 *iface, IDWriteFont *font, FONTSIGNATURE *fontsig)
+{
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
+
+    FIXME("(%p)->(%p %p): stub\n", This, font, fontsig);
+
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI gdiinterop1_GetMatchingFontsByLOGFONT(IDWriteGdiInterop1 *iface, LOGFONTW const *logfont,
+    IDWriteFontSet *fontset, IDWriteFontSet **subset)
+{
+    struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
+
+    FIXME("(%p)->(%p %p %p): stub\n", This, logfont, fontset, subset);
+
+    return E_NOTIMPL;
+}
+
+static const struct IDWriteGdiInterop1Vtbl gdiinteropvtbl = {
     gdiinterop_QueryInterface,
     gdiinterop_AddRef,
     gdiinterop_Release,
@@ -883,10 +924,14 @@ static const struct IDWriteGdiInteropVtbl gdiinteropvtbl = {
     gdiinterop_ConvertFontToLOGFONT,
     gdiinterop_ConvertFontFaceToLOGFONT,
     gdiinterop_CreateFontFaceFromHdc,
-    gdiinterop_CreateBitmapRenderTarget
+    gdiinterop_CreateBitmapRenderTarget,
+    gdiinterop1_CreateFontFromLOGFONT,
+    gdiinterop1_GetFontSignature_,
+    gdiinterop1_GetFontSignature,
+    gdiinterop1_GetMatchingFontsByLOGFONT
 };
 
-HRESULT create_gdiinterop(IDWriteFactory3 *factory, IDWriteGdiInterop **ret)
+HRESULT create_gdiinterop(IDWriteFactory3 *factory, IDWriteGdiInterop1 **ret)
 {
     struct gdiinterop *This;
 
@@ -895,15 +940,15 @@ HRESULT create_gdiinterop(IDWriteFactory3 *factory, IDWriteGdiInterop **ret)
     This = heap_alloc(sizeof(struct gdiinterop));
     if (!This) return E_OUTOFMEMORY;
 
-    This->IDWriteGdiInterop_iface.lpVtbl = &gdiinteropvtbl;
+    This->IDWriteGdiInterop1_iface.lpVtbl = &gdiinteropvtbl;
     This->factory = factory;
 
-    *ret= &This->IDWriteGdiInterop_iface;
+    *ret= &This->IDWriteGdiInterop1_iface;
     return S_OK;
 }
 
-void release_gdiinterop(IDWriteGdiInterop *iface)
+void release_gdiinterop(IDWriteGdiInterop1 *iface)
 {
-    struct gdiinterop *interop = impl_from_IDWriteGdiInterop(iface);
+    struct gdiinterop *interop = impl_from_IDWriteGdiInterop1(iface);
     heap_free(interop);
 }
