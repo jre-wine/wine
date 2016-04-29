@@ -65,7 +65,7 @@ Build-Depends:
  librsvg2-bin,
  imagemagick,
  fontforge-nox,
-Standards-Version: 3.9.7
+Standards-Version: 3.9.8
 Homepage: http://www.winehq.org/
 Vcs-Browser: https://anonscm.debian.org/git/pkg-wine/wine.git/?h=stretch
 Vcs-Git: https://anonscm.debian.org/git/pkg-wine/wine.git -b stretch
