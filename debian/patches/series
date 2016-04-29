@@ -21,3 +21,4 @@ addons.patch
 
 font-divbyzero.patch
 printer-resolution.patch
+manpages-typo.patch
