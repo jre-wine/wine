@@ -1,6 +1,5 @@
 # debhelper bug causes these
-postinst-has-useless-call-to-ldconfig
-postrm-has-useless-call-to-ldconfig
+package-has-unnecessary-activation-of-ldconfig-trigger
 # unfortunately wine doesn't do fortify hardening
 hardening-no-fortify-functions
 # incorrectly flagged
