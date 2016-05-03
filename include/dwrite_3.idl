@@ -24,6 +24,11 @@ interface IDWriteFontSet;
 interface IDWriteFontSetBuilder;
 interface IDWriteFontDownloadQueue;
 
+cpp_quote("#ifndef _WINGDI_")
+/* already defined in wingdi.h but needed for WIDL */
+typedef struct FONTSIGNATURE FONTSIGNATURE;
+cpp_quote("#endif /* _WINGDI_ */")
+
 typedef enum DWRITE_LOCALITY
 {
     DWRITE_LOCALITY_REMOTE,
@@ -257,6 +262,26 @@ interface IDWriteTextLayout3 : IDWriteTextLayout2
 [
     local,
     object,
+    uuid(4556be70-3abd-4f70-90be-421780a6f515)
+]
+interface IDWriteGdiInterop1 : IDWriteGdiInterop
+{
+    HRESULT CreateFontFromLOGFONT(LOGFONTW const *logfont,
+        IDWriteFontCollection *collection,
+        IDWriteFont **font);
+
+    /* GetFontSignature() methods are listed in reversed order to make
+       resulting vtable order compatible. */
+    HRESULT GetFontSignature_(IDWriteFontFace *fontface, FONTSIGNATURE *fontsig);
+    HRESULT GetFontSignature(IDWriteFont *font, FONTSIGNATURE *fontsig);
+    HRESULT GetMatchingFontsByLOGFONT(LOGFONTW const *logfont,
+        IDWriteFontSet *fontset,
+        IDWriteFontSet **subset);
+}
+
+[
+    local,
+    object,
     uuid(9a1b41c3-d3bb-466a-87fc-fe67556a3b65)
 ]
 interface IDWriteFactory3 : IDWriteFactory2
@@ -282,15 +307,17 @@ interface IDWriteFactory3 : IDWriteFactory2
         DWRITE_GRID_FIT_MODE gridfit_mode,
         IDWriteRenderingParams3 **params);
 
-    HRESULT CreateFontFaceReference(
-        WCHAR const *path,
-        FILETIME const *writetime,
+    /* CreateFontFaceReference methods are listed in reversed order to make
+       resulting vtable order compatible. */
+    HRESULT CreateFontFaceReference_(
+        IDWriteFontFile *file,
         UINT32 index,
         DWRITE_FONT_SIMULATIONS simulations,
         IDWriteFontFaceReference **reference);
 
-    HRESULT CreateFontFaceReference_(
-        IDWriteFontFile *file,
+    HRESULT CreateFontFaceReference(
+        WCHAR const *path,
+        FILETIME const *writetime,
         UINT32 index,
         DWRITE_FONT_SIMULATIONS simulations,
         IDWriteFontFaceReference **reference);

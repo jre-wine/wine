@@ -512,6 +512,7 @@ AC_CHECK_HEADERS(\
 	valgrind/valgrind.h \
 	zlib.h
 )
+AC_HEADER_MAJOR()
 AC_HEADER_STAT()
 
 dnl **** Checks for headers that depend on other ones ****
@@ -2996,6 +2997,7 @@ WINE_CONFIG_DLL(joy.cpl,,[clean])
 WINE_CONFIG_DLL(jscript,,[clean])
 WINE_CONFIG_TEST(dlls/jscript/tests)
 WINE_CONFIG_DLL(jsproxy,,[implib])
+WINE_CONFIG_TEST(dlls/jsproxy/tests)
 WINE_CONFIG_DLL(kernel32,,[clean,implib])
 WINE_CONFIG_TEST(dlls/kernel32/tests)
 WINE_CONFIG_DLL(kernelbase)
@@ -3461,6 +3463,7 @@ WINE_CONFIG_PROGRAM(expand,,[install])
 WINE_CONFIG_PROGRAM(explorer,,[clean,install])
 WINE_CONFIG_PROGRAM(extrac32,,[install])
 WINE_CONFIG_PROGRAM(findstr,,[install])
+WINE_CONFIG_PROGRAM(fsutil,,[install])
 WINE_CONFIG_PROGRAM(hh,,[install])
 WINE_CONFIG_PROGRAM(hostname,,[clean,install])
 WINE_CONFIG_PROGRAM(icacls,,[install])

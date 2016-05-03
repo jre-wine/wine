@@ -2194,11 +2194,9 @@ static void test_mdi(void)
                 gotit = TRUE;
             }
             else
-todo_wine
                 ok(msg.hwnd != mdi_client, "message %04x should not be posted to mdiclient\n", msg.message);
             DispatchMessageA(&msg);
         }
-todo_wine
         ok(gotit, "message 0x003f should appear after SetWindowPos\n");
 
         si.cbSize = sizeof(si);
@@ -7578,7 +7576,7 @@ static void test_winregion(void)
         ok( ret == ERROR, "Expected ERROR, got %d\n", ret);
         ok( GetLastError() == 0xdeadbeef, "Expected , got %d\n", GetLastError());
 
-        r.left = r.top = r.right = r.bottom = 0;
+        SetRectEmpty(&r);
         ret = pGetWindowRgnBox(hwnd, &r);
         ok( ret == SIMPLEREGION, "Expected SIMPLEREGION, got %d\n", ret);
         ok( r.left == 2 && r.top == 3 && r.right == 10 && r.bottom == 15,
@@ -7589,10 +7587,10 @@ static void test_winregion(void)
             hrgn = CreateRectRgn(2, 3, 10, 15);
             ret = pMirrorRgn( hwnd, hrgn );
             ok( ret == TRUE, "MirrorRgn failed %u\n", ret );
-            r.left = r.top = r.right = r.bottom = 0;
+            SetRectEmpty(&r);
             GetWindowRect( hwnd, &r );
             width = r.right - r.left;
-            r.left = r.top = r.right = r.bottom = 0;
+            SetRectEmpty(&r);
             ret = GetRgnBox( hrgn, &r );
             ok( ret == SIMPLEREGION, "GetRgnBox failed %u\n", ret );
             ok( r.left == width - 10 && r.top == 3 && r.right == width - 2 && r.bottom == 15,

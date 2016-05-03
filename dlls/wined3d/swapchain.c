@@ -361,12 +361,12 @@ static void swapchain_blit(const struct wined3d_swapchain *swapchain,
         context2 = context_acquire(device, back_buffer);
         context_apply_blit_state(context2, device);
 
-        if (back_buffer->container->flags & WINED3D_TEXTURE_NORMALIZED_COORDS)
+        if (texture->flags & WINED3D_TEXTURE_NORMALIZED_COORDS)
         {
-            tex_left /= back_buffer->pow2Width;
-            tex_right /= back_buffer->pow2Width;
-            tex_top /= back_buffer->pow2Height;
-            tex_bottom /= back_buffer->pow2Height;
+            tex_left /= texture->pow2_width;
+            tex_right /= texture->pow2_width;
+            tex_top /= texture->pow2_height;
+            tex_bottom /= texture->pow2_height;
         }
 
         if (is_complex_fixup(texture->resource.format->color_fixup))
@@ -434,7 +434,6 @@ static void wined3d_swapchain_rotate(struct wined3d_swapchain *swapchain, struct
     struct gl_texture tex0;
     GLuint rb0;
     DWORD locations0;
-    struct wined3d_surface *surface, *surface_prev;
     unsigned int i;
     static const DWORD supported_locations = WINED3D_LOCATION_TEXTURE_RGB | WINED3D_LOCATION_RB_MULTISAMPLE;
 
@@ -442,34 +441,31 @@ static void wined3d_swapchain_rotate(struct wined3d_swapchain *swapchain, struct
         return;
 
     texture_prev = swapchain->back_buffers[0];
-    surface_prev = texture_prev->sub_resources[0].u.surface;
 
     /* Back buffer 0 is already in the draw binding. */
     tex0 = texture_prev->texture_rgb;
-    rb0 = surface_prev->rb_multisample;
+    rb0 = texture_prev->rb_multisample;
     locations0 = texture_prev->sub_resources[0].locations;
 
     for (i = 1; i < swapchain->desc.backbuffer_count; ++i)
     {
         texture = swapchain->back_buffers[i];
         sub_resource = &texture->sub_resources[0];
-        surface = sub_resource->u.surface;
 
         if (!(sub_resource->locations & supported_locations))
-            surface_load_location(surface, context, texture->resource.draw_binding);
+            surface_load_location(sub_resource->u.surface, context, texture->resource.draw_binding);
 
         texture_prev->texture_rgb = texture->texture_rgb;
-        surface_prev->rb_multisample = surface->rb_multisample;
+        texture_prev->rb_multisample = texture->rb_multisample;
 
         wined3d_texture_validate_location(texture_prev, 0, sub_resource->locations & supported_locations);
         wined3d_texture_invalidate_location(texture_prev, 0, ~(sub_resource->locations & supported_locations));
 
         texture_prev = texture;
-        surface_prev = surface;
     }
 
     texture_prev->texture_rgb = tex0;
-    surface_prev->rb_multisample = rb0;
+    texture_prev->rb_multisample = rb0;
 
     wined3d_texture_validate_location(texture_prev, 0, locations0 & supported_locations);
     wined3d_texture_invalidate_location(texture_prev, 0, ~(locations0 & supported_locations));
@@ -707,15 +703,15 @@ static void swapchain_gdi_present(struct wined3d_swapchain *swapchain,
     /* Flip the surface data. */
     dc = front->dc;
     bitmap = front->bitmap;
-    data = front->resource.heap_memory;
+    data = front->container->resource.heap_memory;
 
     front->dc = back->dc;
     front->bitmap = back->bitmap;
-    front->resource.heap_memory = back->resource.heap_memory;
+    front->container->resource.heap_memory = back->container->resource.heap_memory;
 
     back->dc = dc;
     back->bitmap = bitmap;
-    back->resource.heap_memory = data;
+    back->container->resource.heap_memory = data;
 
     /* FPS support */
     if (TRACE_ON(fps))
