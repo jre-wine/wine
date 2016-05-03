@@ -1,3 +1,15 @@
+wine-development (1.9.9-1) UNRELEASED; urgency=medium
+
+  * New upstream release 1.9.9, released Apr 29, 2016.
+    - More work towards the WineD3D command stream.
+    - Service proxies in WebServices.
+    - Query support in the builtin reg.exe utility.
+    - Improved support for long URLs in WinInet.
+    - Various bug fixes.
+  * Refresh patches.
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Tue, 03 May 2016 22:07:19 +0200
+
 wine-development (1.9.8-1) unstable; urgency=medium
 
   [ Michael Gilbert ]
