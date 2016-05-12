@@ -7,8 +7,12 @@ wine-development (1.9.9-1) UNRELEASED; urgency=medium
     - Improved support for long URLs in WinInet.
     - Various bug fixes.
   * Refresh patches.
+  * Bump standards-version to 3.9.8, no changes required.
+  * Update overrides for changed tags in lintian 2.5.44.
+  * Fix local search for addon (gecko/mono) installers and update
+    documentation for their manual installation (closes: #783428).
 
- -- Jens Reyer <jre.winesim@gmail.com>  Tue, 03 May 2016 22:07:19 +0200
+ -- Jens Reyer <jre.winesim@gmail.com>  Thu, 12 May 2016 18:15:49 +0200
 
 wine-development (1.9.8-1) unstable; urgency=medium
 
