@@ -13,6 +13,7 @@ wine-development (1.9.9-1) UNRELEASED; urgency=medium
     documentation for their manual installation (closes: #783428).
   * Bump recommended fonts-wine version to one with ttf fonts
     (closes: #818925).
+  * Move some dependencies to libwineVERSION.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Fri, 13 May 2016 15:36:46 +0200
 
