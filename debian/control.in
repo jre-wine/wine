@@ -214,7 +214,7 @@ Depends:
 Recommends:
  libxcursor1,
  fonts-liberation,
- fonts-wine (>= 1.8.1-2),
+ fonts-wine (>= 1.8.2-1~),
 Suggests:
  cups-bsd,
  ttf-mscorefonts-installer,
