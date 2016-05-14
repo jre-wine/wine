@@ -5,6 +5,7 @@ manpages.patch
 version-string.patch
 
 disable/tests.patch
+disable/addons-download.patch
 disable/shlib-exit-calls.patch
 
 generate/opengl.patch

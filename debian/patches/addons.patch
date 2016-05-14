@@ -1,4 +1,4 @@
-description: adjust search paths for addon installers, but don't download installers
+description: adjust search paths for addon installers
 author: Michael Gilbert <mgilbert@debian.org>
 author: Jens Reyer <jre.winesim@gmail.com>
 
@@ -27,15 +27,3 @@ author: Jens Reyer <jre.winesim@gmail.com>
      if (ret == INSTALL_NEXT && strcmp(INSTALL_DATADIR, "/usr/share"))
          ret = install_from_unix_file("/usr/share/wine/", addon->subdir_name, addon->file_name);
      return ret;
-@@ -795,9 +793,8 @@ BOOL install_addon(addon_t addon_type)
-      */
-     if (install_from_registered_dir() == INSTALL_NEXT
-         && install_from_default_dir() == INSTALL_NEXT
--        && install_from_cache() == INSTALL_NEXT
--        && (url = get_url()))
--        DialogBoxW(hInst, addon->dialog_template, 0, installer_proc);
-+        && install_from_cache() == INSTALL_NEXT)
-+        {};
- 
-     heap_free(url);
-     url = NULL;
