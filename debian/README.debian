@@ -104,12 +104,13 @@ https://wiki.winehq.org/Gecko
 
 If the right libwine-gecko-*.deb package is not currently available, you can
 download the Wine Gecko installers (on 64-bit systems you need both the 32-bit
-and the 64-bit version) and copy them to one of the following locations:
+and the 64-bit version) and copy them to one of the following locations (in
+home their checksums get verified, in /usr/share not):
 - /usr/share/wine-gecko/
 - /usr/share/wine-development/gecko/ (only if you are using wine-development)
 - /usr/share/wine/gecko/
 - $XDG_CACHE_HOME/wine/
-- $HOME/.cache/wine (if XDG_CACHE_HOME is not set)
+- $HOME/.cache/wine/ (if XDG_CACHE_HOME is not set)
 Or preferably, please provide help building the new Debian libwine-gecko-*
 package that is needed.
 
