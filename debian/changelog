@@ -15,7 +15,6 @@ wine-development (1.9.9-1) UNRELEASED; urgency=medium
   * Bump recommended fonts-wine version to one with ttf fonts
     (closes: #818925).
   * Move some dependencies to libwineVERSION.
-  * Add missing runtime dependencies to libwine recommends (see: #823991).
   * Add widl to the -tools packages.
     Thanks to Andrey Gursky (closes: #824671).
   * Fix winegcc script to call wineg++/cpp based on its basename.
