@@ -22,8 +22,9 @@ wine-development (1.9.9-1) UNRELEASED; urgency=medium
     Thanks to Javier Serrano Polo (see: #824715).
   * Add bugnumbers from other branch to changelog since 1.9.1-1.
   * Drop obsolete dh_strip exclusion of some files.
+  * Change version string to display vendor and version.
 
- -- Jens Reyer <jre.winesim@gmail.com>  Sun, 22 May 2016 03:15:14 +0200
+ -- Jens Reyer <jre.winesim@gmail.com>  Sun, 29 May 2016 21:13:50 +0200
 
 wine-development (1.9.8-1) unstable; urgency=medium
 
