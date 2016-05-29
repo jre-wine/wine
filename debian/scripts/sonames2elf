@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e -u
+if [ $# = 0 ] || tty <&1 >/dev/null
+then
+    printf 'Usage: %s SONAME... > ELF\n' "$0"
+    exit 1
+fi
+tmpdir=$(mktemp -d -t sonames2elf.XXXXXX)
+cd "$tmpdir"
+printf 'INPUT(%s)\n' "$@" > libeverything.so
+gcc -shared -nostdlib -Wl,--no-as-needed -L. -leverything -o elf
+cat elf
+rm -rf "$tmpdir"
