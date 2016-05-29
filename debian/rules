@@ -12,9 +12,6 @@ DATDIR=usr/share/wine$(VERSION)
 INCDIR=usr/include/wine$(VERSION)
 LIBDIR=usr/lib/$(shell dpkg-architecture -qDEB_HOST_MULTIARCH)/wine$(VERSION)
 
-NCURSES=$(shell ./debian/scripts/dpkg-depgrep ncurses)
-FREETYPE=$(shell ./debian/scripts/dpkg-depgrep freetype)
-
 export VENDOR=$(shell dpkg-vendor --query Vendor && dpkg-parsechangelog -S Version)
 
 # enable verbose build log
@@ -162,7 +159,6 @@ override_dh_shlibdeps:
 override_dh_gencontrol:
 	dh_gencontrol -- \
 	    -Vbuilt:Using="$(shell dpkg-query -f '$${source:Package} (= $${source:Version}), ' -W khronos-api unicode-data)" \
-	    -Vdlopen:Depends="$(NCURSES), $(FREETYPE)" \
 
 override_dh_bugfiles:
 	dh_bugfiles -A
