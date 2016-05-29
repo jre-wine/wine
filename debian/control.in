@@ -205,7 +205,6 @@ Depends:
  ${misc:Depends},
  ${dlopen:Depends},
  ${shlibs:Depends},
- x11-utils,
  libfontconfig1,
 Recommends:
  libxcursor1,

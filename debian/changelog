@@ -23,6 +23,7 @@ wine-development (1.9.9-1) UNRELEASED; urgency=medium
   * Add bugnumbers from other branch to changelog since 1.9.1-1.
   * Drop obsolete dh_strip exclusion of some files.
   * Change version string to display vendor and version.
+  * Drop obsolete dependency on x11-utils.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Sun, 29 May 2016 21:13:50 +0200
 
