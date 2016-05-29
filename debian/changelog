@@ -24,6 +24,10 @@ wine-development (1.9.9-1) UNRELEASED; urgency=medium
   * Drop obsolete dh_strip exclusion of some files.
   * Change version string to display vendor and version.
   * Drop obsolete dependency on x11-utils.
+  * Generate list of used shared libraries and let libwine recommend it.
+    (see: #823991).
+    Also use this mechanism to identify the package names of depended
+    upon libraries. Thanks to Jakub Wilk.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Sun, 29 May 2016 21:13:50 +0200
 
