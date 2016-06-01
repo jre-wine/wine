@@ -1,4 +1,4 @@
-wine-development (1.9.9-1) UNRELEASED; urgency=medium
+wine-development (1.9.9-1) unstable; urgency=medium
 
   * New upstream release 1.9.9, released Apr 29, 2016.
     - More work towards the WineD3D command stream.
