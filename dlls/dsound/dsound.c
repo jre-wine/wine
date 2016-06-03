@@ -158,7 +158,6 @@ static HRESULT DirectSoundDevice_Create(DirectSoundDevice ** ppDevice)
     device->ds3dl.flRolloffFactor = DS3D_DEFAULTROLLOFFFACTOR;
     device->ds3dl.flDopplerFactor = DS3D_DEFAULTDOPPLERFACTOR;
 
-    device->prebuf = ds_snd_queue_max;
     device->guid = GUID_NULL;
 
     /* Set default wave format (may need it for waveOutOpen) */
@@ -239,7 +238,6 @@ static ULONG DirectSoundDevice_Release(DirectSoundDevice * device)
             IAudioStreamVolume_Release(device->volume);
 
         HeapFree(GetProcessHeap(), 0, device->tmp_buffer);
-        HeapFree(GetProcessHeap(), 0, device->mix_buffer);
         HeapFree(GetProcessHeap(), 0, device->buffer);
         RtlDeleteResource(&device->buffer_list_lock);
         device->mixlock.DebugInfo->Spare[0] = 0;

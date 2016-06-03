@@ -3365,6 +3365,14 @@ const char *debug_color(const struct wined3d_color *color)
             color->r, color->g, color->b, color->a);
 }
 
+const char *debug_vec4(const struct wined3d_vec4 *v)
+{
+    if (!v)
+        return "(null)";
+    return wine_dbg_sprintf("{%.8e, %.8e, %.8e, %.8e}",
+            v->x, v->y, v->z, v->w);
+}
+
 const char *debug_d3dformat(enum wined3d_format_id format_id)
 {
     switch (format_id)
@@ -3656,8 +3664,6 @@ const char *debug_d3dresourcetype(enum wined3d_resource_type resource_type)
     switch (resource_type)
     {
 #define WINED3D_TO_STR(x) case x: return #x
-        WINED3D_TO_STR(WINED3D_RTYPE_SURFACE);
-        WINED3D_TO_STR(WINED3D_RTYPE_VOLUME);
         WINED3D_TO_STR(WINED3D_RTYPE_BUFFER);
         WINED3D_TO_STR(WINED3D_RTYPE_TEXTURE_2D);
         WINED3D_TO_STR(WINED3D_RTYPE_TEXTURE_3D);
@@ -3869,7 +3875,7 @@ const char *debug_d3dtexturefiltertype(enum wined3d_texture_filter_type filter_t
         D3DTEXTUREFILTERTYPE_TO_STR(WINED3D_TEXF_GAUSSIAN_QUAD);
 #undef D3DTEXTUREFILTERTYPE_TO_STR
         default:
-            FIXME("Unrecognied texture filter type 0x%08x.\n", filter_type);
+            FIXME("Unrecognized texture filter type 0x%08x.\n", filter_type);
             return "unrecognized";
     }
 }
@@ -4101,11 +4107,13 @@ const char *debug_fbostatus(GLenum status) {
         FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_DRAW_BUFFER);
         FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_READ_BUFFER);
         FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_LAYER_TARGETS);
+        FBOSTATUS_TO_STR(GL_FRAMEBUFFER_INCOMPLETE_LAYER_COUNT_ARB);
         FBOSTATUS_TO_STR(GL_FRAMEBUFFER_UNSUPPORTED);
         FBOSTATUS_TO_STR(GL_FRAMEBUFFER_UNDEFINED);
 #undef FBOSTATUS_TO_STR
         default:
-            FIXME("Unrecognied FBO status 0x%08x\n", status);
+            FIXME("Unrecognized FBO status 0x%08x.\n", status);
             return "unrecognized";
     }
 }
@@ -4123,7 +4131,7 @@ const char *debug_glerror(GLenum error) {
         GLERROR_TO_STR(GL_INVALID_FRAMEBUFFER_OPERATION);
 #undef GLERROR_TO_STR
         default:
-            FIXME("Unrecognied GL error 0x%08x\n", error);
+            FIXME("Unrecognized GL error 0x%08x.\n", error);
             return "unrecognized";
     }
 }
@@ -5456,7 +5464,16 @@ void wined3d_get_draw_rect(const struct wined3d_state *state, RECT *rect)
 
 const char *wined3d_debug_location(DWORD location)
 {
+    const char *prefix = "";
+    const char *suffix = "";
     char buf[294];
+
+    if (wined3d_popcount(location) > 16)
+    {
+        prefix = "~(";
+        location = ~location;
+        suffix = ")";
+    }
 
     buf[0] = '\0';
 #define LOCATION_TO_STR(u) if (location & u) { strcat(buf, " | "#u); location &= ~u; }
@@ -5472,7 +5489,7 @@ const char *wined3d_debug_location(DWORD location)
 #undef LOCATION_TO_STR
     if (location) FIXME("Unrecognized location flag(s) %#x.\n", location);
 
-    return buf[0] ? wine_dbg_sprintf("%s", &buf[3]) : "0";
+    return wine_dbg_sprintf("%s%s%s", prefix, buf[0] ? &buf[3] : "0", suffix);
 }
 
 /* Print a floating point value with the %.8e format specifier, always using

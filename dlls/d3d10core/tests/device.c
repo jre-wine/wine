@@ -22,6 +22,8 @@
 #include "wine/test.h"
 #include <limits.h>
 
+static BOOL d3d11_available;
+
 struct vec2
 {
     float x, y;
@@ -478,6 +480,8 @@ static void test_feature_level(void)
         return;
     }
 
+    d3d11_available = TRUE;
+
     /* Device was created by D3D10CreateDevice. */
     feature_level = ID3D11Device_GetFeatureLevel(device11);
     ok(feature_level == D3D_FEATURE_LEVEL_10_0, "Got unexpected feature level %#x.\n", feature_level);
@@ -573,7 +577,7 @@ static void test_create_texture2d(void)
         {DXGI_FORMAT_R32G32B32A32_TYPELESS,  1, D3D10_BIND_VERTEX_BUFFER,   0, FALSE, TRUE},
         {DXGI_FORMAT_R32G32B32A32_TYPELESS,  1, D3D10_BIND_INDEX_BUFFER,    0, FALSE, TRUE},
         {DXGI_FORMAT_R32G32B32A32_TYPELESS,  1, D3D10_BIND_CONSTANT_BUFFER, 0, FALSE, TRUE},
-        {DXGI_FORMAT_R32G32B32A32_TYPELESS,  0, D3D10_BIND_SHADER_RESOURCE, 0, FALSE, TRUE},
+        {DXGI_FORMAT_R32G32B32A32_TYPELESS,  0, D3D10_BIND_SHADER_RESOURCE, 0, FALSE, FALSE},
         {DXGI_FORMAT_R32G32B32A32_TYPELESS,  1, D3D10_BIND_SHADER_RESOURCE, 0, TRUE,  FALSE},
         {DXGI_FORMAT_R32G32B32A32_TYPELESS,  2, D3D10_BIND_SHADER_RESOURCE, 0, TRUE,  FALSE},
         {DXGI_FORMAT_R32G32B32A32_TYPELESS,  3, D3D10_BIND_SHADER_RESOURCE, 0, TRUE,  FALSE},
@@ -591,7 +595,7 @@ static void test_create_texture2d(void)
                 FALSE, TRUE},
         {DXGI_FORMAT_R32G32B32A32_TYPELESS, 12, D3D10_BIND_SHADER_RESOURCE, D3D10_RESOURCE_MISC_TEXTURECUBE,
                 FALSE, TRUE},
-        {DXGI_FORMAT_R32G32B32A32_TYPELESS,  0, D3D10_BIND_RENDER_TARGET,   0, FALSE, TRUE},
+        {DXGI_FORMAT_R32G32B32A32_TYPELESS,  0, D3D10_BIND_RENDER_TARGET,   0, FALSE, FALSE},
         {DXGI_FORMAT_R32G32B32A32_TYPELESS,  1, D3D10_BIND_RENDER_TARGET,   0, TRUE,  FALSE},
         {DXGI_FORMAT_R32G32B32A32_TYPELESS,  2, D3D10_BIND_RENDER_TARGET,   0, TRUE,  FALSE},
         {DXGI_FORMAT_R32G32B32A32_TYPELESS,  9, D3D10_BIND_RENDER_TARGET,   0, TRUE,  FALSE},
@@ -603,7 +607,7 @@ static void test_create_texture2d(void)
         {DXGI_FORMAT_R32G8X24_TYPELESS,      1, D3D10_BIND_DEPTH_STENCIL,   0, TRUE,  TRUE},
         {DXGI_FORMAT_R10G10B10A2_TYPELESS,   1, D3D10_BIND_SHADER_RESOURCE, 0, TRUE,  FALSE},
         {DXGI_FORMAT_R10G10B10A2_TYPELESS,   1, D3D10_BIND_RENDER_TARGET,   0, TRUE,  FALSE},
-        {DXGI_FORMAT_R32_TYPELESS,           0, D3D10_BIND_SHADER_RESOURCE, 0, FALSE, TRUE},
+        {DXGI_FORMAT_R32_TYPELESS,           0, D3D10_BIND_SHADER_RESOURCE, 0, FALSE, FALSE},
         {DXGI_FORMAT_R32_TYPELESS,           1, D3D10_BIND_SHADER_RESOURCE, 0, TRUE,  FALSE},
         {DXGI_FORMAT_R32_TYPELESS,           9, D3D10_BIND_SHADER_RESOURCE, 0, TRUE,  FALSE},
         {DXGI_FORMAT_R32_TYPELESS,           9, D3D10_BIND_SHADER_RESOURCE, D3D10_RESOURCE_MISC_TEXTURECUBE,
@@ -6075,6 +6079,7 @@ static void test_clear_render_target_view(void)
 {
     static const DWORD expected_color = 0xbf4c7f19, expected_srgb_color = 0xbf95bc59;
     static const float color[] = {0.1f, 0.5f, 0.3f, 0.75f};
+    static const float green[] = {0.0f, 1.0f, 0.0f, 0.5f};
 
     struct d3d10core_test_context test_context;
     ID3D10Texture2D *texture, *srgb_texture;
@@ -6118,6 +6123,14 @@ static void test_clear_render_target_view(void)
 
     ID3D10Device_ClearRenderTargetView(device, rtv, color);
     check_texture_color(texture, expected_color, 1);
+
+    if (d3d11_available)
+    {
+        ID3D10Device_ClearRenderTargetView(device, NULL, green);
+        check_texture_color(texture, expected_color, 1);
+    }
+    else
+        win_skip("D3D11 is not available, skipping test.\n");
 
     ID3D10Device_ClearRenderTargetView(device, srgb_rtv, color);
     check_texture_color(srgb_texture, expected_srgb_color, 1);
@@ -6221,6 +6234,14 @@ static void test_clear_depth_stencil_view(void)
 
     ID3D10Device_ClearDepthStencilView(device, dsv, D3D10_CLEAR_DEPTH | D3D10_CLEAR_STENCIL, 0.0f, 0);
     check_texture_color(depth_texture, 0x00000000, 0);
+
+    if (d3d11_available)
+    {
+        ID3D10Device_ClearDepthStencilView(device, NULL, D3D10_CLEAR_DEPTH | D3D10_CLEAR_STENCIL, 1.0f, 0xff);
+        check_texture_color(depth_texture, 0x00000000, 0);
+    }
+    else
+        win_skip("D3D11 is not available, skipping test.\n");
 
     ID3D10Device_ClearDepthStencilView(device, dsv, D3D10_CLEAR_DEPTH, 1.0f, 0xff);
     todo_wine check_texture_color(depth_texture, 0x00ffffff, 0);
