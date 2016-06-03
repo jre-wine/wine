@@ -2789,7 +2789,7 @@ static void test_GetConsoleFontInfo(HANDLE std_output)
     CONSOLE_FONT_INFO *cfi;
     BOOL ret;
     CONSOLE_SCREEN_BUFFER_INFO csbi;
-    COORD orig_font, tmp_font;
+    COORD orig_sb_size, tmp_sb_size, orig_font, tmp_font;
 
     hmod = GetModuleHandleA("kernel32.dll");
     pGetConsoleFontInfo = (void *)GetProcAddress(hmod, "GetConsoleFontInfo");
@@ -2810,6 +2810,12 @@ static void test_GetConsoleFontInfo(HANDLE std_output)
     memsize = num_fonts * sizeof(CONSOLE_FONT_INFO);
     cfi = HeapAlloc(GetProcessHeap(), 0, memsize);
     memset(cfi, 0, memsize);
+
+    GetConsoleScreenBufferInfo(std_output, &csbi);
+    orig_sb_size = csbi.dwSize;
+    tmp_sb_size.X = csbi.dwSize.X + 3;
+    tmp_sb_size.Y = csbi.dwSize.Y + 5;
+    SetConsoleScreenBufferSize(std_output, tmp_sb_size);
 
     SetLastError(0xdeadbeef);
     ret = pGetConsoleFontInfo(NULL, FALSE, 0, cfi);
@@ -2834,22 +2840,102 @@ static void test_GetConsoleFontInfo(HANDLE std_output)
     index = cfi[0].nFont;
     orig_font = GetConsoleFontSize(std_output, index);
 
-    SetLastError(0xdeadbeef);
+    memset(cfi, 0, memsize);
     ret = pGetConsoleFontInfo(std_output, FALSE, num_fonts, cfi);
     todo_wine ok(ret, "got %d, expected non-zero\n", ret);
-    todo_wine ok(GetLastError() == 0xdeadbeef, "got %u, expected 0xdeadbeef\n", GetLastError());
 
-    ok(cfi[index].dwFontSize.X == win_width, "got %d, expected %d\n", cfi[index].dwFontSize.X, win_width);
-    ok(cfi[index].dwFontSize.Y == win_height, "got %d, expected %d\n", cfi[index].dwFontSize.Y, win_height);
+    todo_wine ok(cfi[index].dwFontSize.X == win_width, "got %d, expected %d\n",
+                 cfi[index].dwFontSize.X, win_width);
+    todo_wine ok(cfi[index].dwFontSize.Y == win_height, "got %d, expected %d\n",
+                 cfi[index].dwFontSize.Y, win_height);
 
     for (i = 0; i < num_fonts; i++)
     {
+        ok(cfi[i].nFont == i, "element out of order, got nFont %d, expected %d\n", cfi[i].nFont, i);
         tmp_font = GetConsoleFontSize(std_output, cfi[i].nFont);
         tmp_w = (double)orig_font.X / tmp_font.X * win_width;
         tmp_h = (double)orig_font.Y / tmp_font.Y * win_height;
-        ok(cfi[i].dwFontSize.X == tmp_w, "got %d, expected %d\n", cfi[i].dwFontSize.X, tmp_w);
-        ok(cfi[i].dwFontSize.Y == tmp_h, "got %d, expected %d\n", cfi[i].dwFontSize.Y, tmp_h);
+        todo_wine ok(cfi[i].dwFontSize.X == tmp_w, "got %d, expected %d\n", cfi[i].dwFontSize.X, tmp_w);
+        todo_wine ok(cfi[i].dwFontSize.Y == tmp_h, "got %d, expected %d\n", cfi[i].dwFontSize.Y, tmp_h);
     }
+
+    SetLastError(0xdeadbeef);
+    ret = pGetConsoleFontInfo(NULL, TRUE, 0, cfi);
+    ok(!ret, "got %d, expected zero\n", ret);
+    todo_wine ok(GetLastError() == ERROR_INVALID_HANDLE, "got %u, expected 6\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetConsoleFontInfo(GetStdHandle(STD_INPUT_HANDLE), TRUE, 0, cfi);
+    ok(!ret, "got %d, expected zero\n", ret);
+    todo_wine ok(GetLastError() == ERROR_INVALID_HANDLE, "got %u, expected 6\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pGetConsoleFontInfo(std_output, TRUE, 0, cfi);
+    ok(!ret, "got %d, expected zero\n", ret);
+    todo_wine ok(GetLastError() == 0xdeadbeef, "got %u, expected 0xdeadbeef\n", GetLastError());
+
+    memset(cfi, 0, memsize);
+    ret = pGetConsoleFontInfo(std_output, TRUE, num_fonts, cfi);
+    todo_wine ok(ret, "got %d, expected non-zero\n", ret);
+
+    todo_wine ok(cfi[index].dwFontSize.X == csbi.dwMaximumWindowSize.X, "got %d, expected %d\n",
+                 cfi[index].dwFontSize.X, csbi.dwMaximumWindowSize.X);
+    todo_wine ok(cfi[index].dwFontSize.Y == csbi.dwMaximumWindowSize.Y, "got %d, expected %d\n",
+                 cfi[index].dwFontSize.Y, csbi.dwMaximumWindowSize.Y);
+
+    for (i = 0; i < num_fonts; i++)
+    {
+        ok(cfi[i].nFont == i, "element out of order, got nFont %d, expected %d\n", cfi[i].nFont, i);
+        tmp_font = GetConsoleFontSize(std_output, cfi[i].nFont);
+        tmp_w = (double)orig_font.X / tmp_font.X * csbi.dwMaximumWindowSize.X;
+        tmp_h = (double)orig_font.Y / tmp_font.Y * csbi.dwMaximumWindowSize.Y;
+        todo_wine ok(cfi[i].dwFontSize.X == tmp_w, "got %d, expected %d\n", cfi[i].dwFontSize.X, tmp_w);
+        todo_wine ok(cfi[i].dwFontSize.Y == tmp_h, "got %d, expected %d\n", cfi[i].dwFontSize.Y, tmp_h);
+     }
+
+    HeapFree(GetProcessHeap(), 0, cfi);
+    SetConsoleScreenBufferSize(std_output, orig_sb_size);
+}
+
+static void test_SetConsoleFont(HANDLE std_output)
+{
+    HANDLE hmod;
+    BOOL (WINAPI *pSetConsoleFont)(HANDLE, DWORD);
+    BOOL ret;
+    DWORD (WINAPI *pGetNumberOfConsoleFonts)(void);
+    DWORD num_fonts;
+
+    hmod = GetModuleHandleA("kernel32.dll");
+    pSetConsoleFont = (void *)GetProcAddress(hmod, "SetConsoleFont");
+    if (!pSetConsoleFont)
+    {
+        win_skip("SetConsoleFont is not available\n");
+        return;
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = pSetConsoleFont(NULL, 0);
+    ok(!ret, "got %d, expected zero\n", ret);
+    todo_wine ok(GetLastError() == ERROR_INVALID_HANDLE, "got %u, expected 6\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = pSetConsoleFont(GetStdHandle(STD_INPUT_HANDLE), 0);
+    ok(!ret, "got %d, expected zero\n", ret);
+    todo_wine ok(GetLastError() == ERROR_INVALID_HANDLE, "got %u, expected 6\n", GetLastError());
+
+    pGetNumberOfConsoleFonts = (void *)GetProcAddress(hmod, "GetNumberOfConsoleFonts");
+    if (!pGetNumberOfConsoleFonts)
+    {
+        win_skip("GetNumberOfConsoleFonts is not available\n");
+        return;
+    }
+
+    num_fonts = pGetNumberOfConsoleFonts();
+
+    SetLastError(0xdeadbeef);
+    ret = pSetConsoleFont(std_output, num_fonts);
+    ok(!ret, "got %d, expected zero\n", ret);
+    todo_wine ok(GetLastError() == ERROR_INVALID_PARAMETER, "got %u, expected 87\n", GetLastError());
 }
 
 START_TEST(console)
@@ -2999,4 +3085,5 @@ START_TEST(console)
     test_GetConsoleFontSize(hConOut);
     test_GetLargestConsoleWindowSize(hConOut);
     test_GetConsoleFontInfo(hConOut);
+    test_SetConsoleFont(hConOut);
 }

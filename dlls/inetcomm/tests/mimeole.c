@@ -332,6 +332,57 @@ static void test_CreateMessage(void)
     IStream_Release(stream);
 }
 
+static void test_MessageSetProp(void)
+{
+    static const char topic[] = "wine topic";
+    HRESULT hr;
+    IMimeMessage *msg;
+    IMimeBody *body;
+    PROPVARIANT prop;
+
+    hr = MimeOleCreateMessage(NULL, &msg);
+    ok(hr == S_OK, "ret %08x\n", hr);
+
+    PropVariantInit(&prop);
+
+    hr = IMimeMessage_BindToObject(msg, HBODY_ROOT, &IID_IMimeBody, (void**)&body);
+    ok(hr == S_OK, "ret %08x\n", hr);
+
+    hr = IMimeBody_SetProp(body, NULL, 0, &prop);
+    ok(hr == E_INVALIDARG, "ret %08x\n", hr);
+
+    hr = IMimeBody_SetProp(body, "Thread-Topic", 0, NULL);
+    ok(hr == E_INVALIDARG, "ret %08x\n", hr);
+
+    prop.vt = VT_LPSTR;
+    prop.u.pszVal = CoTaskMemAlloc(strlen(topic)+1);
+    strcpy(prop.u.pszVal, topic);
+    hr = IMimeBody_SetProp(body, "Thread-Topic", 0, &prop);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    PropVariantClear(&prop);
+
+    hr = IMimeBody_GetProp(body, NULL, 0, &prop);
+    ok(hr == E_INVALIDARG, "ret %08x\n", hr);
+
+    hr = IMimeBody_GetProp(body, "Thread-Topic", 0, NULL);
+    ok(hr == E_INVALIDARG, "ret %08x\n", hr);
+
+    hr = IMimeBody_GetProp(body, "Wine-Topic", 0, &prop);
+    ok(hr == MIME_E_NOT_FOUND, "ret %08x\n", hr);
+
+    hr = IMimeBody_GetProp(body, "Thread-Topic", 0, &prop);
+    ok(hr == S_OK, "ret %08x\n", hr);
+    if(hr == S_OK)
+    {
+        ok(prop.vt == VT_LPSTR, "type %d\n", prop.vt);
+        ok(!strcmp(prop.u.pszVal, topic), "got  %s\n", prop.u.pszVal);
+        PropVariantClear(&prop);
+    }
+
+    IMimeBody_Release(body);
+    IMimeMessage_Release(msg);
+}
+
 static void test_MessageOptions(void)
 {
     static const char string[] = "XXXXX";
@@ -361,7 +412,7 @@ static void test_MessageOptions(void)
     prop.u.pszVal = CoTaskMemAlloc(strlen(string)+1);
     strcpy(prop.u.pszVal, string);
     hr = IMimeMessage_SetOption(msg, OID_HIDE_TNEF_ATTACHMENTS, &prop);
-    todo_wine ok(hr == S_OK, "ret %08x\n", hr);
+    ok(hr == S_OK, "ret %08x\n", hr);
     PropVariantClear(&prop);
 
     hr = IMimeMessage_GetOption(msg, OID_HIDE_TNEF_ATTACHMENTS, &prop);
@@ -375,7 +426,7 @@ static void test_MessageOptions(void)
     prop.u.pszVal = CoTaskMemAlloc(strlen(zero)+1);
     strcpy(prop.u.pszVal, zero);
     hr = IMimeMessage_SetOption(msg, OID_HIDE_TNEF_ATTACHMENTS, &prop);
-    todo_wine ok(hr == S_OK, "ret %08x\n", hr);
+    ok(hr == S_OK, "ret %08x\n", hr);
     PropVariantClear(&prop);
 
     hr = IMimeMessage_GetOption(msg, OID_HIDE_TNEF_ATTACHMENTS, &prop);
@@ -388,7 +439,14 @@ static void test_MessageOptions(void)
     prop.vt = VT_BOOL;
     prop.u.boolVal = TRUE;
     hr = IMimeMessage_SetOption(msg, 0xff00000a, &prop);
-    todo_wine ok(hr == MIME_E_INVALID_OPTION_ID, "ret %08x\n", hr);
+    ok(hr == MIME_E_INVALID_OPTION_ID, "ret %08x\n", hr);
+    PropVariantClear(&prop);
+
+    /* Out of range before type. */
+    prop.vt = VT_I4;
+    prop.u.lVal = 1;
+    hr = IMimeMessage_SetOption(msg, 0xff00000a, &prop);
+    ok(hr == MIME_E_INVALID_OPTION_ID, "ret %08x\n", hr);
     PropVariantClear(&prop);
 
     IMimeMessage_Release(msg);
@@ -434,6 +492,7 @@ START_TEST(mimeole)
     test_CreateBody();
     test_Allocator();
     test_CreateMessage();
+    test_MessageSetProp();
     test_MessageOptions();
     test_BindToObject();
     test_MimeOleGetPropertySchema();

@@ -214,7 +214,7 @@ static header_t *read_prop(MimeBody *body, char **ptr)
 
     for(prop = default_props; prop->name; prop++)
     {
-        if(!strcasecmp(*ptr, prop->name))
+        if(!lstrcmpiA(*ptr, prop->name))
         {
             TRACE("%s: found match with default property id %d\n", *ptr, prop->id);
             break;
@@ -226,7 +226,7 @@ static header_t *read_prop(MimeBody *body, char **ptr)
         property_list_entry_t *prop_entry;
         LIST_FOR_EACH_ENTRY(prop_entry, &body->new_props, property_list_entry_t, entry)
         {
-            if(!strcasecmp(*ptr, prop_entry->prop.name))
+            if(!lstrcmpiA(*ptr, prop_entry->prop.name))
             {
                 TRACE("%s: found match with already added new property id %d\n", *ptr, prop_entry->prop.id);
                 prop = &prop_entry->prop;
@@ -496,7 +496,7 @@ static HRESULT find_prop(MimeBody *body, const char *name, header_t **prop)
 
     LIST_FOR_EACH_ENTRY(header, &body->headers, header_t, entry)
     {
-        if(!strcasecmp(name, header->prop->name))
+        if(!lstrcmpiA(name, header->prop->name))
         {
             *prop = header;
             return S_OK;
@@ -642,9 +642,15 @@ static HRESULT WINAPI MimeBody_GetProp(
                               LPPROPVARIANT pValue)
 {
     MimeBody *This = impl_from_IMimeBody(iface);
-    TRACE("(%p)->(%s, 0x%x, %p)\n", This, pszName, dwFlags, pValue);
+    header_t *header;
+    HRESULT hr;
 
-    if(!strcasecmp(pszName, "att:pri-content-type"))
+    TRACE("(%p)->(%s, 0x%x, %p)\n", This, debugstr_a(pszName), dwFlags, pValue);
+
+    if(!pszName || !pValue)
+        return E_INVALIDARG;
+
+    if(!lstrcmpiA(pszName, "att:pri-content-type"))
     {
         PropVariantClear(pValue);
         pValue->vt = VT_LPSTR;
@@ -652,8 +658,13 @@ static HRESULT WINAPI MimeBody_GetProp(
         return S_OK;
     }
 
-    FIXME("stub!\n");
-    return E_FAIL;
+    hr = find_prop(This, pszName, &header);
+    if(hr == S_OK)
+    {
+        PropVariantCopy(pValue, &header->value);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI MimeBody_SetProp(
@@ -663,8 +674,60 @@ static HRESULT WINAPI MimeBody_SetProp(
                               LPCPROPVARIANT pValue)
 {
     MimeBody *This = impl_from_IMimeBody(iface);
-    FIXME("(%p)->(%s, 0x%x, %p) stub\n", This, debugstr_a(pszName), dwFlags, pValue);
-    return E_NOTIMPL;
+    header_t *header;
+    HRESULT hr;
+
+    TRACE("(%p)->(%s, 0x%x, %p)\n", This, debugstr_a(pszName), dwFlags, pValue);
+
+    if(!pszName || !pValue)
+        return E_INVALIDARG;
+
+    hr = find_prop(This, pszName, &header);
+    if(hr != S_OK)
+    {
+        property_list_entry_t *prop_entry;
+        const property_t *prop = NULL;
+
+        LIST_FOR_EACH_ENTRY(prop_entry, &This->new_props, property_list_entry_t, entry)
+        {
+            if(!lstrcmpiA(pszName, prop_entry->prop.name))
+            {
+                TRACE("Found match with already added new property id %d\n", prop_entry->prop.id);
+                prop = &prop_entry->prop;
+                break;
+            }
+        }
+
+        header = HeapAlloc(GetProcessHeap(), 0, sizeof(*header));
+        if(!header)
+            return E_OUTOFMEMORY;
+
+        if(!prop)
+        {
+            prop_entry = HeapAlloc(GetProcessHeap(), 0, sizeof(*prop_entry));
+            if(!prop_entry)
+            {
+                HeapFree(GetProcessHeap(), 0, header);
+                return E_OUTOFMEMORY;
+            }
+            prop_entry->prop.name = strdupA(pszName);
+            prop_entry->prop.id = This->next_prop_id++;
+            prop_entry->prop.flags = 0;
+            prop_entry->prop.default_vt = pValue->vt;
+            list_add_tail(&This->new_props, &prop_entry->entry);
+            prop = &prop_entry->prop;
+            TRACE("Allocating new prop id %d\n", prop_entry->prop.id);
+        }
+
+        header->prop = prop;
+        PropVariantInit(&header->value);
+        list_init(&header->params);
+        list_add_tail(&This->headers, &header->entry);
+    }
+
+    PropVariantCopy(&header->value, pValue);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI MimeBody_AppendProp(
@@ -808,14 +871,14 @@ static HRESULT WINAPI MimeBody_IsContentType(
     {
         const char *pri = This->content_pri_type;
         if(!pri) pri = "text";
-        if(strcasecmp(pri, pszPriType)) return S_FALSE;
+        if(lstrcmpiA(pri, pszPriType)) return S_FALSE;
     }
 
     if(pszSubType)
     {
         const char *sub = This->content_sub_type;
         if(!sub) sub = "plain";
-        if(strcasecmp(sub, pszSubType)) return S_FALSE;
+        if(lstrcmpiA(sub, pszSubType)) return S_FALSE;
     }
 
     return S_OK;
@@ -1701,7 +1764,7 @@ static body_t *create_sub_body(MimeMessage *msg, IStream *pStm, BODYOFFSETS *off
 
         for(i = 0; i < count; i++)
         {
-            if(!strcasecmp(param_info[i].pszName, "boundary"))
+            if(!lstrcmpiA(param_info[i].pszName, "boundary"))
             {
                 struct list offset_list;
                 offset_entry_t *cur, *cursor2;
@@ -2242,27 +2305,38 @@ static HRESULT WINAPI MimeMessage_SetOption(
     const TYPEDID oid,
     LPCPROPVARIANT pValue)
 {
-    HRESULT hr = E_NOTIMPL;
+    HRESULT hr = S_OK;
     TRACE("(%p)->(%08x, %p)\n", iface, oid, pValue);
+
+    /* Message ID is checked before type.
+     *  OID 0x4D -> 0x56 and 0x58 aren't defined but will filtered out later.
+     */
+    if(TYPEDID_ID(oid) < TYPEDID_ID(OID_ALLOW_8BIT_HEADER) || TYPEDID_ID(oid) > TYPEDID_ID(OID_SECURITY_2KEY_CERT_BAG_64))
+    {
+        WARN("oid (%08x) out of range\n", oid);
+        return MIME_E_INVALID_OPTION_ID;
+    }
 
     if(pValue->vt != TYPEDID_TYPE(oid))
     {
         WARN("Called with vartype %04x and oid %08x\n", pValue->vt, oid);
-        return E_INVALIDARG;
+        return S_OK;
     }
 
     switch(oid)
     {
     case OID_HIDE_TNEF_ATTACHMENTS:
         FIXME("OID_HIDE_TNEF_ATTACHMENTS (value %d): ignoring\n", pValue->u.boolVal);
-        hr = S_OK;
         break;
     case OID_SHOW_MACBINARY:
         FIXME("OID_SHOW_MACBINARY (value %d): ignoring\n", pValue->u.boolVal);
-        hr = S_OK;
+        break;
+    case OID_SAVEBODY_KEEPBOUNDARY:
+        FIXME("OID_SAVEBODY_KEEPBOUNDARY (value %d): ignoring\n", pValue->u.boolVal);
         break;
     default:
         FIXME("Unhandled oid %08x\n", oid);
+        hr = MIME_E_INVALID_OPTION_ID;
     }
 
     return hr;
@@ -3157,4 +3231,12 @@ HRESULT WINAPI MimeOleGetPropertySchema(IMimePropertySchema **schema)
     *schema = &This->IMimePropertySchema_iface;
 
     return S_OK;
+}
+
+HRESULT WINAPI MimeGetAddressFormatW(REFIID riid, void *object, DWORD addr_type,
+       ADDRESSFORMAT addr_format, WCHAR **address)
+{
+    FIXME("(%s, %p, %d, %d, %p) stub\n", debugstr_guid(riid), object, addr_type, addr_format, address);
+
+    return E_NOTIMPL;
 }

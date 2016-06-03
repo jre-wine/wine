@@ -2,7 +2,7 @@
  *    GDI Interop
  *
  * Copyright 2011 Huw Davies
- * Copyright 2012, 2014 Nikolay Sivov for CodeWeavers
+ * Copyright 2012, 2014-2016 Nikolay Sivov for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,11 +31,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
-
-struct gdiinterop {
-    IDWriteGdiInterop1 IDWriteGdiInterop1_iface;
-    IDWriteFactory3 *factory;
-};
 
 struct dib_data {
     DWORD *ptr;
@@ -339,9 +334,7 @@ static HRESULT WINAPI rendertarget_DrawGlyphRun(IDWriteBitmapRenderTarget1 *ifac
     if (FAILED(hr))
         return hr;
 
-    target.left = target.top = 0;
-    target.right = This->size.cx;
-    target.bottom = This->size.cy;
+    SetRect(&target, 0, 0, This->size.cx, This->size.cy);
 
     if (rendermode == DWRITE_RENDERING_MODE_OUTLINE) {
         static const XFORM identity = { 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
@@ -689,7 +682,7 @@ static HRESULT WINAPI gdiinterop_ConvertFontFaceToLOGFONT(IDWriteGdiInterop1 *if
     struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
     IDWriteLocalizedStrings *familynames;
     DWRITE_FONT_SIMULATIONS simulations;
-    DWRITE_FONT_FACE_TYPE face_type;
+    struct file_stream_desc stream_desc;
     struct dwrite_font_props props;
     IDWriteFontFileStream *stream;
     IDWriteFontFile *file = NULL;
@@ -712,10 +705,11 @@ static HRESULT WINAPI gdiinterop_ConvertFontFaceToLOGFONT(IDWriteGdiInterop1 *if
         return hr;
     }
 
-    index = IDWriteFontFace_GetIndex(fontface);
-    face_type = IDWriteFontFace_GetType(fontface);
-    opentype_get_font_properties(stream, face_type, index, &props);
-    hr = opentype_get_font_familyname(stream, index, face_type, &familynames);
+    stream_desc.stream = stream;
+    stream_desc.face_type = IDWriteFontFace_GetType(fontface);
+    stream_desc.face_index = IDWriteFontFace_GetIndex(fontface);
+    opentype_get_font_properties(&stream_desc, &props);
+    hr = opentype_get_font_familyname(&stream_desc, &familynames);
     IDWriteFontFile_Release(file);
     IDWriteFontFileStream_Release(stream);
     if (FAILED(hr))
@@ -891,19 +885,51 @@ static HRESULT WINAPI gdiinterop1_GetFontSignature_(IDWriteGdiInterop1 *iface, I
     FONTSIGNATURE *fontsig)
 {
     struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
+    struct file_stream_desc stream_desc;
+    IDWriteFontFileStream *stream;
+    IDWriteFontFile *file;
+    UINT32 count;
+    HRESULT hr;
 
-    FIXME("(%p)->(%p %p): stub\n", This, fontface, fontsig);
+    TRACE("(%p)->(%p %p)\n", This, fontface, fontsig);
 
-    return E_NOTIMPL;
+    memset(fontsig, 0, sizeof(*fontsig));
+
+    count = 1;
+    hr = IDWriteFontFace_GetFiles(fontface, &count, &file);
+    hr = get_filestream_from_file(file, &stream);
+    IDWriteFontFile_Release(file);
+    if (FAILED(hr))
+        return hr;
+
+    stream_desc.stream = stream;
+    stream_desc.face_type = IDWriteFontFace_GetType(fontface);
+    stream_desc.face_index = IDWriteFontFace_GetIndex(fontface);
+    hr = opentype_get_font_signature(&stream_desc, fontsig);
+    IDWriteFontFileStream_Release(stream);
+    return hr;
 }
 
 static HRESULT WINAPI gdiinterop1_GetFontSignature(IDWriteGdiInterop1 *iface, IDWriteFont *font, FONTSIGNATURE *fontsig)
 {
     struct gdiinterop *This = impl_from_IDWriteGdiInterop1(iface);
+    IDWriteFontFace *fontface;
+    HRESULT hr;
 
-    FIXME("(%p)->(%p %p): stub\n", This, font, fontsig);
+    TRACE("(%p)->(%p %p)\n", This, font, fontsig);
 
-    return E_NOTIMPL;
+    if (!font)
+        return E_INVALIDARG;
+
+    memset(fontsig, 0, sizeof(*fontsig));
+
+    hr = IDWriteFont_CreateFontFace(font, &fontface);
+    if (FAILED(hr))
+        return hr;
+
+    hr = IDWriteGdiInterop1_GetFontSignature_(iface, fontface, fontsig);
+    IDWriteFontFace_Release(fontface);
+    return hr;
 }
 
 static HRESULT WINAPI gdiinterop1_GetMatchingFontsByLOGFONT(IDWriteGdiInterop1 *iface, LOGFONTW const *logfont,
@@ -931,24 +957,10 @@ static const struct IDWriteGdiInterop1Vtbl gdiinteropvtbl = {
     gdiinterop1_GetMatchingFontsByLOGFONT
 };
 
-HRESULT create_gdiinterop(IDWriteFactory3 *factory, IDWriteGdiInterop1 **ret)
+void gdiinterop_init(struct gdiinterop *interop, IDWriteFactory3 *factory)
 {
-    struct gdiinterop *This;
-
-    *ret = NULL;
-
-    This = heap_alloc(sizeof(struct gdiinterop));
-    if (!This) return E_OUTOFMEMORY;
-
-    This->IDWriteGdiInterop1_iface.lpVtbl = &gdiinteropvtbl;
-    This->factory = factory;
-
-    *ret= &This->IDWriteGdiInterop1_iface;
-    return S_OK;
-}
-
-void release_gdiinterop(IDWriteGdiInterop1 *iface)
-{
-    struct gdiinterop *interop = impl_from_IDWriteGdiInterop1(iface);
-    heap_free(interop);
+    interop->IDWriteGdiInterop1_iface.lpVtbl = &gdiinteropvtbl;
+    /* Interop is a part of a factory, sharing its refcount.
+       GetGdiInterop() will AddRef() on every call. */
+    interop->factory = factory;
 }

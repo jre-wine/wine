@@ -172,7 +172,7 @@ HRESULT WINAPI WsCreateServiceProxyFromTemplate( WS_CHANNEL_TYPE channel_type,
         return E_NOTIMPL;
     }
 
-    if ((hr = create_channel( type, binding, channel_props, channel_props_count, &channel )) != S_OK)
+    if ((hr = create_channel( channel_type, binding, channel_props, channel_props_count, &channel )) != S_OK)
         return hr;
 
     if ((hr = create_proxy( channel, properties, count, handle )) != S_OK)
@@ -233,4 +233,15 @@ HRESULT WINAPI WsCloseServiceProxy( WS_SERVICE_PROXY *handle, const WS_ASYNC_CON
     if (ctx) FIXME( "ignoring ctx parameter\n" );
 
     return close_channel( proxy->channel );
+}
+
+/**************************************************************************
+ *          WsCall		[webservices.@]
+ */
+HRESULT WINAPI WsCall( WS_SERVICE_PROXY *handle, const WS_OPERATION_DESCRIPTION *desc, const void **args,
+                       WS_HEAP *heap, const WS_CALL_PROPERTY *properties, const ULONG count,
+                       const WS_ASYNC_CONTEXT *ctx, WS_ERROR *error )
+{
+    FIXME( "%p %p %p %p %p %u %p %p\n", handle, desc, args, heap, properties, count, ctx, error );
+    return E_NOTIMPL;
 }

@@ -525,7 +525,7 @@ struct dwritefactory {
 
     IDWriteFontCollection *system_collection;
     IDWriteFontCollection *eudc_collection;
-    IDWriteGdiInterop1 *gdiinterop;
+    struct gdiinterop interop;
     IDWriteFontFallback *fallback;
 
     IDWriteLocalFontFileLoader* localfontfileloader;
@@ -538,12 +538,6 @@ struct dwritefactory {
 static inline struct dwritefactory *impl_from_IDWriteFactory3(IDWriteFactory3 *iface)
 {
     return CONTAINING_RECORD(iface, struct dwritefactory, IDWriteFactory3_iface);
-}
-
-void notify_factory_fallback_removed(IDWriteFactory3 *iface)
-{
-    struct dwritefactory *factory = impl_from_IDWriteFactory3(iface);
-    factory->fallback = NULL;
 }
 
 static void release_fontface_cache(struct list *fontfaces)
@@ -586,8 +580,6 @@ static void release_dwritefactory(struct dwritefactory *factory)
         IDWriteFontCollection_Release(factory->system_collection);
     if (factory->eudc_collection)
         IDWriteFontCollection_Release(factory->eudc_collection);
-    if (factory->gdiinterop)
-        release_gdiinterop(factory->gdiinterop);
     if (factory->fallback)
         release_system_fontfallback(factory->fallback);
     heap_free(factory);
@@ -841,6 +833,9 @@ static HRESULT WINAPI dwritefactory_CreateFontFace(IDWriteFactory3 *iface,
     if (req_facetype != DWRITE_FONT_FACE_TYPE_TRUETYPE_COLLECTION && index)
         return E_INVALIDARG;
 
+    if (!is_simulation_valid(simulations))
+        return E_INVALIDARG;
+
     /* check actual file/face type */
     is_supported = FALSE;
     face_type = DWRITE_FONT_FACE_TYPE_UNKNOWN;
@@ -1057,17 +1052,8 @@ static HRESULT WINAPI dwritefactory_GetGdiInterop(IDWriteFactory3 *iface, IDWrit
 
     TRACE("(%p)->(%p)\n", This, gdi_interop);
 
-    *gdi_interop = NULL;
-
-    if (!This->gdiinterop) {
-        HRESULT hr = create_gdiinterop(iface, &This->gdiinterop);
-        if (FAILED(hr))
-            return hr;
-    }
-
-    *gdi_interop = (IDWriteGdiInterop*)This->gdiinterop;
+    *gdi_interop = (IDWriteGdiInterop*)&This->interop.IDWriteGdiInterop1_iface;
     IDWriteGdiInterop_AddRef(*gdi_interop);
-
     return S_OK;
 }
 
@@ -1489,7 +1475,7 @@ static void init_dwritefactory(struct dwritefactory *factory, DWRITE_FACTORY_TYP
     factory->localfontfileloader = NULL;
     factory->system_collection = NULL;
     factory->eudc_collection = NULL;
-    factory->gdiinterop = NULL;
+    gdiinterop_init(&factory->interop, &factory->IDWriteFactory3_iface);
     factory->fallback = NULL;
 
     list_init(&factory->collection_loaders);

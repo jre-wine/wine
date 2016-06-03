@@ -11,7 +11,7 @@
 @ stub WsAddressMessage
 @ stdcall WsAlloc(ptr long ptr ptr)
 @ stub WsAsyncExecute
-@ stub WsCall
+@ stdcall WsCall(ptr ptr ptr ptr ptr long ptr ptr)
 @ stub WsCheckMustUnderstandHeaders
 @ stdcall WsCloseChannel(ptr ptr ptr)
 @ stub WsCloseListener
@@ -37,12 +37,12 @@
 @ stdcall WsCreateWriter(ptr long ptr ptr)
 @ stdcall WsCreateXmlBuffer(ptr ptr long ptr ptr)
 @ stub WsCreateXmlSecurityToken
-@ stub WsDateTimeToFileTime
+@ stdcall WsDateTimeToFileTime(ptr ptr ptr)
 @ stub WsDecodeUrl
 @ stub WsEncodeUrl
 @ stub WsEndReaderCanonicalization
 @ stub WsEndWriterCanonicalization
-@ stub WsFileTimeToDateTime
+@ stdcall WsFileTimeToDateTime(ptr ptr ptr)
 @ stub WsFillBody
 @ stdcall WsFillReader(ptr long ptr ptr)
 @ stdcall WsFindAttribute(ptr ptr ptr long ptr ptr)
