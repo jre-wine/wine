@@ -1,3 +1,14 @@
+wine-development (1.9.11-1) unstable; urgency=medium
+
+  * New upstream release 1.9.11, released May 27, 2016.
+    - Better support for long URLs in WinInet.
+    - Various Direct3D 11 improvements.
+    - Down-mixing support in DirectSound.
+    - Some cosmetic improvements in desktop mode.
+    - Various bug fixes.
+
+ -- Michael Gilbert <mgilbert@debian.org>  Sat, 04 Jun 2016 18:20:11 +0000
+
 wine-development (1.9.10-1) unstable; urgency=medium
 
   * New upstream release 1.9.10, released May 16, 2016.
