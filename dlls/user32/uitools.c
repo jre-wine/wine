@@ -21,6 +21,7 @@
 
 #include <stdarg.h>
 
+#define WINE_NO_INLINE_RECT
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
@@ -717,7 +718,7 @@ static BOOL UITOOLS95_DFC_ButtonPush(HDC dc, LPRECT r, UINT uFlags)
 
 
 /************************************************************************
- *	UITOOLS_DFC_ButtonChcek
+ *	UITOOLS_DFC_ButtonCheck
  *
  * Draw a check/3state button coming from DrawFrameControl()
  *

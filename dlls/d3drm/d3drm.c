@@ -195,17 +195,25 @@ static HRESULT WINAPI d3drm1_CreateAnimationSet(IDirect3DRM *iface, IDirect3DRMA
 static HRESULT WINAPI d3drm1_CreateTexture(IDirect3DRM *iface,
         D3DRMIMAGE *image, IDirect3DRMTexture **texture)
 {
-    struct d3drm_texture *object;
+    struct d3drm *d3drm = impl_from_IDirect3DRM(iface);
+    IDirect3DRMTexture3 *texture3;
     HRESULT hr;
 
-    FIXME("iface %p, image %p, texture %p partial stub.\n", iface, image, texture);
+    TRACE("iface %p, image %p, texture %p.\n", iface, image, texture);
 
-    if (FAILED(hr = d3drm_texture_create(&object)))
+    if (!texture)
+        return D3DRMERR_BADVALUE;
+
+    if (FAILED(hr = IDirect3DRM3_CreateTexture(&d3drm->IDirect3DRM3_iface, image, &texture3)))
+    {
+        *texture = NULL;
         return hr;
+    }
 
-    *texture = &object->IDirect3DRMTexture_iface;
+    hr = IDirect3DRMTexture3_QueryInterface(texture3, &IID_IDirect3DRMTexture, (void **)texture);
+    IDirect3DRMTexture3_Release(texture3);
 
-    return D3DRM_OK;
+    return hr;
 }
 
 static HRESULT WINAPI d3drm1_CreateLight(IDirect3DRM *iface,
@@ -418,7 +426,7 @@ static HRESULT WINAPI d3drm1_LoadTexture(IDirect3DRM *iface,
 
     FIXME("iface %p, filename %s, texture %p stub!\n", iface, debugstr_a(filename), texture);
 
-    if (FAILED(hr = d3drm_texture_create(&object)))
+    if (FAILED(hr = d3drm_texture_create(&object, iface)))
         return hr;
 
     *texture = &object->IDirect3DRMTexture_iface;
@@ -434,7 +442,7 @@ static HRESULT WINAPI d3drm1_LoadTextureFromResource(IDirect3DRM *iface,
 
     FIXME("iface %p, resource %p, texture %p stub!\n", iface, resource, texture);
 
-    if (FAILED(hr = d3drm_texture_create(&object)))
+    if (FAILED(hr = d3drm_texture_create(&object, iface)))
         return hr;
 
     *texture = &object->IDirect3DRMTexture_iface;
@@ -661,17 +669,25 @@ static HRESULT WINAPI d3drm2_CreateAnimationSet(IDirect3DRM2 *iface, IDirect3DRM
 static HRESULT WINAPI d3drm2_CreateTexture(IDirect3DRM2 *iface,
         D3DRMIMAGE *image, IDirect3DRMTexture2 **texture)
 {
-    struct d3drm_texture *object;
+    struct d3drm *d3drm = impl_from_IDirect3DRM2(iface);
+    IDirect3DRMTexture3 *texture3;
     HRESULT hr;
 
-    FIXME("iface %p, image %p, texture %p partial stub.\n", iface, image, texture);
+    TRACE("iface %p, image %p, texture %p.\n", iface, image, texture);
 
-    if (FAILED(hr = d3drm_texture_create(&object)))
+    if (!texture)
+        return D3DRMERR_BADVALUE;
+
+    if (FAILED(hr = IDirect3DRM3_CreateTexture(&d3drm->IDirect3DRM3_iface, image, &texture3)))
+    {
+        *texture = NULL;
         return hr;
+    }
 
-    *texture = &object->IDirect3DRMTexture2_iface;
+    hr = IDirect3DRMTexture3_QueryInterface(texture3, &IID_IDirect3DRMTexture2, (void **)texture);
+    IDirect3DRMTexture3_Release(texture3);
 
-    return D3DRM_OK;
+    return hr;
 }
 
 static HRESULT WINAPI d3drm2_CreateLight(IDirect3DRM2 *iface,
@@ -857,29 +873,31 @@ static HRESULT WINAPI d3drm2_CreateUserVisual(IDirect3DRM2 *iface,
 static HRESULT WINAPI d3drm2_LoadTexture(IDirect3DRM2 *iface,
         const char *filename, IDirect3DRMTexture2 **texture)
 {
+    struct d3drm *d3drm = impl_from_IDirect3DRM2(iface);
     struct d3drm_texture *object;
     HRESULT hr;
 
     FIXME("iface %p, filename %s, texture %p stub!\n", iface, debugstr_a(filename), texture);
 
-    if (FAILED(hr = d3drm_texture_create(&object)))
+    if (FAILED(hr = d3drm_texture_create(&object, &d3drm->IDirect3DRM_iface)))
         return hr;
 
     *texture = &object->IDirect3DRMTexture2_iface;
 
-    return D3DRM_OK;
+    return hr;
 }
 
 static HRESULT WINAPI d3drm2_LoadTextureFromResource(IDirect3DRM2 *iface, HMODULE module,
         const char *resource_name, const char *resource_type, IDirect3DRMTexture2 **texture)
 {
+    struct d3drm *d3drm = impl_from_IDirect3DRM2(iface);
     struct d3drm_texture *object;
     HRESULT hr;
 
     FIXME("iface %p, resource_name %s, resource_type %s, texture %p stub!\n",
             iface, debugstr_a(resource_name), debugstr_a(resource_type), texture);
 
-    if (FAILED(hr = d3drm_texture_create(&object)))
+    if (FAILED(hr = d3drm_texture_create(&object, &d3drm->IDirect3DRM_iface)))
         return hr;
 
     *texture = &object->IDirect3DRMTexture2_iface;
@@ -1058,6 +1076,7 @@ static ULONG WINAPI d3drm3_Release(IDirect3DRM3 *iface)
 static HRESULT WINAPI d3drm3_CreateObject(IDirect3DRM3 *iface,
         REFCLSID clsid, IUnknown *outer, REFIID iid, void **out)
 {
+    struct d3drm *d3drm = impl_from_IDirect3DRM3(iface);
     IUnknown *object;
     HRESULT hr;
 
@@ -1083,7 +1102,7 @@ static HRESULT WINAPI d3drm3_CreateObject(IDirect3DRM3 *iface,
     if (IsEqualGUID(clsid, &CLSID_CDirect3DRMTexture))
     {
         struct d3drm_texture *texture;
-        if (FAILED(hr = d3drm_texture_create(&texture)))
+        if (FAILED(hr = d3drm_texture_create(&texture, &d3drm->IDirect3DRM_iface)))
         {
             *out = NULL;
             return hr;
@@ -1150,15 +1169,26 @@ static HRESULT WINAPI d3drm3_CreateAnimationSet(IDirect3DRM3 *iface, IDirect3DRM
 static HRESULT WINAPI d3drm3_CreateTexture(IDirect3DRM3 *iface,
         D3DRMIMAGE *image, IDirect3DRMTexture3 **texture)
 {
+    struct d3drm *d3drm = impl_from_IDirect3DRM3(iface);
     struct d3drm_texture *object;
     HRESULT hr;
 
-    FIXME("iface %p, image %p, texture %p partial stub.\n", iface, image, texture);
+    TRACE("iface %p, image %p, texture %p.\n", iface, image, texture);
 
-    if (FAILED(hr = d3drm_texture_create(&object)))
+    if (!texture)
+        return D3DRMERR_BADVALUE;
+
+    if (FAILED(hr = d3drm_texture_create(&object, &d3drm->IDirect3DRM_iface)))
         return hr;
 
     *texture = &object->IDirect3DRMTexture3_iface;
+
+    if (FAILED(IDirect3DRMTexture3_InitFromImage(*texture, image)))
+    {
+        IDirect3DRMTexture3_Release(*texture);
+        *texture = NULL;
+        return D3DRMERR_BADVALUE;
+    }
 
     return D3DRM_OK;
 }
@@ -1396,12 +1426,13 @@ static HRESULT WINAPI d3drm3_CreateUserVisual(IDirect3DRM3 *iface,
 static HRESULT WINAPI d3drm3_LoadTexture(IDirect3DRM3 *iface,
         const char *filename, IDirect3DRMTexture3 **texture)
 {
+    struct d3drm *d3drm = impl_from_IDirect3DRM3(iface);
     struct d3drm_texture *object;
     HRESULT hr;
 
     FIXME("iface %p, filename %s, texture %p stub!\n", iface, debugstr_a(filename), texture);
 
-    if (FAILED(hr = d3drm_texture_create(&object)))
+    if (FAILED(hr = d3drm_texture_create(&object, &d3drm->IDirect3DRM_iface)))
         return hr;
 
     *texture = &object->IDirect3DRMTexture3_iface;
@@ -1412,13 +1443,14 @@ static HRESULT WINAPI d3drm3_LoadTexture(IDirect3DRM3 *iface,
 static HRESULT WINAPI d3drm3_LoadTextureFromResource(IDirect3DRM3 *iface, HMODULE module,
         const char *resource_name, const char *resource_type, IDirect3DRMTexture3 **texture)
 {
+    struct d3drm *d3drm = impl_from_IDirect3DRM3(iface);
     struct d3drm_texture *object;
     HRESULT hr;
 
     FIXME("iface %p, module %p, resource_name %s, resource_type %s, texture %p stub!\n",
             iface, module, debugstr_a(resource_name), debugstr_a(resource_type), texture);
 
-    if (FAILED(hr = d3drm_texture_create(&object)))
+    if (FAILED(hr = d3drm_texture_create(&object, &d3drm->IDirect3DRM_iface)))
         return hr;
 
     *texture = &object->IDirect3DRMTexture3_iface;

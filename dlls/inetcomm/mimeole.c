@@ -924,6 +924,10 @@ static HRESULT WINAPI MimeBody_SetOption(
         FIXME("OID_SECURITY_HWND_OWNER (value %08x): ignoring\n", pValue->u.ulVal);
         hr = S_OK;
         break;
+    case OID_TRANSMIT_BODY_ENCODING:
+        FIXME("OID_TRANSMIT_BODY_ENCODING (value %08x): ignoring\n", pValue->u.ulVal);
+        hr = S_OK;
+        break;
     default:
         FIXME("Unhandled oid %08x\n", oid);
     }
@@ -3178,7 +3182,7 @@ static HRESULT WINAPI propschema_ModifyProperty(IMimePropertySchema *iface, cons
 {
     propschema *This = impl_from_IMimePropertySchema(iface);
     FIXME("(%p)->(%s, %x, %d, %d) stub\n", This, debugstr_a(name), flags, rownumber, vtdefault);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI propschema_GetPropertyId(IMimePropertySchema *iface, const char *name, DWORD *propid)

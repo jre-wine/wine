@@ -1279,6 +1279,9 @@ static HRESULT WINAPI d3d9_device_GetRenderTargetData(IDirect3DDevice9Ex *iface,
 
     TRACE("iface %p, render_target %p, dst_surface %p.\n", iface, render_target, dst_surface);
 
+    if (!render_target || !dst_surface)
+        return D3DERR_INVALIDCALL;
+
     wined3d_mutex_lock();
     wined3d_texture_get_sub_resource_desc(dst_impl->wined3d_texture, dst_impl->sub_resource_idx, &wined3d_desc);
     dst_rect.left = 0;
@@ -2289,6 +2292,12 @@ static HRESULT WINAPI d3d9_device_DrawPrimitive(IDirect3DDevice9Ex *iface,
             iface, primitive_type, start_vertex, primitive_count);
 
     wined3d_mutex_lock();
+    if (!device->has_vertex_declaration)
+    {
+        wined3d_mutex_unlock();
+        WARN("Called without a valid vertex declaration set.\n");
+        return D3DERR_INVALIDCALL;
+    }
     wined3d_device_set_primitive_type(device->wined3d_device, primitive_type);
     hr = wined3d_device_draw_primitive(device->wined3d_device, start_vertex,
             vertex_count_from_primitive_count(primitive_type, primitive_count));
@@ -2310,6 +2319,12 @@ static HRESULT WINAPI d3d9_device_DrawIndexedPrimitive(IDirect3DDevice9Ex *iface
             vertex_count, start_idx, primitive_count);
 
     wined3d_mutex_lock();
+    if (!device->has_vertex_declaration)
+    {
+        wined3d_mutex_unlock();
+        WARN("Called without a valid vertex declaration set.\n");
+        return D3DERR_INVALIDCALL;
+    }
     wined3d_device_set_base_vertex_index(device->wined3d_device, base_vertex_idx);
     wined3d_device_set_primitive_type(device->wined3d_device, primitive_type);
     hr = wined3d_device_draw_indexed_primitive(device->wined3d_device, start_idx,
@@ -2369,6 +2384,13 @@ static HRESULT WINAPI d3d9_device_DrawPrimitiveUP(IDirect3DDevice9Ex *iface,
     }
 
     wined3d_mutex_lock();
+
+    if (!device->has_vertex_declaration)
+    {
+        wined3d_mutex_unlock();
+        WARN("Called without a valid vertex declaration set.\n");
+        return D3DERR_INVALIDCALL;
+    }
 
     hr = d3d9_device_prepare_vertex_buffer(device, size);
     if (FAILED(hr))
@@ -2462,6 +2484,13 @@ static HRESULT WINAPI d3d9_device_DrawIndexedPrimitiveUP(IDirect3DDevice9Ex *ifa
     }
 
     wined3d_mutex_lock();
+
+    if (!device->has_vertex_declaration)
+    {
+        wined3d_mutex_unlock();
+        WARN("Called without a valid vertex declaration set.\n");
+        return D3DERR_INVALIDCALL;
+    }
 
     hr = d3d9_device_prepare_vertex_buffer(device, vtx_size);
     if (FAILED(hr))
@@ -2576,6 +2605,7 @@ static HRESULT WINAPI d3d9_device_SetVertexDeclaration(IDirect3DDevice9Ex *iface
     wined3d_mutex_lock();
     wined3d_device_set_vertex_declaration(device->wined3d_device,
             decl_impl ? decl_impl->wined3d_declaration : NULL);
+    device->has_vertex_declaration = !!decl_impl;
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -2699,6 +2729,7 @@ static HRESULT WINAPI d3d9_device_SetFVF(IDirect3DDevice9Ex *iface, DWORD fvf)
     }
 
     wined3d_device_set_vertex_declaration(device->wined3d_device, decl);
+    device->has_vertex_declaration = TRUE;
     wined3d_mutex_unlock();
 
     return D3D_OK;
@@ -2852,7 +2883,8 @@ static HRESULT WINAPI d3d9_device_SetVertexShaderConstantI(IDirect3DDevice9Ex *i
     TRACE("iface %p, reg_idx %u, data %p, count %u.\n", iface, reg_idx, data, count);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_set_vs_consts_i(device->wined3d_device, reg_idx, data, count);
+    hr = wined3d_device_set_vs_consts_i(device->wined3d_device,
+            reg_idx, count, (const struct wined3d_ivec4 *)data);
     wined3d_mutex_unlock();
 
     return hr;
@@ -2867,7 +2899,8 @@ static HRESULT WINAPI d3d9_device_GetVertexShaderConstantI(IDirect3DDevice9Ex *i
     TRACE("iface %p, reg_idx %u, data %p, count %u.\n", iface, reg_idx, data, count);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_get_vs_consts_i(device->wined3d_device, reg_idx, data, count);
+    hr = wined3d_device_get_vs_consts_i(device->wined3d_device,
+            reg_idx, count, (struct wined3d_ivec4 *)data);
     wined3d_mutex_unlock();
 
     return hr;
@@ -2882,7 +2915,7 @@ static HRESULT WINAPI d3d9_device_SetVertexShaderConstantB(IDirect3DDevice9Ex *i
     TRACE("iface %p, reg_idx %u, data %p, count %u.\n", iface, reg_idx, data, count);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_set_vs_consts_b(device->wined3d_device, reg_idx, data, count);
+    hr = wined3d_device_set_vs_consts_b(device->wined3d_device, reg_idx, count, data);
     wined3d_mutex_unlock();
 
     return hr;
@@ -2897,7 +2930,7 @@ static HRESULT WINAPI d3d9_device_GetVertexShaderConstantB(IDirect3DDevice9Ex *i
     TRACE("iface %p, reg_idx %u, data %p, count %u.\n", iface, reg_idx, data, count);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_get_vs_consts_b(device->wined3d_device, reg_idx, data, count);
+    hr = wined3d_device_get_vs_consts_b(device->wined3d_device, reg_idx, count, data);
     wined3d_mutex_unlock();
 
     return hr;
@@ -3140,7 +3173,8 @@ static HRESULT WINAPI d3d9_device_SetPixelShaderConstantI(IDirect3DDevice9Ex *if
     TRACE("iface %p, reg_idx %u, data %p, count %u.\n", iface, reg_idx, data, count);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_set_ps_consts_i(device->wined3d_device, reg_idx, data, count);
+    hr = wined3d_device_set_ps_consts_i(device->wined3d_device,
+            reg_idx, count, (const struct wined3d_ivec4 *)data);
     wined3d_mutex_unlock();
 
     return hr;
@@ -3155,7 +3189,8 @@ static HRESULT WINAPI d3d9_device_GetPixelShaderConstantI(IDirect3DDevice9Ex *if
     TRACE("iface %p, reg_idx %u, data %p, count %u.\n", iface, reg_idx, data, count);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_get_ps_consts_i(device->wined3d_device, reg_idx, data, count);
+    hr = wined3d_device_get_ps_consts_i(device->wined3d_device,
+            reg_idx, count, (struct wined3d_ivec4 *)data);
     wined3d_mutex_unlock();
 
     return hr;
@@ -3170,7 +3205,7 @@ static HRESULT WINAPI d3d9_device_SetPixelShaderConstantB(IDirect3DDevice9Ex *if
     TRACE("iface %p, reg_idx %u, data %p, count %u.\n", iface, reg_idx, data, count);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_set_ps_consts_b(device->wined3d_device, reg_idx, data, count);
+    hr = wined3d_device_set_ps_consts_b(device->wined3d_device, reg_idx, count, data);
     wined3d_mutex_unlock();
 
     return hr;
@@ -3185,7 +3220,7 @@ static HRESULT WINAPI d3d9_device_GetPixelShaderConstantB(IDirect3DDevice9Ex *if
     TRACE("iface %p, reg_idx %u, data %p, count %u.\n", iface, reg_idx, data, count);
 
     wined3d_mutex_lock();
-    hr = wined3d_device_get_ps_consts_b(device->wined3d_device, reg_idx, data, count);
+    hr = wined3d_device_get_ps_consts_b(device->wined3d_device, reg_idx, count, data);
     wined3d_mutex_unlock();
 
     return hr;

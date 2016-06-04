@@ -47,6 +47,7 @@ typedef float (*bitsgetfunc)(const IDirectSoundBufferImpl *, DWORD, DWORD);
 typedef void (*bitsputfunc)(const IDirectSoundBufferImpl *, DWORD, DWORD, float);
 extern const bitsgetfunc getbpp[5] DECLSPEC_HIDDEN;
 void putieee32(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, float value) DECLSPEC_HIDDEN;
+void putieee32_sum(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, float value) DECLSPEC_HIDDEN;
 void mixieee32(float *src, float *dst, unsigned samples) DECLSPEC_HIDDEN;
 typedef void (*normfunc)(const void *, void *, unsigned);
 extern const normfunc normfunctions[4] DECLSPEC_HIDDEN;
@@ -76,7 +77,7 @@ struct DirectSoundDevice
     DWORD                       priolevel, sleeptime;
     PWAVEFORMATEX               pwfx, primary_pwfx;
     LPBYTE                      buffer;
-    DWORD                       writelead, buflen, aclen, fraglen, state, playpos, pad;
+    DWORD                       writelead, buflen, aclen, fraglen, playpos, pad, stopped;
     int                         nrofbuffers;
     IDirectSoundBufferImpl**    buffers;
     RTL_RWLOCK                  buffer_list_lock;
@@ -87,8 +88,8 @@ struct DirectSoundDevice
     int                         speaker_num[DS_MAX_CHANNELS];
     int                         num_speakers;
     int                         lfe_channel;
-    float *tmp_buffer;
-    DWORD                       tmp_buffer_len;
+    float *tmp_buffer, *cp_buffer;
+    DWORD                       tmp_buffer_len, cp_buffer_len;
 
     DSVOLUMEPAN                 volpan;
 
@@ -100,7 +101,6 @@ struct DirectSoundDevice
 
     IMMDevice *mmdevice;
     IAudioClient *client;
-    IAudioClock *clock;
     IAudioStreamVolume *volume;
     IAudioRenderClient *render;
 
@@ -178,6 +178,8 @@ void put_mono2quad(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, 
 void put_stereo2quad(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, float value) DECLSPEC_HIDDEN;
 void put_mono2surround51(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, float value) DECLSPEC_HIDDEN;
 void put_stereo2surround51(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, float value) DECLSPEC_HIDDEN;
+void put_surround512stereo(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, float value) DECLSPEC_HIDDEN;
+void put_quad2stereo(const IDirectSoundBufferImpl *dsb, DWORD pos, DWORD channel, float value) DECLSPEC_HIDDEN;
 
 HRESULT secondarybuffer_create(DirectSoundDevice *device, const DSBUFFERDESC *dsbd,
         IDirectSoundBuffer **buffer) DECLSPEC_HIDDEN;
@@ -204,13 +206,11 @@ void DSOUND_ParseSpeakerConfig(DirectSoundDevice *device) DECLSPEC_HIDDEN;
 
 /* primary.c */
 
-HRESULT DSOUND_PrimaryCreate(DirectSoundDevice *device) DECLSPEC_HIDDEN;
 HRESULT DSOUND_PrimaryDestroy(DirectSoundDevice *device) DECLSPEC_HIDDEN;
 HRESULT DSOUND_PrimaryPlay(DirectSoundDevice *device) DECLSPEC_HIDDEN;
 HRESULT DSOUND_PrimaryStop(DirectSoundDevice *device) DECLSPEC_HIDDEN;
 LPWAVEFORMATEX DSOUND_CopyFormat(LPCWAVEFORMATEX wfex) DECLSPEC_HIDDEN;
 HRESULT DSOUND_ReopenDevice(DirectSoundDevice *device, BOOL forcewave) DECLSPEC_HIDDEN;
-HRESULT DSOUND_PrimaryOpen(DirectSoundDevice *device) DECLSPEC_HIDDEN;
 HRESULT primarybuffer_create(DirectSoundDevice *device, IDirectSoundBufferImpl **ppdsb,
     const DSBUFFERDESC *dsbd) DECLSPEC_HIDDEN;
 void primarybuffer_destroy(IDirectSoundBufferImpl *This) DECLSPEC_HIDDEN;

@@ -784,17 +784,13 @@ static void surface_download_data(struct wined3d_surface *surface, const struct 
 
     if (surface->texture_target == GL_TEXTURE_2D_ARRAY)
     {
-        /* We don't expect to ever need to emulate NP2 textures when we have EXT_texture_array. */
+        /* NP2 emulation is not allowed on array textures. */
         if (texture->flags & WINED3D_TEXTURE_COND_NP2_EMULATED)
-        {
-            FIXME("Cannot download surface %p, level %u, layer %u.\n",
-                    surface, surface->texture_level, surface->texture_layer);
-            return;
-        }
+            ERR("Array texture %p uses NP2 emulation.\n", texture);
 
         WARN_(d3d_perf)("Downloading all miplevel layers to get the surface data for a single sub-resource.\n");
 
-        if (!(temporary_mem = HeapAlloc(GetProcessHeap(), 0, texture->layer_count * sub_resource->size)))
+        if (!(temporary_mem = wined3d_calloc(texture->layer_count, sub_resource->size)))
         {
             ERR("Out of memory.\n");
             return;
@@ -1897,7 +1893,7 @@ static void fb_copy_to_texture_direct(struct wined3d_surface *dst_surface, struc
 
     if ((xrel - 1.0f < -eps) || (xrel - 1.0f > eps))
     {
-        FIXME("Doing a pixel by pixel copy from the framebuffer to a texture, expect major performance issues\n");
+        FIXME_(d3d_perf)("Doing a pixel by pixel copy from the framebuffer to a texture.\n");
 
         if (filter != WINED3D_TEXF_NONE && filter != WINED3D_TEXF_POINT)
             ERR("Texture filtering not supported in direct blit.\n");
@@ -2910,8 +2906,7 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
         if ((sub_resource->locations & (WINED3D_LOCATION_TEXTURE_RGB | texture->resource.map_binding))
                 == WINED3D_LOCATION_TEXTURE_RGB)
         {
-            /* Performance warning... */
-            FIXME("Downloading RGB surface %p to reload it as sRGB.\n", surface);
+            FIXME_(d3d_perf)("Downloading RGB surface %p to reload it as sRGB.\n", surface);
             surface_load_location(surface, context, texture->resource.map_binding);
         }
     }
@@ -2920,8 +2915,7 @@ static HRESULT surface_load_texture(struct wined3d_surface *surface,
         if ((sub_resource->locations & (WINED3D_LOCATION_TEXTURE_SRGB | texture->resource.map_binding))
                 == WINED3D_LOCATION_TEXTURE_SRGB)
         {
-            /* Performance warning... */
-            FIXME("Downloading sRGB surface %p to reload it as RGB.\n", surface);
+            FIXME_(d3d_perf)("Downloading sRGB surface %p to reload it as RGB.\n", surface);
             surface_load_location(surface, context, texture->resource.map_binding);
         }
     }
@@ -4302,12 +4296,4 @@ fallback:
 cpu:
     return surface_cpu_blt(dst_texture, dst_sub_resource_idx, &dst_box,
             src_texture, src_sub_resource_idx, &src_box, flags, fx, filter);
-}
-
-/* Context activation is done by the caller. Context may be NULL in
- * WINED3D_NO3D mode. */
-void wined3d_surface_prepare(struct wined3d_surface *surface, struct wined3d_context *context, DWORD location)
-{
-    wined3d_texture_prepare_location(surface->container,
-            surface_get_sub_resource_idx(surface), context, location);
 }

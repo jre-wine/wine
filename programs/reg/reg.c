@@ -159,7 +159,7 @@ static BOOL ask_confirm(unsigned int msgid, WCHAR *reg_info)
     LoadStringW(hmod, STRING_NO,  Nbuffer, ARRAY_SIZE(Nbuffer));
     LoadStringW(hmod, STRING_DEFAULT_VALUE, defval, ARRAY_SIZE(defval));
 
-    str = (reg_info && strlenW(reg_info)) ? reg_info : defval;
+    str = (reg_info && *reg_info) ? reg_info : defval;
 
     while (1)
     {
@@ -894,8 +894,14 @@ int wmain(int argc, WCHAR *argvW[])
     static const WCHAR slashVEW[] = {'/','v','e',0};
     static const WCHAR slashHelpW[] = {'/','?',0};
 
-    if (argc < 2 || !lstrcmpW(argvW[1], slashHelpW)
-                 || !lstrcmpiW(argvW[1], slashHW))
+    if (argc == 1)
+    {
+        output_message(STRING_INVALID_SYNTAX);
+        output_message(STRING_REG_HELP);
+        return 1;
+    }
+
+    if (!lstrcmpW(argvW[1], slashHelpW) || !lstrcmpiW(argvW[1], slashHW))
     {
         output_message(STRING_USAGE);
         return 0;
@@ -908,7 +914,8 @@ int wmain(int argc, WCHAR *argvW[])
 
         if (argc < 3)
         {
-            output_message(STRING_INVALID_CMDLINE);
+            output_message(STRING_INVALID_SYNTAX);
+            output_message(STRING_FUNC_HELP, struprW(argvW[1]));
             return 1;
         }
         else if (argc == 3 && (!lstrcmpW(argvW[2], slashHelpW) ||
@@ -965,7 +972,8 @@ int wmain(int argc, WCHAR *argvW[])
 
         if (argc < 3)
         {
-            output_message(STRING_INVALID_CMDLINE);
+            output_message(STRING_INVALID_SYNTAX);
+            output_message(STRING_FUNC_HELP, struprW(argvW[1]));
             return 1;
         }
         else if (argc == 3 && (!lstrcmpW(argvW[2], slashHelpW) ||
@@ -1002,7 +1010,8 @@ int wmain(int argc, WCHAR *argvW[])
 
         if (argc < 3)
         {
-            output_message(STRING_INVALID_CMDLINE);
+            output_message(STRING_INVALID_SYNTAX);
+            output_message(STRING_FUNC_HELP, struprW(argvW[1]));
             return 1;
         }
         else if (argc == 3 && (!lstrcmpW(argvW[2], slashHelpW) ||
@@ -1032,7 +1041,8 @@ int wmain(int argc, WCHAR *argvW[])
     }
     else
     {
-        output_message(STRING_INVALID_CMDLINE);
+        output_message(STRING_INVALID_OPTION, argvW[1]);
+        output_message(STRING_REG_HELP);
         return 1;
     }
 }
