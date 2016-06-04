@@ -844,31 +844,30 @@ static inline void notify_itemactivate(const LISTVIEW_INFO *infoPtr, const LVHIT
     NMITEMACTIVATE nmia;
     LVITEMW item;
 
-    if (htInfo) {
-      nmia.uNewState = 0;
-      nmia.uOldState = 0;
-      nmia.uChanged  = 0;
-      nmia.uKeyFlags = 0;
-      
-      item.mask = LVIF_PARAM|LVIF_STATE;
-      item.iItem = htInfo->iItem;
-      item.iSubItem = 0;
-      item.stateMask = (UINT)-1;
-      if (LISTVIEW_GetItemT(infoPtr, &item, TRUE)) {
-	  nmia.lParam = item.lParam;
- 	  nmia.uOldState = item.state;
-	  nmia.uNewState = item.state | LVIS_ACTIVATING;
-	  nmia.uChanged  = LVIF_STATE;
-      }
-      
-      nmia.iItem = htInfo->iItem;
-      nmia.iSubItem = htInfo->iSubItem;
-      nmia.ptAction = htInfo->pt;     
-      
-      if (GetKeyState(VK_SHIFT) & 0x8000) nmia.uKeyFlags |= LVKF_SHIFT;
-      if (GetKeyState(VK_CONTROL) & 0x8000) nmia.uKeyFlags |= LVKF_CONTROL;
-      if (GetKeyState(VK_MENU) & 0x8000) nmia.uKeyFlags |= LVKF_ALT;
+    nmia.uNewState = 0;
+    nmia.uOldState = 0;
+    nmia.uChanged  = 0;
+    nmia.uKeyFlags = 0;
+
+    item.mask = LVIF_PARAM|LVIF_STATE;
+    item.iItem = htInfo->iItem;
+    item.iSubItem = 0;
+    item.stateMask = (UINT)-1;
+    if (LISTVIEW_GetItemT(infoPtr, &item, TRUE)) {
+        nmia.lParam = item.lParam;
+        nmia.uOldState = item.state;
+        nmia.uNewState = item.state | LVIS_ACTIVATING;
+        nmia.uChanged  = LVIF_STATE;
     }
+
+    nmia.iItem = htInfo->iItem;
+    nmia.iSubItem = htInfo->iSubItem;
+    nmia.ptAction = htInfo->pt;
+
+    if (GetKeyState(VK_SHIFT) & 0x8000) nmia.uKeyFlags |= LVKF_SHIFT;
+    if (GetKeyState(VK_CONTROL) & 0x8000) nmia.uKeyFlags |= LVKF_CONTROL;
+    if (GetKeyState(VK_MENU) & 0x8000) nmia.uKeyFlags |= LVKF_ALT;
+
     notify_hdr(infoPtr, LVN_ITEMACTIVATE, (LPNMHDR)&nmia);
 }
 
@@ -4748,7 +4747,7 @@ static BOOL LISTVIEW_DrawItem(LISTVIEW_INFO *infoPtr, HDC hdc, INT nItem, ITERAT
 
        - CDDS_ITEMPREPAINT
        - CDDS_ITEMPREPAINT|CDDS_SUBITEM   | => sent n times, where n is number of subitems,
-         CDDS_ITEMPOSTPAINT|CDDS_SUBITEM  |    including item iself
+         CDDS_ITEMPOSTPAINT|CDDS_SUBITEM  |    including item itself
        - CDDS_ITEMPOSTPAINT
 
        other styles:

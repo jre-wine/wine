@@ -103,6 +103,8 @@ WINE_DECLARE_DEBUG_CHANNEL(d3d_bytecode);
 
 #define WINED3D_SM4_INSTRUCTION_FLAG_SATURATE   0x4
 
+#define WINED3D_SM4_CONDITIONAL_NZ              (0x1u << 18)
+
 enum wined3d_sm4_opcode
 {
     WINED3D_SM4_OP_ADD                              = 0x00,
@@ -157,6 +159,7 @@ enum wined3d_sm4_opcode
     WINED3D_SM4_OP_OR                               = 0x3c,
     WINED3D_SM4_OP_RESINFO                          = 0x3d,
     WINED3D_SM4_OP_RET                              = 0x3e,
+    WINED3D_SM4_OP_ROUND_NE                         = 0x40,
     WINED3D_SM4_OP_ROUND_NI                         = 0x41,
     WINED3D_SM4_OP_ROUND_PI                         = 0x42,
     WINED3D_SM4_OP_ROUND_Z                          = 0x43,
@@ -377,6 +380,15 @@ static BOOL shader_sm4_read_src_param(struct wined3d_sm4_data *priv, const DWORD
         enum wined3d_data_type data_type, struct wined3d_shader_src_param *src_param);
 static BOOL shader_sm4_read_dst_param(struct wined3d_sm4_data *priv, const DWORD **ptr,
         enum wined3d_data_type data_type, struct wined3d_shader_dst_param *dst_param);
+
+static void shader_sm4_read_conditional_op(struct wined3d_shader_instruction *ins,
+        DWORD opcode, DWORD opcode_token, const DWORD *tokens, unsigned int token_count,
+        struct wined3d_sm4_data *priv)
+{
+    shader_sm4_read_src_param(priv, &tokens, WINED3D_DATA_UINT, &priv->src_param[0]);
+    ins->flags = (opcode_token & WINED3D_SM4_CONDITIONAL_NZ) ?
+            WINED3D_SHADER_CONDITIONAL_OP_NZ : WINED3D_SHADER_CONDITIONAL_OP_Z;
+}
 
 static void shader_sm4_read_shader_data(struct wined3d_shader_instruction *ins,
         DWORD opcode, DWORD opcode_token, const DWORD *tokens, unsigned int token_count,
@@ -606,7 +618,8 @@ static const struct wined3d_sm4_opcode_info opcode_table[] =
     {WINED3D_SM4_OP_ADD,                              WINED3DSIH_ADD,                              "f",    "ff"},
     {WINED3D_SM4_OP_AND,                              WINED3DSIH_AND,                              "u",    "uu"},
     {WINED3D_SM4_OP_BREAK,                            WINED3DSIH_BREAK,                            "",     ""},
-    {WINED3D_SM4_OP_BREAKC,                           WINED3DSIH_BREAKP,                           "",     "u"},
+    {WINED3D_SM4_OP_BREAKC,                           WINED3DSIH_BREAKP,                           "",     "u",
+            shader_sm4_read_conditional_op},
     {WINED3D_SM4_OP_CUT,                              WINED3DSIH_CUT,                              "",     ""},
     {WINED3D_SM4_OP_DERIV_RTX,                        WINED3DSIH_DSX,                              "f",    "f"},
     {WINED3D_SM4_OP_DERIV_RTY,                        WINED3DSIH_DSY,                              "f",    "f"},
@@ -626,7 +639,8 @@ static const struct wined3d_sm4_opcode_info opcode_table[] =
     {WINED3D_SM4_OP_FTOU,                             WINED3DSIH_FTOU,                             "u",    "f"},
     {WINED3D_SM4_OP_GE,                               WINED3DSIH_GE,                               "u",    "ff"},
     {WINED3D_SM4_OP_IADD,                             WINED3DSIH_IADD,                             "i",    "ii"},
-    {WINED3D_SM4_OP_IF,                               WINED3DSIH_IF,                               "",     "u"},
+    {WINED3D_SM4_OP_IF,                               WINED3DSIH_IF,                               "",     "u",
+            shader_sm4_read_conditional_op},
     {WINED3D_SM4_OP_IEQ,                              WINED3DSIH_IEQ,                              "u",    "ii"},
     {WINED3D_SM4_OP_IGE,                              WINED3DSIH_IGE,                              "u",    "ii"},
     {WINED3D_SM4_OP_ILT,                              WINED3DSIH_ILT,                              "u",    "ii"},
@@ -656,6 +670,7 @@ static const struct wined3d_sm4_opcode_info opcode_table[] =
     {WINED3D_SM4_OP_OR,                               WINED3DSIH_OR,                               "u",    "uu"},
     {WINED3D_SM4_OP_RESINFO,                          WINED3DSIH_RESINFO,                          "f",    "iR"},
     {WINED3D_SM4_OP_RET,                              WINED3DSIH_RET,                              "",     ""},
+    {WINED3D_SM4_OP_ROUND_NE,                         WINED3DSIH_ROUND_NE,                         "f",    "f"},
     {WINED3D_SM4_OP_ROUND_NI,                         WINED3DSIH_ROUND_NI,                         "f",    "f"},
     {WINED3D_SM4_OP_ROUND_PI,                         WINED3DSIH_ROUND_PI,                         "f",    "f"},
     {WINED3D_SM4_OP_ROUND_Z,                          WINED3DSIH_ROUND_Z,                          "f",    "f"},

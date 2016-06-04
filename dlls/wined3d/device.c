@@ -302,7 +302,7 @@ void device_clear_render_targets(struct wined3d_device *device, UINT rt_count, c
     GLbitfield clear_mask = 0;
     BOOL render_offscreen;
     unsigned int i;
-    RECT ds_rect;
+    RECT ds_rect = {0};
 
     context = context_acquire(device, target);
     if (!context->valid)
@@ -682,19 +682,23 @@ out:
 /* Context activation is done by the caller. */
 static void create_dummy_textures(struct wined3d_device *device, struct wined3d_context *context)
 {
+    const struct wined3d_d3d_info *d3d_info = &device->adapter->d3d_info;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     unsigned int i, j, count;
+    DWORD color;
+
+    if (d3d_info->wined3d_creation_flags & WINED3D_LEGACY_UNBOUND_RESOURCE_COLOR)
+        color = 0x000000ff;
+    else
+        color = 0x00000000;
+
     /* Under DirectX you can sample even if no texture is bound, whereas
      * OpenGL will only allow that when a valid texture is bound.
      * We emulate this by creating dummy textures and binding them
      * to each texture stage when the currently set D3D texture is NULL. */
-
     count = min(MAX_COMBINED_SAMPLERS, gl_info->limits.combined_samplers);
     for (i = 0; i < count; ++i)
     {
-        static const DWORD d3d10_color = 0x00000000;
-        static const DWORD color = 0x000000ff;
-
         /* Make appropriate texture active */
         context_active_texture(context, gl_info, i);
 
@@ -732,7 +736,8 @@ static void create_dummy_textures(struct wined3d_device *device, struct wined3d_
             gl_info->gl_ops.gl.p_glBindTexture(GL_TEXTURE_3D, device->dummy_texture_3d[i]);
             checkGLcall("glBindTexture");
 
-            GL_EXTCALL(glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, &color));
+            GL_EXTCALL(glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA8, 1, 1, 1, 0,
+                    GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, &color));
             checkGLcall("glTexImage3D");
         }
 
@@ -763,7 +768,7 @@ static void create_dummy_textures(struct wined3d_device *device, struct wined3d_
             checkGLcall("glBindTexture");
 
             GL_EXTCALL(glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, 1, 1, 1, 0,
-                    GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, &d3d10_color));
+                    GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, &color));
             checkGLcall("glTexImage3D");
         }
     }
@@ -820,7 +825,6 @@ static void create_default_sampler(struct wined3d_device *device)
      * sampler object is used to emulate the direct resource access when there is no sampler state
      * to use.
      */
-
     if (gl_info->supported[ARB_SAMPLER_OBJECTS])
     {
         GL_EXTCALL(glGenSamplers(1, &device->default_sampler));
@@ -1001,8 +1005,8 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
     if (device->wined3d->flags & WINED3D_NO3D)
         return WINED3DERR_INVALIDCALL;
 
-    device->fb.render_targets = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-            sizeof(*device->fb.render_targets) * gl_info->limits.buffers);
+    if (!(device->fb.render_targets = wined3d_calloc(gl_info->limits.buffers, sizeof(*device->fb.render_targets))))
+        return E_OUTOFMEMORY;
 
     if (FAILED(hr = device->shader_backend->shader_alloc_private(device,
             device->adapter->vertex_pipe, device->adapter->fragment_pipe)))
@@ -1043,8 +1047,7 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
     }
 
     device->swapchain_count = 1;
-    device->swapchains = HeapAlloc(GetProcessHeap(), 0, device->swapchain_count * sizeof(*device->swapchains));
-    if (!device->swapchains)
+    if (!(device->swapchains = wined3d_calloc(device->swapchain_count, sizeof(*device->swapchains))))
     {
         ERR("Out of memory!\n");
         goto err_out;
@@ -1112,8 +1115,7 @@ HRESULT CDECL wined3d_device_init_gdi(struct wined3d_device *device,
     }
 
     device->swapchain_count = 1;
-    device->swapchains = HeapAlloc(GetProcessHeap(), 0, device->swapchain_count * sizeof(*device->swapchains));
-    if (!device->swapchains)
+    if (!(device->swapchains = wined3d_calloc(device->swapchain_count, sizeof(*device->swapchains))))
     {
         ERR("Out of memory!\n");
         goto err_out;
@@ -2363,104 +2365,100 @@ struct wined3d_sampler * CDECL wined3d_device_get_vs_sampler(const struct wined3
     return device->state.sampler[WINED3D_SHADER_TYPE_VERTEX][idx];
 }
 
-static void device_invalidate_shader_constants(const struct wined3d_device *device, DWORD mask)
-{
-    UINT i;
-
-    for (i = 0; i < device->context_count; ++i)
-    {
-        device->contexts[i]->constant_update_mask |= mask;
-    }
-}
-
 HRESULT CDECL wined3d_device_set_vs_consts_b(struct wined3d_device *device,
-        UINT start_register, const BOOL *constants, UINT bool_count)
+        unsigned int start_idx, unsigned int count, const BOOL *constants)
 {
-    UINT count = min(bool_count, MAX_CONST_B - start_register);
-    UINT i;
+    unsigned int i;
 
-    TRACE("device %p, start_register %u, constants %p, bool_count %u.\n",
-            device, start_register, constants, bool_count);
+    TRACE("device %p, start_idx %u, count %u, constants %p.\n",
+            device, start_idx, count, constants);
 
-    if (!constants || start_register >= MAX_CONST_B)
+    if (!constants || start_idx >= WINED3D_MAX_CONSTS_B)
         return WINED3DERR_INVALIDCALL;
 
-    memcpy(&device->update_state->vs_consts_b[start_register], constants, count * sizeof(BOOL));
-    for (i = 0; i < count; ++i)
-        TRACE("Set BOOL constant %u to %s.\n", start_register + i, constants[i] ? "true" : "false");
+    if (count > WINED3D_MAX_CONSTS_B - start_idx)
+        count = WINED3D_MAX_CONSTS_B - start_idx;
+    memcpy(&device->update_state->vs_consts_b[start_idx], constants, count * sizeof(*constants));
+    if (TRACE_ON(d3d))
+    {
+        for (i = 0; i < count; ++i)
+            TRACE("Set BOOL constant %u to %#x.\n", start_idx + i, constants[i]);
+    }
 
     if (device->recording)
     {
-        for (i = start_register; i < count + start_register; ++i)
+        for (i = start_idx; i < count + start_idx; ++i)
             device->recording->changed.vertexShaderConstantsB |= (1u << i);
     }
     else
     {
-        device_invalidate_shader_constants(device, WINED3D_SHADER_CONST_VS_B);
+        wined3d_cs_push_constants(device->cs, WINED3D_PUSH_CONSTANTS_VS_B, start_idx, count, constants);
     }
 
     return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_device_get_vs_consts_b(const struct wined3d_device *device,
-        UINT start_register, BOOL *constants, UINT bool_count)
+        unsigned int start_idx, unsigned int count, BOOL *constants)
 {
-    UINT count = min(bool_count, MAX_CONST_B - start_register);
+    TRACE("device %p, start_idx %u, count %u, constants %p.\n",
+            device, start_idx, count, constants);
 
-    TRACE("device %p, start_register %u, constants %p, bool_count %u.\n",
-            device, start_register, constants, bool_count);
-
-    if (!constants || start_register >= MAX_CONST_B)
+    if (!constants || start_idx >= WINED3D_MAX_CONSTS_B)
         return WINED3DERR_INVALIDCALL;
 
-    memcpy(constants, &device->state.vs_consts_b[start_register], count * sizeof(BOOL));
+    if (count > WINED3D_MAX_CONSTS_B - start_idx)
+        count = WINED3D_MAX_CONSTS_B - start_idx;
+    memcpy(constants, &device->state.vs_consts_b[start_idx], count * sizeof(*constants));
 
     return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_device_set_vs_consts_i(struct wined3d_device *device,
-        UINT start_register, const int *constants, UINT vector4i_count)
+        unsigned int start_idx, unsigned int count, const struct wined3d_ivec4 *constants)
 {
-    UINT count = min(vector4i_count, MAX_CONST_I - start_register);
-    UINT i;
+    unsigned int i;
 
-    TRACE("device %p, start_register %u, constants %p, vector4i_count %u.\n",
-            device, start_register, constants, vector4i_count);
+    TRACE("device %p, start_idx %u, count %u, constants %p.\n",
+            device, start_idx, count, constants);
 
-    if (!constants || start_register >= MAX_CONST_I)
+    if (!constants || start_idx >= WINED3D_MAX_CONSTS_I)
         return WINED3DERR_INVALIDCALL;
 
-    memcpy(&device->update_state->vs_consts_i[start_register * 4], constants, count * sizeof(int) * 4);
-    for (i = 0; i < count; ++i)
-        TRACE("Set INT constant %u to {%d, %d, %d, %d}.\n", start_register + i,
-                constants[i * 4], constants[i * 4 + 1],
-                constants[i * 4 + 2], constants[i * 4 + 3]);
+    if (count > WINED3D_MAX_CONSTS_I - start_idx)
+        count = WINED3D_MAX_CONSTS_I - start_idx;
+    memcpy(&device->update_state->vs_consts_i[start_idx], constants, count * sizeof(*constants));
+    if (TRACE_ON(d3d))
+    {
+        for (i = 0; i < count; ++i)
+            TRACE("Set ivec4 constant %u to %s.\n", start_idx + i, debug_ivec4(&constants[i]));
+    }
 
     if (device->recording)
     {
-        for (i = start_register; i < count + start_register; ++i)
+        for (i = start_idx; i < count + start_idx; ++i)
             device->recording->changed.vertexShaderConstantsI |= (1u << i);
     }
     else
     {
-        device_invalidate_shader_constants(device, WINED3D_SHADER_CONST_VS_I);
+        wined3d_cs_push_constants(device->cs, WINED3D_PUSH_CONSTANTS_VS_I, start_idx, count, constants);
     }
 
     return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_device_get_vs_consts_i(const struct wined3d_device *device,
-        UINT start_register, int *constants, UINT vector4i_count)
+        unsigned int start_idx, unsigned int count, struct wined3d_ivec4 *constants)
 {
-    UINT count = min(vector4i_count, MAX_CONST_I - start_register);
+    TRACE("device %p, start_idx %u, count %u, constants %p.\n",
+            device, start_idx, count, constants);
 
-    TRACE("device %p, start_register %u, constants %p, vector4i_count %u.\n",
-            device, start_register, constants, vector4i_count);
-
-    if (!constants || start_register >= MAX_CONST_I)
+    if (!constants || start_idx >= WINED3D_MAX_CONSTS_I)
         return WINED3DERR_INVALIDCALL;
 
-    memcpy(constants, &device->state.vs_consts_i[start_register * 4], count * sizeof(int) * 4);
+    if (count > WINED3D_MAX_CONSTS_I - start_idx)
+        count = WINED3D_MAX_CONSTS_I - start_idx;
+    memcpy(constants, &device->state.vs_consts_i[start_idx], count * sizeof(*constants));
     return WINED3D_OK;
 }
 
@@ -2485,10 +2483,10 @@ HRESULT CDECL wined3d_device_set_vs_consts_f(struct wined3d_device *device,
     }
 
     if (device->recording)
-        memset(&device->recording->changed.vertexShaderConstantsF[start_idx], 1,
-                count * sizeof(*device->recording->changed.vertexShaderConstantsF));
+        memset(&device->recording->changed.vs_consts_f[start_idx], 1,
+                count * sizeof(*device->recording->changed.vs_consts_f));
     else
-        device->shader_backend->shader_update_float_vertex_constants(device, start_idx, count);
+        wined3d_cs_push_constants(device->cs, WINED3D_PUSH_CONSTANTS_VS_F, start_idx, count, constants);
 
     return WINED3D_OK;
 }
@@ -2601,93 +2599,99 @@ struct wined3d_sampler * CDECL wined3d_device_get_ps_sampler(const struct wined3
 }
 
 HRESULT CDECL wined3d_device_set_ps_consts_b(struct wined3d_device *device,
-        UINT start_register, const BOOL *constants, UINT bool_count)
+        unsigned int start_idx, unsigned int count, const BOOL *constants)
 {
-    UINT count = min(bool_count, MAX_CONST_B - start_register);
-    UINT i;
+    unsigned int i;
 
-    TRACE("device %p, start_register %u, constants %p, bool_count %u.\n",
-            device, start_register, constants, bool_count);
+    TRACE("device %p, start_idx %u, count %u, constants %p.\n",
+            device, start_idx, count, constants);
 
-    if (!constants || start_register >= MAX_CONST_B)
+    if (!constants || start_idx >= WINED3D_MAX_CONSTS_B)
         return WINED3DERR_INVALIDCALL;
 
-    memcpy(&device->update_state->ps_consts_b[start_register], constants, count * sizeof(BOOL));
-    for (i = 0; i < count; ++i)
-        TRACE("Set BOOL constant %u to %s.\n", start_register + i, constants[i] ? "true" : "false");
+    if (count > WINED3D_MAX_CONSTS_B - start_idx)
+        count = WINED3D_MAX_CONSTS_B - start_idx;
+    memcpy(&device->update_state->ps_consts_b[start_idx], constants, count * sizeof(*constants));
+    if (TRACE_ON(d3d))
+    {
+        for (i = 0; i < count; ++i)
+            TRACE("Set BOOL constant %u to %#x.\n", start_idx + i, constants[i]);
+    }
 
     if (device->recording)
     {
-        for (i = start_register; i < count + start_register; ++i)
+        for (i = start_idx; i < count + start_idx; ++i)
             device->recording->changed.pixelShaderConstantsB |= (1u << i);
     }
     else
     {
-        device_invalidate_shader_constants(device, WINED3D_SHADER_CONST_PS_B);
+        wined3d_cs_push_constants(device->cs, WINED3D_PUSH_CONSTANTS_PS_B, start_idx, count, constants);
     }
 
     return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_device_get_ps_consts_b(const struct wined3d_device *device,
-        UINT start_register, BOOL *constants, UINT bool_count)
+        unsigned int start_idx, unsigned int count, BOOL *constants)
 {
-    UINT count = min(bool_count, MAX_CONST_B - start_register);
+    TRACE("device %p, start_idx %u, count %u,constants %p.\n",
+            device, start_idx, count, constants);
 
-    TRACE("device %p, start_register %u, constants %p, bool_count %u.\n",
-            device, start_register, constants, bool_count);
-
-    if (!constants || start_register >= MAX_CONST_B)
+    if (!constants || start_idx >= WINED3D_MAX_CONSTS_B)
         return WINED3DERR_INVALIDCALL;
 
-    memcpy(constants, &device->state.ps_consts_b[start_register], count * sizeof(BOOL));
+    if (count > WINED3D_MAX_CONSTS_B - start_idx)
+        count = WINED3D_MAX_CONSTS_B - start_idx;
+    memcpy(constants, &device->state.ps_consts_b[start_idx], count * sizeof(*constants));
 
     return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_device_set_ps_consts_i(struct wined3d_device *device,
-        UINT start_register, const int *constants, UINT vector4i_count)
+        unsigned int start_idx, unsigned int count, const struct wined3d_ivec4 *constants)
 {
-    UINT count = min(vector4i_count, MAX_CONST_I - start_register);
-    UINT i;
+    unsigned int i;
 
-    TRACE("device %p, start_register %u, constants %p, vector4i_count %u.\n",
-            device, start_register, constants, vector4i_count);
+    TRACE("device %p, start_idx %u, count %u, constants %p.\n",
+            device, start_idx, count, constants);
 
-    if (!constants || start_register >= MAX_CONST_I)
+    if (!constants || start_idx >= WINED3D_MAX_CONSTS_I)
         return WINED3DERR_INVALIDCALL;
 
-    memcpy(&device->update_state->ps_consts_i[start_register * 4], constants, count * sizeof(int) * 4);
-    for (i = 0; i < count; ++i)
-        TRACE("Set INT constant %u to {%d, %d, %d, %d}.\n", start_register + i,
-                constants[i * 4], constants[i * 4 + 1],
-                constants[i * 4 + 2], constants[i * 4 + 3]);
+    if (count > WINED3D_MAX_CONSTS_I - start_idx)
+        count = WINED3D_MAX_CONSTS_I - start_idx;
+    memcpy(&device->update_state->ps_consts_i[start_idx], constants, count * sizeof(*constants));
+    if (TRACE_ON(d3d))
+    {
+        for (i = 0; i < count; ++i)
+            TRACE("Set ivec4 constant %u to %s.\n", start_idx + i, debug_ivec4(&constants[i]));
+    }
 
     if (device->recording)
     {
-        for (i = start_register; i < count + start_register; ++i)
+        for (i = start_idx; i < count + start_idx; ++i)
             device->recording->changed.pixelShaderConstantsI |= (1u << i);
     }
     else
     {
-        device_invalidate_shader_constants(device, WINED3D_SHADER_CONST_PS_I);
+        wined3d_cs_push_constants(device->cs, WINED3D_PUSH_CONSTANTS_PS_I, start_idx, count, constants);
     }
 
     return WINED3D_OK;
 }
 
 HRESULT CDECL wined3d_device_get_ps_consts_i(const struct wined3d_device *device,
-        UINT start_register, int *constants, UINT vector4i_count)
+        unsigned int start_idx, unsigned int count, struct wined3d_ivec4 *constants)
 {
-    UINT count = min(vector4i_count, MAX_CONST_I - start_register);
+    TRACE("device %p, start_idx %u, count %u, constants %p.\n",
+            device, start_idx, count, constants);
 
-    TRACE("device %p, start_register %u, constants %p, vector4i_count %u.\n",
-            device, start_register, constants, vector4i_count);
-
-    if (!constants || start_register >= MAX_CONST_I)
+    if (!constants || start_idx >= WINED3D_MAX_CONSTS_I)
         return WINED3DERR_INVALIDCALL;
 
-    memcpy(constants, &device->state.ps_consts_i[start_register * 4], count * sizeof(int) * 4);
+    if (count > WINED3D_MAX_CONSTS_I - start_idx)
+        count = WINED3D_MAX_CONSTS_I - start_idx;
+    memcpy(constants, &device->state.ps_consts_i[start_idx], count * sizeof(*constants));
 
     return WINED3D_OK;
 }
@@ -2713,10 +2717,10 @@ HRESULT CDECL wined3d_device_set_ps_consts_f(struct wined3d_device *device,
     }
 
     if (device->recording)
-        memset(&device->recording->changed.pixelShaderConstantsF[start_idx], 1,
-                count * sizeof(*device->recording->changed.pixelShaderConstantsF));
+        memset(&device->recording->changed.ps_consts_f[start_idx], 1,
+                count * sizeof(*device->recording->changed.ps_consts_f));
     else
-        device->shader_backend->shader_update_float_pixel_constants(device, start_idx, count);
+        wined3d_cs_push_constants(device->cs, WINED3D_PUSH_CONSTANTS_PS_F, start_idx, count, constants);
 
     return WINED3D_OK;
 }
@@ -3478,12 +3482,6 @@ HRESULT CDECL wined3d_device_draw_primitive(struct wined3d_device *device, UINT 
 {
     TRACE("device %p, start_vertex %u, vertex_count %u.\n", device, start_vertex, vertex_count);
 
-    if (!device->state.vertex_declaration)
-    {
-        WARN("Called without a valid vertex declaration set.\n");
-        return WINED3DERR_INVALIDCALL;
-    }
-
     if (device->state.load_base_vertex_index)
     {
         device->state.load_base_vertex_index = 0;
@@ -3520,14 +3518,8 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive(struct wined3d_device *devic
         return WINED3DERR_INVALIDCALL;
     }
 
-    if (!device->state.vertex_declaration)
-    {
-        WARN("Called without a valid vertex declaration set.\n");
-        return WINED3DERR_INVALIDCALL;
-    }
-
     if (!gl_info->supported[ARB_DRAW_ELEMENTS_BASE_VERTEX] &&
-        device->state.load_base_vertex_index != device->state.base_vertex_index)
+            device->state.load_base_vertex_index != device->state.base_vertex_index)
     {
         device->state.load_base_vertex_index = device->state.base_vertex_index;
         device_invalidate_state(device, STATE_BASEVERTEXINDEX);
@@ -4887,9 +4879,8 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
         if (device->d3d_initialized)
             delete_opengl_contexts(device, swapchain);
 
-        if (FAILED(hr = state_init(&device->state, &device->fb, &device->adapter->gl_info,
-                &device->adapter->d3d_info, WINED3D_STATE_INIT_DEFAULT)))
-            ERR("Failed to initialize device state, hr %#x.\n", hr);
+        state_init(&device->state, &device->fb, &device->adapter->gl_info,
+                &device->adapter->d3d_info, WINED3D_STATE_INIT_DEFAULT);
         device->update_state = &device->state;
 
         device_init_swapchain_state(device, swapchain);
@@ -5143,12 +5134,8 @@ HRESULT device_init(struct wined3d_device *device, struct wined3d *wined3d,
 
     device->blitter = adapter->blitter;
 
-    if (FAILED(hr = state_init(&device->state, &device->fb, &adapter->gl_info,
-            &adapter->d3d_info, WINED3D_STATE_INIT_DEFAULT)))
-    {
-        ERR("Failed to initialize device state, hr %#x.\n", hr);
-        goto err;
-    }
+    state_init(&device->state, &device->fb, &adapter->gl_info,
+            &adapter->d3d_info, WINED3D_STATE_INIT_DEFAULT);
     device->update_state = &device->state;
 
     if (!(device->cs = wined3d_cs_create(device)))

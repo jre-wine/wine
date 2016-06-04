@@ -173,6 +173,18 @@ void DSOUND_RecalcFormat(IDirectSoundBufferImpl *dsb)
 		dsb->mix_channels = 2;
 		dsb->put = put_stereo2surround51;
 	}
+	else if (ichannels == 6 && ochannels == 2)
+	{
+		dsb->mix_channels = 6;
+		dsb->put = put_surround512stereo;
+		dsb->put_aux = putieee32_sum;
+	}
+	else if (ichannels == 4 && ochannels == 2)
+	{
+		dsb->mix_channels = 4;
+		dsb->put = put_quad2stereo;
+		dsb->put_aux = putieee32_sum;
+	}
 	else
 	{
 		if (ichannels > 2)
@@ -292,18 +304,29 @@ static UINT cp_fields_resample(IDirectSoundBufferImpl *dsb, UINT count, LONG64 *
 
     UINT fir_cachesize = (fir_len + dsbfirstep - 2) / dsbfirstep;
     UINT required_input = max_ipos + fir_cachesize;
+    float *intermediate, *fir_copy, *itmp;
 
-    float* intermediate = HeapAlloc(GetProcessHeap(), 0,
-            sizeof(float) * required_input * channels);
+    DWORD len = required_input * channels;
+    len += fir_cachesize;
+    len *= sizeof(float);
 
-    float* fir_copy = HeapAlloc(GetProcessHeap(), 0,
-            sizeof(float) * fir_cachesize);
+    if (!dsb->device->cp_buffer) {
+        dsb->device->cp_buffer = HeapAlloc(GetProcessHeap(), 0, len);
+        dsb->device->cp_buffer_len = len;
+    } else if (len > dsb->device->cp_buffer_len) {
+        dsb->device->cp_buffer = HeapReAlloc(GetProcessHeap(), 0, dsb->device->cp_buffer, len);
+        dsb->device->cp_buffer_len = len;
+    }
+
+    fir_copy = dsb->device->cp_buffer;
+    intermediate = fir_copy + fir_cachesize;
+
 
     /* Important: this buffer MUST be non-interleaved
      * if you want -msse3 to have any effect.
      * This is good for CPU cache effects, too.
      */
-    float* itmp = intermediate;
+    itmp = intermediate;
     for (channel = 0; channel < channels; channel++)
         for (i = 0; i < required_input; i++)
             *(itmp++) = get_current_sample(dsb,
@@ -337,9 +360,6 @@ static UINT cp_fields_resample(IDirectSoundBufferImpl *dsb, UINT count, LONG64 *
     }
 
     *freqAccNum = freqAcc_end % dsb->freqAdjustDen;
-
-    HeapFree(GetProcessHeap(), 0, fir_copy);
-    HeapFree(GetProcessHeap(), 0, intermediate);
 
     return max_ipos;
 }
@@ -487,6 +507,8 @@ static DWORD DSOUND_MixInBuffer(IDirectSoundBufferImpl *dsb, float *mix_buffer, 
 	/* Resample buffer to temporary buffer specifically allocated for this purpose, if needed */
 	oldpos = dsb->sec_mixpos;
 
+	if(dsb->put_aux == putieee32_sum)
+		memset(dsb->device->tmp_buffer, 0, dsb->device->tmp_buffer_len);
 	DSOUND_MixToTemporary(dsb, frames);
 	ibuf = dsb->device->tmp_buffer;
 
@@ -621,16 +643,18 @@ static void DSOUND_WaveQueue(DirectSoundDevice *device, LPBYTE pos, DWORD bytes)
 	hr = IAudioRenderClient_GetBuffer(device->render, bytes / device->pwfx->nBlockAlign, &buffer);
 	if(FAILED(hr)){
 		WARN("GetBuffer failed: %08x\n", hr);
-		goto done;
+		return;
 	}
 
 	memcpy(buffer, pos, bytes);
 
 	hr = IAudioRenderClient_ReleaseBuffer(device->render, bytes / device->pwfx->nBlockAlign, 0);
-	if(FAILED(hr))
-		WARN("ReleaseBuffer failed: %08x\n", hr);
+	if(FAILED(hr)) {
+		ERR("ReleaseBuffer failed: %08x\n", hr);
+		IAudioRenderClient_ReleaseBuffer(device->render, 0, 0);
+		return;
+	}
 
-done:
 	device->pad += bytes;
 }
 
@@ -692,10 +716,6 @@ static void DSOUND_PerformMix(DirectSoundDevice *device)
 		 * also wipe out just-played sound data */
 		if (!pad)
 			WARN("Probable buffer underrun\n");
-		else if (device->state == STATE_STOPPED ||
-		         device->state == STATE_STARTING) {
-			TRACE("Buffer restarting\n");
-		}
 
 		hr = IAudioRenderClient_GetBuffer(device->render, maxq / block, (void*)&buffer);
 		if(FAILED(hr)){
@@ -722,23 +742,7 @@ static void DSOUND_PerformMix(DirectSoundDevice *device)
 			ERR("ReleaseBuffer failed: %08x\n", hr);
 
 		device->pad += maxq;
-
-		if (maxq) {
-			if (device->state == STATE_STARTING ||
-			    device->state == STATE_STOPPED) {
-				if(DSOUND_PrimaryPlay(device) != DS_OK)
-					WARN("DSOUND_PrimaryPlay failed\n");
-				else if (device->state == STATE_STARTING)
-					device->state = STATE_PLAYING;
-				else
-					device->state = STATE_STOPPING;
-			}
-		} else if (!pad && !maxq && (all_stopped == TRUE) &&
-			   (device->state == STATE_STOPPING)) {
-			device->state = STATE_STOPPED;
-			DSOUND_PrimaryStop(device);
-		}
-	} else if (device->state != STATE_STOPPED) {
+	} else if (!device->stopped) {
 		if (maxq > device->buflen)
 			maxq = device->buflen;
 		if (writepos + maxq > device->buflen) {
@@ -746,20 +750,6 @@ static void DSOUND_PerformMix(DirectSoundDevice *device)
 			DSOUND_WaveQueue(device, device->buffer, writepos + maxq - device->buflen);
 		} else
 			DSOUND_WaveQueue(device, device->buffer + writepos, maxq);
-
-		/* in the DSSCL_WRITEPRIMARY mode, the app is totally in charge... */
-		if (device->state == STATE_STARTING) {
-			if (DSOUND_PrimaryPlay(device) != DS_OK)
-				WARN("DSOUND_PrimaryPlay failed\n");
-			else
-				device->state = STATE_PLAYING;
-		}
-		else if (device->state == STATE_STOPPING) {
-			if (DSOUND_PrimaryStop(device) != DS_OK)
-				WARN("DSOUND_PrimaryStop failed\n");
-			else
-				device->state = STATE_STOPPED;
-		}
 	}
 
 	LeaveCriticalSection(&(device->mixlock));
