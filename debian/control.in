@@ -268,7 +268,7 @@ Depends:
  libwineVERSION (= ${binary:Version}),
  libc6-dev,
 Recommends:
- wine32VERSION-tools (= ${binary:Version}) | wine64VERSION-tools (= ${binary:Version}),
+ wine64VERSION-tools (= ${binary:Version}) | wine32VERSION-tools (= ${binary:Version}),
 Breaks:
  wine32VERSION (<< 1.7.51-2~),
  wine64VERSION (<< 1.7.51-2~),
