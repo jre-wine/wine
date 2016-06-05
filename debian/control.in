@@ -63,6 +63,10 @@ Build-Depends:
  libgstreamer-plugins-base1.0-dev,
  freebsd-glue [kfreebsd-any],
  ocl-icd-opencl-dev,
+ icoutils,
+ librsvg2-bin,
+ imagemagick,
+ fontforge-nox | fontforge,
 Standards-Version: 3.9.8
 Homepage: http://www.winehq.org/
 Vcs-Browser: https://anonscm.debian.org/git/pkg-wine/wine.git
