@@ -103,7 +103,7 @@ Depends:
 Recommends:
  wineVERSION (= ${source:Version}),
 Suggests:
- libwine-gecko-2.40 [!armel !armhf !arm64],
+ libwine-gecko-2.44 [!armel !armhf !arm64],
  wine32VERSION-preloader (= ${binary:Version}),
 Breaks:
  wineVERSION (<< 1.7.50-3~),
@@ -126,7 +126,7 @@ Recommends:
  wineVERSION (= ${source:Version}),
  wine32VERSION (= ${binary:Version}),
 Suggests:
- libwine-gecko-2.40 [!armel !armhf !arm64],
+ libwine-gecko-2.44 [!armel !armhf !arm64],
  wine64VERSION-preloader (= ${binary:Version}),
 Breaks:
  wineVERSION (<< 1.7.50-3~),
