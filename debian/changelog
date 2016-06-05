@@ -18,6 +18,8 @@ wine (1.8.2-2) UNRELEASED; urgency=medium
       upon libraries. Thanks to Jakub Wilk.
     - Drop useless workaround for one-arch-only binNMUs.
     - Add alternative dependency on 32-bit libwine-dev to wine64-tools.
+    - Make wineNN-tools multi-arch installable (closes: #823264,
+      see: #824673). Thanks to Javier Serrano Polo.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Mon, 06 Jun 2016 03:35:43 +0200
 

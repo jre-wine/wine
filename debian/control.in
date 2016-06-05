@@ -173,11 +173,12 @@ Description: Windows API implementation - prelinked 64-bit binary loader
 
 Package: wine32VERSION-tools
 Architecture: any-i386 any-powerpc armel armhf
+Multi-Arch: foreign
 Section: libdevel
 Built-Using: ${built:Using}
 Depends:
- gcc,
- ${perl:Depends},
+ gcc | gcc-multilib:amd64 [i386],
+ ${perl:Depends} | perl:any [i386],
  ${misc:Depends},
  ${shlibs:Depends},
  libwineVERSION-dev (= ${binary:Version}),
@@ -191,6 +192,7 @@ Description: Windows API implementation - 32-bit developer tools
 
 Package: wine64VERSION-tools
 Architecture: amd64 arm64
+Multi-Arch: foreign
 Section: libdevel
 Built-Using: ${built:Using}
 Depends:
