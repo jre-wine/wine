@@ -1,3 +1,12 @@
+wine-development (1.9.11-2) UNRELEASED; urgency=medium
+
+  * Cherrypick changes from stretch:
+    - Add Wine's TrueType fonts to fonts-wineVERSION.install (see: #818925).
+      Note: fonts-wine-development isn't built currently, instead the
+      already fixed fonts-wine is used.
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Sun, 05 Jun 2016 15:24:30 +0200
+
 wine-development (1.9.11-1) unstable; urgency=medium
 
   * New upstream release 1.9.11, released May 27, 2016.
