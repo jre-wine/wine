@@ -21,6 +21,8 @@ wine (1.8.2-2) UNRELEASED; urgency=medium
     - Make wineNN-tools multi-arch installable (closes: #823264,
       see: #824673). Thanks to Javier Serrano Polo.
     - Let libwine-dev prefer wine64-tools to wine32-tools.
+    - Document generating 32-bit results with the -tools packages.
+      Thanks to Andrey Gursky and Javier Serrano Polo.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Mon, 06 Jun 2016 03:35:43 +0200
 
