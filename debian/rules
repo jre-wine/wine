@@ -55,6 +55,9 @@ export DEB_CFLAGS_MAINT_APPEND+=-march=armv5t
 export DEB_LDFLAGS_MAINT_APPEND+=-march=armv5t
 endif
 
+# override maintainer mode config
+export DEB_CFLAGS_MAINT_APPEND+=-Wno-error
+
 # additional files to generate
 INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/) \
          debian/bug-control \

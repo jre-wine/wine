@@ -6,6 +6,7 @@ wine-development (1.9.11-2) UNRELEASED; urgency=medium
       already fixed fonts-wine is used.
     - Build Wine in maintainer mode.
       Note: added alternative build-dependency on fontforge.
+    - Don't error out on build warnings.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Sun, 05 Jun 2016 15:24:30 +0200
 
