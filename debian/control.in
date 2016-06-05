@@ -133,8 +133,7 @@ Depends:
  libwineVERSION (= ${binary:Version}),
 Recommends:
  wineVERSION (= ${source:Version}),
- wine32VERSION (>= ${source:Version}),
- wine32VERSION (<< ${source:Version}.1~),
+ wine32VERSION (= ${binary:Version}),
 Suggests:
  wine64VERSION-preloader (= ${binary:Version}),
 Breaks:
