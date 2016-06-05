@@ -12,6 +12,7 @@ wine-development (1.9.11-2) UNRELEASED; urgency=medium
   * Add alternative dependency on 32-bit libwine-dev to wine64-tools.
   * Make wineNN-tools multi-arch installable (closes: #824673, see: #823264).
     Thanks to Javier Serrano Polo.
+  * Let libwine-dev prefer wine64-tools to wine32-tools.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Sun, 05 Jun 2016 15:24:30 +0200
 
