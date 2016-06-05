@@ -9,6 +9,7 @@ wine-development (1.9.11-2) UNRELEASED; urgency=medium
       Note: added alternative build-dependency on fontforge.
     - Don't error out on build warnings.
   * Drop useless workaround for one-arch-only binNMUs.
+  * Add alternative dependency on 32-bit libwine-dev to wine64-tools.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Sun, 05 Jun 2016 15:24:30 +0200
 
