@@ -108,14 +108,10 @@ Multi-Arch: foreign
 Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
- ${dlopen:Depends},
  ${shlibs:Depends},
- x11-utils,
  libwineVERSION (= ${binary:Version}),
 Recommends:
  wineVERSION (= ${source:Version}),
- libgl1-mesa-dri,
- libasound2-plugins,
 Suggests:
  wine32VERSION-preloader (= ${binary:Version}),
 Breaks:
@@ -134,13 +130,11 @@ Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
  ${shlibs:Depends},
- x11-utils,
  libwineVERSION (= ${binary:Version}),
 Recommends:
  wineVERSION (= ${source:Version}),
  wine32VERSION (>= ${source:Version}),
  wine32VERSION (<< ${source:Version}.1~),
- libasound2-plugins,
 Suggests:
  wine64VERSION-preloader (= ${binary:Version}),
 Breaks:
@@ -238,10 +232,14 @@ Multi-Arch: same
 Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
+ ${dlopen:Depends},
  ${shlibs:Depends},
+ x11-utils,
  libfontconfig1,
 Recommends:
  libxcursor1,
+ libgl1-mesa-dri,
+ libasound2-plugins,
  fonts-liberation,
  fonts-wine (>= 1.8.2-1~),
 Suggests:
