@@ -66,6 +66,16 @@ export DEB_CFLAGS_MAINT_APPEND+=-Wno-error
 INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/) \
          debian/bug-control \
 
+# sonames to compute additional dependencies
+sonamesDepends=$(shell \
+    grep "^\#define SONAME_" include/config.h | \
+    grep -E "libfontconfig|libfreetype|libncurses" | \
+    cut -d\" -f2)
+sonamesRecommends=$(shell \
+    grep "^\#define SONAME_" include/config.h | \
+    grep -v libnetapi | \
+    cut -d\" -f2)
+
 debian/control: debian/control.in
 	sed s/VERSION/$(VERSION)/g < $< > $@
 
@@ -145,6 +155,17 @@ override_dh_auto_install-arch: $(INSTALLS)
 
 override_dh_strip:
 	dh_strip --dbgsym-migration='libwine$(VERSION)-dbg (<< 1.8-2~)'
+
+override_dh_shlibdeps:
+	mkdir -p debian/tmp
+	./debian/scripts/sonames2elf $(sonamesDepends) > debian/tmp/elf.depends
+	./debian/scripts/sonames2elf $(sonamesRecommends) > debian/tmp/elf.recommends
+	dpkg-shlibdeps --warnings=1 \
+	    -pdlopen \
+	    -dDepends -edebian/tmp/elf.depends \
+	    -dRecommends -edebian/tmp/elf.recommends \
+	    -Tdebian/libwine$(VERSION).substvars
+	dh_shlibdeps
 
 override_dh_gencontrol:
 	dh_gencontrol -- \
