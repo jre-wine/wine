@@ -234,9 +234,8 @@ Depends:
  ${misc:Depends},
  ${dlopen:Depends},
  ${shlibs:Depends},
- libfontconfig1,
 Recommends:
- libxcursor1,
+ ${dlopen:Recommends},
  libgl1-mesa-dri,
  libasound2-plugins,
  fonts-liberation,
