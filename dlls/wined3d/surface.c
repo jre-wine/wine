@@ -2524,6 +2524,8 @@ HRESULT CDECL wined3d_surface_map(struct wined3d_surface *surface,
         }
     }
 
+    flags = wined3d_resource_sanitize_map_flags(&surface->resource, flags);
+
     surface_prepare_map_memory(surface);
     if (flags & WINED3D_MAP_DISCARD)
     {
@@ -2887,7 +2889,7 @@ static void surface_prepare_rb(struct wined3d_surface *surface, const struct win
          * AMD has a similar feature called Enhanced Quality Anti-Aliasing (EQAA),
          * but it does not have an equivalent OpenGL extension. */
         if (surface->resource.multisample_type == WINED3D_MULTISAMPLE_NON_MASKABLE)
-            samples = surface->resource.multisample_quality;
+            samples = 1u << (surface->resource.multisample_quality + 1);
         else
             samples = surface->resource.multisample_type;
 
@@ -3661,10 +3663,10 @@ void surface_load_ds_location(struct wined3d_surface *surface, struct wined3d_co
         return;
     }
 
+    wined3d_surface_prepare(surface, context, location);
     if (surface->locations & WINED3D_LOCATION_DISCARDED)
     {
         TRACE("Surface was discarded, no need copy data.\n");
-        wined3d_surface_prepare(surface, context, location);
         surface->locations &= ~WINED3D_LOCATION_DISCARDED;
         surface->locations |= location;
         surface->ds_current_size.cx = surface->resource.width;

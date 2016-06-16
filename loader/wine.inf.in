@@ -218,13 +218,13 @@ HKCR,Msi.Patch,,2,"Windows Installer Patch"
 HKCR,Msi.Patch\DefaultIcon,,2,"msiexec.exe"
 HKCR,Msi.Patch\shell\Open\command,,2,"%11%\msiexec.exe /p ""%1"""
 HKCR,rtffile,,2,"Rich Text Document"
-HKCR,rtffile\shell\open\command,,2,"%11%\wordpad.exe %1"
-HKCR,rtffile\shell\print\command,,2,"%11%\wordpad.exe /p %1"
+HKCR,rtffile\shell\open\command,,2,"""%16422%\Windows NT\Accessories\wordpad.exe"" %1"
+HKCR,rtffile\shell\print\command,,2,"""%16422%\Windows NT\Accessories\wordpad.exe"" /p %1"
 HKCR,txtfile,,2,"Text Document"
 HKCR,txtfile\shell\open\command,,2,"%11%\notepad.exe %1"
 HKCR,txtfile\shell\print\command,,2,"%11%\notepad.exe /p %1"
-HKCR,wrifile\shell\open\command,,2,"%11%\wordpad.exe %1"
-HKCR,wrifile\shell\print\command,,2,"%11%\wordpad.exe /p %1"
+HKCR,wrifile\shell\open\command,,2,"""%16422%\Windows NT\Accessories\wordpad.exe"" %1"
+HKCR,wrifile\shell\print\command,,2,"""%16422%\Windows NT\Accessories\wordpad.exe"" /p %1"
 HKCR,xmlfile,,2,"XML Document"
 HKCR,xmlfile\shell\open\command,,2,"""%11%\winebrowser.exe"" -nohome"
 HKCR,xmlfile\shell\open\ddeexec,,2,"""%1"",,-1,0,,,,"
@@ -2582,6 +2582,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 16422,Internet Explorer,iexplore.exe
 16422,Windows Media Player,wmplayer.exe
 16422,Windows NT\Accessories,wordpad.exe
+16427,Microsoft Shared\TextConv,
 16427,System\OLE DB,oledb32.dll
 16427,System\OLE DB,msdaps.dll
 11,,*
