@@ -127,6 +127,8 @@ override_dh_auto_install-indep: $(INSTALLS)
 	mkdir -p debian/tmp
 	cp ANNOUNCE debian/tmp/changelog
 	cp programs/winedbg/README debian/tmp/README.winedbg
+	sed "s|DEBSUFFIX|$(DEBSUFFIX)|g" debian/scripts/wineapploader.in > debian/tmp/wineapploader
+	chmod 755 debian/tmp/wineapploader
 	sed "s|BINDIR|$(BINDIR)|g;s|VERSION|$(VERSION)|g" debian/scripts/wine.in > debian/tmp/wine$(DEBSUFFIX)
 	for dir in loader server programs/msiexec programs/winedbg \
 	    programs/wineconsole programs/regedit programs/regsvr32 \
