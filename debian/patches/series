@@ -12,8 +12,8 @@ generate/opengl.patch
 generate/unicode.patch
 generate/request.patch
 
-development/winegcc.patch
-development/winemenubuilder.patch
+debsuffix/winegcc.patch
+debsuffix/winemenubuilder.patch
 
 glu32.patch
 openal.patch
