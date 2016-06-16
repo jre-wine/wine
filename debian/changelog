@@ -1,3 +1,23 @@
+wine-development (1.9.12-2~local4+debsuffix) UNRELEASED; urgency=medium
+
+  * Replace VERSION with DEBSUFFIX in user exposed files.
+    DEB_SUFFIX is the same as VERSION.
+    If VERSION is empty DEBSUFFIX is -stable.
+    Package and directory names don't change.
+    This is needed for the alternatives system for Wine which
+    replaces these filenames from src:wine with links pointing to
+    either the files in wine or wine-development.
+  * Generate static wine script.
+  * Generate static wineapploader script.
+  * Generate static wineserver script.
+  * Rename sources of generated scripts and remove executable bit.
+  * Export DEBSUFFIX from d/rules.
+  * Use variable instead of '-development' in winegcc.patch.
+  * Use variable instead of '-development' in winemenubuilder.patch.
+  * Rename d/patches/development to d/p/debsuffix.
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Fri, 17 Jun 2016 00:20:00 +0200
+
 wine-development (1.9.12-1) unstable; urgency=medium
 
   [ Michael Gilbert ]
