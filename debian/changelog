@@ -1,3 +1,10 @@
+wine-development (1.9.12-2) UNRELEASED; urgency=medium
+
+  * Replace VERSION (value is empty or '-development') with DEBSUFFIX
+    ('-stable' or '-development') in user exposed files.
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Wed, 22 Jun 2016 23:28:47 +0200
+
 wine-development (1.9.12-1) unstable; urgency=medium
 
   [ Michael Gilbert ]
