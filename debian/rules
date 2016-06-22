@@ -149,7 +149,7 @@ override_dh_auto_install-arch: $(INSTALLS)
 	cp ANNOUNCE debian/tmp/changelog
 	cp tools/winedump/README debian/tmp/README.winedump
 	cp server/wineserver debian/tmp/wineserver$(DEB_BUILD_ARCH_BITS)
-	sed "s|BINDIR|$(BINDIR)|g" debian/scripts/winegcc > debian/tmp/winegcc$(DEBSUFFIX)
+	sed "s|BINDIR|$(BINDIR)|g" debian/scripts/winegcc.in > debian/tmp/winegcc$(DEBSUFFIX)
 	dh_auto_install
 	for file in $$(find . ! -path "./debian/*" -name \*.man); do \
 	    rename=$$(basename $$file | sed "s/\\./$(DEBSUFFIX)./;s/UTF-8\\.//"); \
