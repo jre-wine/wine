@@ -10,6 +10,7 @@ DEBSUFFIX=-stable
 else
 DEBSUFFIX=$(VERSION)
 endif
+export DEBSUFFIX
 
 MANDIR=usr/share/man
 BINDIR=usr/lib/wine$(VERSION)

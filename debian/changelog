@@ -11,6 +11,7 @@ wine (1.8.3-3) UNRELEASED; urgency=medium
       ('-stable' or '-development') in user exposed files.
     - Generate scripts (wine, wineserver, wineapploader, winegcc) with
       hardcoded paths/names instead of runtime detection.
+    - Export DEBSUFFIX from d/rules.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Thu, 28 Jul 2016 17:33:38 +0200
 
