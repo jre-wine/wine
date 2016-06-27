@@ -124,6 +124,8 @@ typedef struct event_target_t event_target_t;
     XDIID(DispHTMLXMLHttpRequest) \
     XDIID(HTMLDocumentEvents) \
     XDIID(HTMLElementEvents2) \
+    XIID(IDocumentSelector) \
+    XIID(IElementSelector) \
     XIID(IHTMLAnchorElement) \
     XIID(IHTMLAreaElement) \
     XIID(IHTMLAttributeCollection) \
@@ -422,6 +424,7 @@ struct HTMLOuterWindow {
 
     HTMLDocumentObj *doc_obj;
     nsIDOMWindow *nswindow;
+    mozIDOMWindowProxy *window_proxy;
     HTMLOuterWindow *parent;
     HTMLFrameBase *frame_element;
 
@@ -529,6 +532,7 @@ struct HTMLDocument {
     IHTMLDocument5              IHTMLDocument5_iface;
     IHTMLDocument6              IHTMLDocument6_iface;
     IHTMLDocument7              IHTMLDocument7_iface;
+    IDocumentSelector           IDocumentSelector_iface;
     IPersistMoniker             IPersistMoniker_iface;
     IPersistFile                IPersistFile_iface;
     IPersistHistory             IPersistHistory_iface;
@@ -714,6 +718,7 @@ typedef struct {
     IHTMLElement3 IHTMLElement3_iface;
     IHTMLElement4 IHTMLElement4_iface;
     IHTMLUniqueName IHTMLUniqueName_iface;
+    IElementSelector IElementSelector_iface;
 
     nsIDOMHTMLElement *nselem;
     HTMLStyle *style;
@@ -730,7 +735,8 @@ typedef struct {
     IHTMLElement2_tid,      \
     IHTMLElement3_tid,      \
     IHTMLElement4_tid,      \
-    IHTMLUniqueName_tid
+    IHTMLUniqueName_tid,    \
+    IElementSelector_tid
 
 extern cp_static_data_t HTMLElementEvents2_data DECLSPEC_HIDDEN;
 #define HTMLELEMENT_CPC {&DIID_HTMLElementEvents2, &HTMLElementEvents2_data}
@@ -800,6 +806,7 @@ HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument*,HTMLDocumentObj*,HTMLInnerWind
 HRESULT HTMLOuterWindow_Create(HTMLDocumentObj*,nsIDOMWindow*,HTMLOuterWindow*,HTMLOuterWindow**) DECLSPEC_HIDDEN;
 HRESULT update_window_doc(HTMLInnerWindow*) DECLSPEC_HIDDEN;
 HTMLOuterWindow *nswindow_to_window(const nsIDOMWindow*) DECLSPEC_HIDDEN;
+HTMLOuterWindow *mozwindow_to_window(const mozIDOMWindowProxy*) DECLSPEC_HIDDEN;
 void get_top_window(HTMLOuterWindow*,HTMLOuterWindow**) DECLSPEC_HIDDEN;
 HRESULT HTMLOptionElementFactory_Create(HTMLInnerWindow*,HTMLOptionElementFactory**) DECLSPEC_HIDDEN;
 HRESULT HTMLImageElementFactory_Create(HTMLInnerWindow*,HTMLImageElementFactory**) DECLSPEC_HIDDEN;
@@ -1022,6 +1029,7 @@ HRESULT wrap_iface(IUnknown*,IUnknown*,IUnknown**) DECLSPEC_HIDDEN;
 IHTMLElementCollection *create_all_collection(HTMLDOMNode*,BOOL) DECLSPEC_HIDDEN;
 IHTMLElementCollection *create_collection_from_nodelist(HTMLDocumentNode*,nsIDOMNodeList*) DECLSPEC_HIDDEN;
 IHTMLElementCollection *create_collection_from_htmlcol(HTMLDocumentNode*,nsIDOMHTMLCollection*) DECLSPEC_HIDDEN;
+IHTMLDOMChildrenCollection *create_child_collection(HTMLDocumentNode*,nsIDOMNodeList*) DECLSPEC_HIDDEN;
 
 HRESULT attr_value_to_string(VARIANT*) DECLSPEC_HIDDEN;
 HRESULT get_elem_attr_value_by_dispid(HTMLElement*,DISPID,VARIANT*) DECLSPEC_HIDDEN;

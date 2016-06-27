@@ -1337,14 +1337,57 @@ static void STDMETHODCALLTYPE d3d11_immediate_context_IAGetInputLayout(ID3D11Dev
 static void STDMETHODCALLTYPE d3d11_immediate_context_IAGetVertexBuffers(ID3D11DeviceContext *iface,
         UINT start_slot, UINT buffer_count, ID3D11Buffer **buffers, UINT *strides, UINT *offsets)
 {
-    FIXME("iface %p, start_slot %u, buffer_count %u, buffers %p, strides %p, offsets %p stub!\n",
+    struct d3d_device *device = device_from_immediate_ID3D11DeviceContext(iface);
+    unsigned int i;
+
+    TRACE("iface %p, start_slot %u, buffer_count %u, buffers %p, strides %p, offsets %p.\n",
             iface, start_slot, buffer_count, buffers, strides, offsets);
+
+    wined3d_mutex_lock();
+    for (i = 0; i < buffer_count; ++i)
+    {
+        struct wined3d_buffer *wined3d_buffer;
+        struct d3d_buffer *buffer_impl;
+
+        if (FAILED(wined3d_device_get_stream_source(device->wined3d_device, start_slot + i,
+                &wined3d_buffer, &offsets[i], &strides[i])))
+            ERR("Failed to get vertex buffer %u.\n", start_slot + i);
+
+        if (!wined3d_buffer)
+        {
+            buffers[i] = NULL;
+            continue;
+        }
+
+        buffer_impl = wined3d_buffer_get_parent(wined3d_buffer);
+        ID3D11Buffer_AddRef(buffers[i] = &buffer_impl->ID3D11Buffer_iface);
+    }
+    wined3d_mutex_unlock();
 }
 
 static void STDMETHODCALLTYPE d3d11_immediate_context_IAGetIndexBuffer(ID3D11DeviceContext *iface,
         ID3D11Buffer **buffer, DXGI_FORMAT *format, UINT *offset)
 {
-    FIXME("iface %p, buffer %p, format %p, offset %p stub!\n", iface, buffer, format, offset);
+    struct d3d_device *device = device_from_immediate_ID3D11DeviceContext(iface);
+    enum wined3d_format_id wined3d_format;
+    struct wined3d_buffer *wined3d_buffer;
+    struct d3d_buffer *buffer_impl;
+
+    TRACE("iface %p, buffer %p, format %p, offset %p.\n", iface, buffer, format, offset);
+
+    wined3d_mutex_lock();
+    wined3d_buffer = wined3d_device_get_index_buffer(device->wined3d_device, &wined3d_format, offset);
+    *format = dxgi_format_from_wined3dformat(wined3d_format);
+    if (!wined3d_buffer)
+    {
+        wined3d_mutex_unlock();
+        *buffer = NULL;
+        return;
+    }
+
+    buffer_impl = wined3d_buffer_get_parent(wined3d_buffer);
+    wined3d_mutex_unlock();
+    ID3D11Buffer_AddRef(*buffer = &buffer_impl->ID3D11Buffer_iface);
 }
 
 static void STDMETHODCALLTYPE d3d11_immediate_context_GSGetConstantBuffers(ID3D11DeviceContext *iface,
@@ -2235,10 +2278,22 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CreateDomainShader(ID3D11Device *i
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateComputeShader(ID3D11Device *iface, const void *byte_code,
         SIZE_T byte_code_length, ID3D11ClassLinkage *class_linkage, ID3D11ComputeShader **shader)
 {
-    FIXME("iface %p, byte_code %p, byte_code_length %lu, class_linkage %p, shader %p stub!\n",
+    struct d3d_device *device = impl_from_ID3D11Device(iface);
+    struct d3d11_compute_shader *object;
+    HRESULT hr;
+
+    TRACE("iface %p, byte_code %p, byte_code_length %lu, class_linkage %p, shader %p.\n",
             iface, byte_code, byte_code_length, class_linkage, shader);
 
-    return E_NOTIMPL;
+    if (class_linkage)
+        FIXME("Class linkage is not implemented yet.\n");
+
+    if (FAILED(hr = d3d11_compute_shader_create(device, byte_code, byte_code_length, &object)))
+        return hr;
+
+    *shader = &object->ID3D11ComputeShader_iface;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CreateClassLinkage(ID3D11Device *iface,
@@ -2634,10 +2689,29 @@ static HRESULT STDMETHODCALLTYPE d3d11_device_CheckCounter(ID3D11Device *iface, 
 static HRESULT STDMETHODCALLTYPE d3d11_device_CheckFeatureSupport(ID3D11Device *iface, D3D11_FEATURE feature,
         void *feature_support_data, UINT feature_support_data_size)
 {
-    FIXME("iface %p, feature %u, feature_support_data %p, feature_support_data_size %u stub!\n",
+    TRACE("iface %p, feature %u, feature_support_data %p, feature_support_data_size %u.\n",
             iface, feature, feature_support_data, feature_support_data_size);
 
-    return E_NOTIMPL;
+    switch (feature)
+    {
+        case D3D11_FEATURE_THREADING:
+        {
+            D3D11_FEATURE_DATA_THREADING *threading_data = feature_support_data;
+            if (feature_support_data_size != sizeof(*threading_data))
+            {
+                WARN("Invalid data size.\n");
+                return E_INVALIDARG;
+            }
+
+            threading_data->DriverConcurrentCreates = FALSE;
+            threading_data->DriverCommandLists = FALSE;
+            return S_OK;
+        }
+
+        default:
+            FIXME("Unhandled feature %#x.\n", feature);
+            return E_NOTIMPL;
+    }
 }
 
 static HRESULT STDMETHODCALLTYPE d3d11_device_GetPrivateData(ID3D11Device *iface, REFGUID guid,
@@ -2867,20 +2941,20 @@ static ULONG STDMETHODCALLTYPE d3d_device_inner_Release(IUnknown *iface)
 static HRESULT STDMETHODCALLTYPE d3d10_device_QueryInterface(ID3D10Device1 *iface, REFIID riid,
         void **ppv)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
-    return IUnknown_QueryInterface(This->outer_unk, riid, ppv);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
+    return IUnknown_QueryInterface(device->outer_unk, riid, ppv);
 }
 
 static ULONG STDMETHODCALLTYPE d3d10_device_AddRef(ID3D10Device1 *iface)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
-    return IUnknown_AddRef(This->outer_unk);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
+    return IUnknown_AddRef(device->outer_unk);
 }
 
 static ULONG STDMETHODCALLTYPE d3d10_device_Release(ID3D10Device1 *iface)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
-    return IUnknown_Release(This->outer_unk);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
+    return IUnknown_Release(device->outer_unk);
 }
 
 /* ID3D10Device methods */
@@ -2928,13 +3002,13 @@ static void STDMETHODCALLTYPE d3d10_device_PSSetShaderResources(ID3D10Device1 *i
 static void STDMETHODCALLTYPE d3d10_device_PSSetShader(ID3D10Device1 *iface,
         ID3D10PixelShader *shader)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
     struct d3d_pixel_shader *ps = unsafe_impl_from_ID3D10PixelShader(shader);
 
     TRACE("iface %p, shader %p\n", iface, shader);
 
     wined3d_mutex_lock();
-    wined3d_device_set_pixel_shader(This->wined3d_device, ps ? ps->wined3d_shader : NULL);
+    wined3d_device_set_pixel_shader(device->wined3d_device, ps ? ps->wined3d_shader : NULL);
     wined3d_mutex_unlock();
 }
 
@@ -2961,40 +3035,40 @@ static void STDMETHODCALLTYPE d3d10_device_PSSetSamplers(ID3D10Device1 *iface,
 static void STDMETHODCALLTYPE d3d10_device_VSSetShader(ID3D10Device1 *iface,
         ID3D10VertexShader *shader)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
     struct d3d_vertex_shader *vs = unsafe_impl_from_ID3D10VertexShader(shader);
 
     TRACE("iface %p, shader %p\n", iface, shader);
 
     wined3d_mutex_lock();
-    wined3d_device_set_vertex_shader(This->wined3d_device, vs ? vs->wined3d_shader : NULL);
+    wined3d_device_set_vertex_shader(device->wined3d_device, vs ? vs->wined3d_shader : NULL);
     wined3d_mutex_unlock();
 }
 
 static void STDMETHODCALLTYPE d3d10_device_DrawIndexed(ID3D10Device1 *iface, UINT index_count,
         UINT start_index_location, INT base_vertex_location)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
 
     TRACE("iface %p, index_count %u, start_index_location %u, base_vertex_location %d.\n",
             iface, index_count, start_index_location, base_vertex_location);
 
     wined3d_mutex_lock();
-    wined3d_device_set_base_vertex_index(This->wined3d_device, base_vertex_location);
-    wined3d_device_draw_indexed_primitive(This->wined3d_device, start_index_location, index_count);
+    wined3d_device_set_base_vertex_index(device->wined3d_device, base_vertex_location);
+    wined3d_device_draw_indexed_primitive(device->wined3d_device, start_index_location, index_count);
     wined3d_mutex_unlock();
 }
 
 static void STDMETHODCALLTYPE d3d10_device_Draw(ID3D10Device1 *iface, UINT vertex_count,
         UINT start_vertex_location)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
 
     TRACE("iface %p, vertex_count %u, start_vertex_location %u\n",
             iface, vertex_count, start_vertex_location);
 
     wined3d_mutex_lock();
-    wined3d_device_draw_primitive(This->wined3d_device, start_vertex_location, vertex_count);
+    wined3d_device_draw_primitive(device->wined3d_device, start_vertex_location, vertex_count);
     wined3d_mutex_unlock();
 }
 
@@ -3021,13 +3095,13 @@ static void STDMETHODCALLTYPE d3d10_device_PSSetConstantBuffers(ID3D10Device1 *i
 static void STDMETHODCALLTYPE d3d10_device_IASetInputLayout(ID3D10Device1 *iface,
         ID3D10InputLayout *input_layout)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
     struct d3d_input_layout *layout = unsafe_impl_from_ID3D10InputLayout(input_layout);
 
     TRACE("iface %p, input_layout %p\n", iface, input_layout);
 
     wined3d_mutex_lock();
-    wined3d_device_set_vertex_declaration(This->wined3d_device,
+    wined3d_device_set_vertex_declaration(device->wined3d_device,
             layout ? layout->wined3d_decl : NULL);
     wined3d_mutex_unlock();
 }
@@ -3035,7 +3109,7 @@ static void STDMETHODCALLTYPE d3d10_device_IASetInputLayout(ID3D10Device1 *iface
 static void STDMETHODCALLTYPE d3d10_device_IASetVertexBuffers(ID3D10Device1 *iface, UINT start_slot,
         UINT buffer_count, ID3D10Buffer *const *buffers, const UINT *strides, const UINT *offsets)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
     unsigned int i;
 
     TRACE("iface %p, start_slot %u, buffer_count %u, buffers %p, strides %p, offsets %p\n",
@@ -3046,7 +3120,7 @@ static void STDMETHODCALLTYPE d3d10_device_IASetVertexBuffers(ID3D10Device1 *ifa
     {
         struct d3d_buffer *buffer = unsafe_impl_from_ID3D10Buffer(buffers[i]);
 
-        wined3d_device_set_stream_source(This->wined3d_device, start_slot + i,
+        wined3d_device_set_stream_source(device->wined3d_device, start_slot + i,
                 buffer ? buffer->wined3d_buffer : NULL, offsets[i], strides[i]);
     }
     wined3d_mutex_unlock();
@@ -3055,14 +3129,14 @@ static void STDMETHODCALLTYPE d3d10_device_IASetVertexBuffers(ID3D10Device1 *ifa
 static void STDMETHODCALLTYPE d3d10_device_IASetIndexBuffer(ID3D10Device1 *iface,
         ID3D10Buffer *buffer, DXGI_FORMAT format, UINT offset)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
     struct d3d_buffer *buffer_impl = unsafe_impl_from_ID3D10Buffer(buffer);
 
     TRACE("iface %p, buffer %p, format %s, offset %u.\n",
             iface, buffer, debug_dxgi_format(format), offset);
 
     wined3d_mutex_lock();
-    wined3d_device_set_index_buffer(This->wined3d_device,
+    wined3d_device_set_index_buffer(device->wined3d_device,
             buffer_impl ? buffer_impl->wined3d_buffer : NULL,
             wined3dformat_from_dxgi_format(format), offset);
     wined3d_mutex_unlock();
@@ -3137,12 +3211,12 @@ static void STDMETHODCALLTYPE d3d10_device_GSSetShader(ID3D10Device1 *iface, ID3
 static void STDMETHODCALLTYPE d3d10_device_IASetPrimitiveTopology(ID3D10Device1 *iface,
         D3D10_PRIMITIVE_TOPOLOGY topology)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
 
     TRACE("iface %p, topology %s\n", iface, debug_d3d10_primitive_topology(topology));
 
     wined3d_mutex_lock();
-    wined3d_device_set_primitive_type(This->wined3d_device, (enum wined3d_primitive_type)topology);
+    wined3d_device_set_primitive_type(device->wined3d_device, (enum wined3d_primitive_type)topology);
     wined3d_mutex_unlock();
 }
 
@@ -3794,12 +3868,12 @@ static void STDMETHODCALLTYPE d3d10_device_GSGetShader(ID3D10Device1 *iface, ID3
 static void STDMETHODCALLTYPE d3d10_device_IAGetPrimitiveTopology(ID3D10Device1 *iface,
         D3D10_PRIMITIVE_TOPOLOGY *topology)
 {
-    struct d3d_device *This = impl_from_ID3D10Device(iface);
+    struct d3d_device *device = impl_from_ID3D10Device(iface);
 
     TRACE("iface %p, topology %p\n", iface, topology);
 
     wined3d_mutex_lock();
-    wined3d_device_get_primitive_type(This->wined3d_device, (enum wined3d_primitive_type *)topology);
+    wined3d_device_get_primitive_type(device->wined3d_device, (enum wined3d_primitive_type *)topology);
     wined3d_mutex_unlock();
 }
 

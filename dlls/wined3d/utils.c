@@ -4186,6 +4186,7 @@ const char *debug_shader_type(enum wined3d_shader_type type)
         WINED3D_TO_STR(WINED3D_SHADER_TYPE_GEOMETRY);
         WINED3D_TO_STR(WINED3D_SHADER_TYPE_HULL);
         WINED3D_TO_STR(WINED3D_SHADER_TYPE_DOMAIN);
+        WINED3D_TO_STR(WINED3D_SHADER_TYPE_COMPUTE);
 #undef WINED3D_TO_STR
         default:
             FIXME("Unrecognized shader type %#x.\n", type);
@@ -5746,4 +5747,31 @@ BOOL wined3d_clip_blit(const RECT *clip_rect, RECT *clipped, RECT *other)
     other->bottom -= (LONG)((orig.bottom - clipped->bottom) / scale_y);
 
     return TRUE;
+}
+
+void wined3d_gl_limits_get_uniform_block_range(const struct wined3d_gl_limits *gl_limits,
+        enum wined3d_shader_type shader_type, unsigned int *base, unsigned int *count)
+{
+    *base = 0;
+    *count = gl_limits->vertex_uniform_blocks;
+
+    if (shader_type == WINED3D_SHADER_TYPE_VERTEX)
+        return;
+
+    *base += *count;
+    *count = gl_limits->geometry_uniform_blocks;
+
+    if (shader_type == WINED3D_SHADER_TYPE_GEOMETRY)
+        return;
+
+    *base += *count;
+    *count = gl_limits->fragment_uniform_blocks;
+
+    if (shader_type == WINED3D_SHADER_TYPE_PIXEL)
+        return;
+
+    *base += *count;
+    *count = 0;
+
+    ERR("Unhandled shader type %#x.\n", shader_type);
 }

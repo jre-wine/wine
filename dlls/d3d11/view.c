@@ -25,7 +25,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d11);
 
-static HRESULT set_dsdesc_from_resource(D3D11_DEPTH_STENCIL_VIEW_DESC *desc, ID3D11Resource *resource)
+static HRESULT set_dsv_desc_from_resource(D3D11_DEPTH_STENCIL_VIEW_DESC *desc, ID3D11Resource *resource)
 {
     D3D11_RESOURCE_DIMENSION dimension;
 
@@ -114,14 +114,14 @@ static HRESULT set_dsdesc_from_resource(D3D11_DEPTH_STENCIL_VIEW_DESC *desc, ID3
         }
 
         default:
-            FIXME("Unhandled resource dimension %#x.\n", dimension);
+            ERR("Unhandled resource dimension %#x.\n", dimension);
         case D3D11_RESOURCE_DIMENSION_BUFFER:
         case D3D11_RESOURCE_DIMENSION_TEXTURE3D:
             return E_INVALIDARG;
     }
 }
 
-static void normalize_dsv_desc(D3D11_DEPTH_STENCIL_VIEW_DESC *desc, ID3D11Resource *resource)
+static HRESULT normalize_dsv_desc(D3D11_DEPTH_STENCIL_VIEW_DESC *desc, ID3D11Resource *resource)
 {
     D3D11_RESOURCE_DIMENSION dimension;
     unsigned int layer_count;
@@ -130,14 +130,36 @@ static void normalize_dsv_desc(D3D11_DEPTH_STENCIL_VIEW_DESC *desc, ID3D11Resour
     ID3D11Resource_GetType(resource, &dimension);
     switch (dimension)
     {
+        case D3D11_RESOURCE_DIMENSION_TEXTURE1D:
+        {
+            if (desc->ViewDimension != D3D11_DSV_DIMENSION_TEXTURE1D
+                    && desc->ViewDimension != D3D11_DSV_DIMENSION_TEXTURE1DARRAY)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+
+            FIXME("Unhandled 1D texture resource.\n");
+            return S_OK;
+        }
+
         case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
         {
             const struct d3d_texture2d *texture;
 
+            if (desc->ViewDimension != D3D11_DSV_DIMENSION_TEXTURE2D
+                    && desc->ViewDimension != D3D11_DSV_DIMENSION_TEXTURE2DARRAY
+                    && desc->ViewDimension != D3D11_DSV_DIMENSION_TEXTURE2DMS
+                    && desc->ViewDimension != D3D11_DSV_DIMENSION_TEXTURE2DMSARRAY)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+
             if (!(texture = unsafe_impl_from_ID3D11Texture2D((ID3D11Texture2D *)resource)))
             {
                 ERR("Cannot get implementation from ID3D11Texture2D.\n");
-                return;
+                return E_FAIL;
             }
 
             format = texture->desc.Format;
@@ -145,8 +167,14 @@ static void normalize_dsv_desc(D3D11_DEPTH_STENCIL_VIEW_DESC *desc, ID3D11Resour
             break;
         }
 
+        case D3D11_RESOURCE_DIMENSION_BUFFER:
+        case D3D11_RESOURCE_DIMENSION_TEXTURE3D:
+            WARN("Invalid resource dimension %#x.\n", dimension);
+            return E_INVALIDARG;
+
         default:
-            return;
+            ERR("Unhandled resource dimension %#x.\n", dimension);
+            return E_FAIL;
     }
 
     if (desc->Format == DXGI_FORMAT_UNKNOWN)
@@ -172,16 +200,18 @@ static void normalize_dsv_desc(D3D11_DEPTH_STENCIL_VIEW_DESC *desc, ID3D11Resour
         default:
             break;
     }
+
+    return S_OK;
 }
 
-static HRESULT set_rtdesc_from_resource(D3D11_RENDER_TARGET_VIEW_DESC *desc, ID3D11Resource *resource)
+static HRESULT set_rtv_desc_from_resource(D3D11_RENDER_TARGET_VIEW_DESC *desc, ID3D11Resource *resource)
 {
     D3D11_RESOURCE_DIMENSION dimension;
     HRESULT hr;
 
     ID3D11Resource_GetType(resource, &dimension);
 
-    switch(dimension)
+    switch (dimension)
     {
         case D3D11_RESOURCE_DIMENSION_TEXTURE1D:
         {
@@ -293,7 +323,7 @@ static HRESULT set_rtdesc_from_resource(D3D11_RENDER_TARGET_VIEW_DESC *desc, ID3
     }
 }
 
-static void normalize_rtv_desc(D3D11_RENDER_TARGET_VIEW_DESC *desc, ID3D11Resource *resource)
+static HRESULT normalize_rtv_desc(D3D11_RENDER_TARGET_VIEW_DESC *desc, ID3D11Resource *resource)
 {
     D3D11_RESOURCE_DIMENSION dimension;
     unsigned int layer_count;
@@ -302,14 +332,46 @@ static void normalize_rtv_desc(D3D11_RENDER_TARGET_VIEW_DESC *desc, ID3D11Resour
     ID3D11Resource_GetType(resource, &dimension);
     switch (dimension)
     {
+        case D3D11_RESOURCE_DIMENSION_BUFFER:
+        {
+            if (desc->ViewDimension != D3D11_RTV_DIMENSION_BUFFER)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+            return S_OK;
+        }
+
+        case D3D11_RESOURCE_DIMENSION_TEXTURE1D:
+        {
+            if (desc->ViewDimension != D3D11_RTV_DIMENSION_TEXTURE1D
+                    && desc->ViewDimension != D3D11_RTV_DIMENSION_TEXTURE1DARRAY)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+
+            FIXME("Unhandled 1D texture resource.\n");
+            return S_OK;
+        }
+
         case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
         {
             const struct d3d_texture2d *texture;
 
+            if (desc->ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2D
+                    && desc->ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2DARRAY
+                    && desc->ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2DMS
+                    && desc->ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2DMSARRAY)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+
             if (!(texture = unsafe_impl_from_ID3D11Texture2D((ID3D11Texture2D *)resource)))
             {
                 ERR("Cannot get implementation from ID3D11Texture2D.\n");
-                return;
+                return E_FAIL;
             }
 
             format = texture->desc.Format;
@@ -321,10 +383,16 @@ static void normalize_rtv_desc(D3D11_RENDER_TARGET_VIEW_DESC *desc, ID3D11Resour
         {
             const struct d3d_texture3d *texture;
 
+            if (desc->ViewDimension != D3D11_RTV_DIMENSION_TEXTURE3D)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+
             if (!(texture = unsafe_impl_from_ID3D11Texture3D((ID3D11Texture3D *)resource)))
             {
                 ERR("Cannot get implementation from ID3D11Texture3D.\n");
-                return;
+                return E_FAIL;
             }
 
             format = texture->desc.Format;
@@ -333,7 +401,8 @@ static void normalize_rtv_desc(D3D11_RENDER_TARGET_VIEW_DESC *desc, ID3D11Resour
         }
 
         default:
-            return;
+            ERR("Unhandled resource dimension %#x.\n", dimension);
+            return E_FAIL;
     }
 
     if (desc->Format == DXGI_FORMAT_UNKNOWN)
@@ -365,9 +434,11 @@ static void normalize_rtv_desc(D3D11_RENDER_TARGET_VIEW_DESC *desc, ID3D11Resour
         default:
             break;
     }
+
+    return S_OK;
 }
 
-static HRESULT set_srdesc_from_resource(D3D11_SHADER_RESOURCE_VIEW_DESC *desc, ID3D11Resource *resource)
+static HRESULT set_srv_desc_from_resource(D3D11_SHADER_RESOURCE_VIEW_DESC *desc, ID3D11Resource *resource)
 {
     D3D11_RESOURCE_DIMENSION dimension;
 
@@ -480,13 +551,13 @@ static HRESULT set_srdesc_from_resource(D3D11_SHADER_RESOURCE_VIEW_DESC *desc, I
         }
 
         default:
-            FIXME("Unhandled resource dimension %#x.\n", dimension);
+            ERR("Unhandled resource dimension %#x.\n", dimension);
         case D3D11_RESOURCE_DIMENSION_BUFFER:
             return E_INVALIDARG;
     }
 }
 
-static void normalize_srv_desc(D3D11_SHADER_RESOURCE_VIEW_DESC *desc, ID3D11Resource *resource)
+static HRESULT normalize_srv_desc(D3D11_SHADER_RESOURCE_VIEW_DESC *desc, ID3D11Resource *resource)
 {
     unsigned int miplevel_count, layer_count;
     D3D11_RESOURCE_DIMENSION dimension;
@@ -495,14 +566,49 @@ static void normalize_srv_desc(D3D11_SHADER_RESOURCE_VIEW_DESC *desc, ID3D11Reso
     ID3D11Resource_GetType(resource, &dimension);
     switch (dimension)
     {
+        case D3D11_RESOURCE_DIMENSION_BUFFER:
+        {
+            if (desc->ViewDimension != D3D11_SRV_DIMENSION_BUFFER
+                    && desc->ViewDimension != D3D11_SRV_DIMENSION_BUFFEREX)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+            return S_OK;
+        }
+
+        case D3D11_RESOURCE_DIMENSION_TEXTURE1D:
+        {
+            if (desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURE1D
+                    && desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURE1DARRAY)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+
+            FIXME("Unhandled 1D texture resource.\n");
+            return S_OK;
+        }
+
         case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
         {
             const struct d3d_texture2d *texture;
 
+            if (desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D
+                    && desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2DARRAY
+                    && desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2DMS
+                    && desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2DMSARRAY
+                    && desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURECUBE
+                    && desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURECUBEARRAY)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+
             if (!(texture = unsafe_impl_from_ID3D11Texture2D((ID3D11Texture2D *)resource)))
             {
                 ERR("Cannot get implementation from ID3D11Texture2D.\n");
-                return;
+                return E_FAIL;
             }
 
             format = texture->desc.Format;
@@ -515,10 +621,16 @@ static void normalize_srv_desc(D3D11_SHADER_RESOURCE_VIEW_DESC *desc, ID3D11Reso
         {
             const struct d3d_texture3d *texture;
 
+            if (desc->ViewDimension != D3D11_SRV_DIMENSION_TEXTURE3D)
+            {
+                WARN("Incompatible dimensions %#x, %#x.\n", dimension, desc->ViewDimension);
+                return E_INVALIDARG;
+            }
+
             if (!(texture = unsafe_impl_from_ID3D11Texture3D((ID3D11Texture3D *)resource)))
             {
                 ERR("Cannot get implementation from ID3D11Texture3D.\n");
-                return;
+                return E_FAIL;
             }
 
             format = texture->desc.Format;
@@ -528,7 +640,8 @@ static void normalize_srv_desc(D3D11_SHADER_RESOURCE_VIEW_DESC *desc, ID3D11Reso
         }
 
         default:
-            return;
+            ERR("Unhandled resource dimension %#x.\n", dimension);
+            return E_FAIL;
     }
 
     if (desc->Format == DXGI_FORMAT_UNKNOWN)
@@ -585,6 +698,8 @@ static void normalize_srv_desc(D3D11_SHADER_RESOURCE_VIEW_DESC *desc, ID3D11Reso
         default:
             break;
     }
+
+    return S_OK;
 }
 
 /* ID3D11DepthStencilView methods */
@@ -928,14 +1043,15 @@ static HRESULT d3d_depthstencil_view_init(struct d3d_depthstencil_view *view, st
 
     if (!desc)
     {
-        if (FAILED(hr = set_dsdesc_from_resource(&view->desc, resource)))
-            return hr;
+        hr = set_dsv_desc_from_resource(&view->desc, resource);
     }
     else
     {
         view->desc = *desc;
-        normalize_dsv_desc(&view->desc, resource);
+        hr = normalize_dsv_desc(&view->desc, resource);
     }
+    if (FAILED(hr))
+        return hr;
 
     wined3d_mutex_lock();
     if (!(wined3d_resource = wined3d_resource_from_d3d11_resource(resource)))
@@ -1350,14 +1466,15 @@ static HRESULT d3d_rendertarget_view_init(struct d3d_rendertarget_view *view, st
 
     if (!desc)
     {
-        if (FAILED(hr = set_rtdesc_from_resource(&view->desc, resource)))
-            return hr;
+        hr = set_rtv_desc_from_resource(&view->desc, resource);
     }
     else
     {
         view->desc = *desc;
-        normalize_rtv_desc(&view->desc, resource);
+        hr = normalize_rtv_desc(&view->desc, resource);
     }
+    if (FAILED(hr))
+        return hr;
 
     wined3d_mutex_lock();
     if (!(wined3d_resource = wined3d_resource_from_d3d11_resource(resource)))
@@ -1818,14 +1935,15 @@ static HRESULT d3d_shader_resource_view_init(struct d3d_shader_resource_view *vi
 
     if (!desc)
     {
-        if (FAILED(hr = set_srdesc_from_resource(&view->desc, resource)))
-            return hr;
+        hr = set_srv_desc_from_resource(&view->desc, resource);
     }
     else
     {
         view->desc = *desc;
-        normalize_srv_desc(&view->desc, resource);
+        hr = normalize_srv_desc(&view->desc, resource);
     }
+    if (FAILED(hr))
+        return hr;
 
     if (FAILED(hr = wined3d_shader_resource_view_desc_from_d3d11(&wined3d_desc, &view->desc)))
         return hr;

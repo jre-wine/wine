@@ -388,7 +388,7 @@ static void test_complicated_cookie(void)
   /* Technically illegal! domain should require 2 dots, but native wininet accepts it */
   ret = InternetSetCookieA("http://www.example.com",NULL,"E=F; domain=example.com");
   ok(ret == TRUE,"InternetSetCookie failed\n");
-  ret = InternetSetCookieA("http://www.example.com",NULL,"G=H; domain=.example.com; path=/foo");
+  ret = InternetSetCookieA("http://www.example.com",NULL,"G=H; domain=.example.com; invalid=attr; path=/foo");
   ok(ret == TRUE,"InternetSetCookie failed\n");
   ret = InternetSetCookieA("http://www.example.com/bar.html",NULL,"I=J; domain=.example.com");
   ok(ret == TRUE,"InternetSetCookie failed\n");
@@ -1067,7 +1067,8 @@ static void test_IsDomainLegalCookieDomainW(void)
 
 static void test_PrivacyGetSetZonePreferenceW(void)
 {
-    DWORD ret, zone, type, template, old_template;
+    DWORD ret, zone, type, template, old_template, pref_size = 0;
+    WCHAR pref[256];
 
     zone = 3;
     type = 0;
@@ -1077,6 +1078,14 @@ static void test_PrivacyGetSetZonePreferenceW(void)
     old_template = 0;
     ret = pPrivacyGetZonePreferenceW(zone, type, &old_template, NULL, NULL);
     ok(ret == 0, "expected ret == 0, got %u\n", ret);
+
+    trace("template %u\n", old_template);
+
+    if(old_template == PRIVACY_TEMPLATE_ADVANCED) {
+        pref_size = sizeof(pref)/sizeof(WCHAR);
+        ret = pPrivacyGetZonePreferenceW(zone, type, &old_template, pref, &pref_size);
+        ok(ret == 0, "expected ret == 0, got %u\n", ret);
+    }
 
     template = 5;
     ret = pPrivacySetZonePreferenceW(zone, type, template, NULL);
@@ -1088,7 +1097,7 @@ static void test_PrivacyGetSetZonePreferenceW(void)
     ok(template == 5, "expected template == 5, got %u\n", template);
 
     template = 5;
-    ret = pPrivacySetZonePreferenceW(zone, type, old_template, NULL);
+    ret = pPrivacySetZonePreferenceW(zone, type, old_template, pref_size ? pref : NULL);
     ok(ret == 0, "expected ret == 0, got %u\n", ret);
 }
 
