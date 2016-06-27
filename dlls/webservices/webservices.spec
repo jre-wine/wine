@@ -26,7 +26,7 @@
 @ stub WsCreateFaultFromError
 @ stdcall WsCreateHeap(long long ptr long ptr ptr)
 @ stub WsCreateListener
-@ stub WsCreateMessage
+@ stdcall WsCreateMessage(long long ptr long ptr ptr)
 @ stub WsCreateMessageForChannel
 @ stub WsCreateMetadata
 @ stdcall WsCreateReader(ptr long ptr ptr)
@@ -52,7 +52,7 @@
 @ stdcall WsFreeError(ptr)
 @ stdcall WsFreeHeap(ptr)
 @ stub WsFreeListener
-@ stub WsFreeMessage
+@ stdcall WsFreeMessage(ptr)
 @ stub WsFreeMetadata
 @ stdcall WsFreeReader(ptr)
 @ stub WsFreeSecurityToken
@@ -71,7 +71,7 @@
 @ stdcall WsGetHeapProperty(ptr long ptr long ptr)
 @ stub WsGetListenerProperty
 @ stub WsGetMappedHeader
-@ stub WsGetMessageProperty
+@ stdcall WsGetMessageProperty(ptr long ptr long ptr)
 @ stub WsGetMetadataEndpoints
 @ stub WsGetMetadataProperty
 @ stub WsGetMissingMetadataDocumentAddress
@@ -87,14 +87,14 @@
 @ stub WsGetSecurityTokenProperty
 @ stub WsGetServiceHostProperty
 @ stdcall WsGetServiceProxyProperty(ptr long ptr long ptr)
-@ stub WsGetWriterPosition
+@ stdcall WsGetWriterPosition(ptr ptr ptr)
 @ stdcall WsGetWriterProperty(ptr long ptr long ptr)
 @ stdcall WsGetXmlAttribute(ptr ptr ptr ptr ptr ptr)
 @ stub WsInitializeMessage
 @ stub WsMarkHeaderAsUnderstood
 @ stub WsMatchPolicyAlternative
 @ stdcall WsMoveReader(ptr long ptr ptr)
-@ stub WsMoveWriter
+@ stdcall WsMoveWriter(ptr long ptr ptr)
 @ stdcall WsOpenChannel(ptr ptr ptr ptr)
 @ stub WsOpenListener
 @ stub WsOpenServiceHost
@@ -134,7 +134,7 @@
 @ stub WsRequestReply
 @ stub WsRequestSecurityToken
 @ stub WsResetChannel
-@ stub WsResetError
+@ stdcall WsResetError(ptr)
 @ stdcall WsResetHeap(ptr ptr)
 @ stub WsResetListener
 @ stub WsResetMessage
@@ -153,11 +153,11 @@
 @ stdcall WsSetInput(ptr ptr ptr ptr long ptr)
 @ stdcall WsSetInputToBuffer(ptr ptr ptr long ptr)
 @ stub WsSetListenerProperty
-@ stub WsSetMessageProperty
+@ stdcall WsSetMessageProperty(ptr long ptr long ptr)
 @ stdcall WsSetOutput(ptr ptr ptr ptr long ptr)
 @ stdcall WsSetOutputToBuffer(ptr ptr ptr long ptr)
 @ stub WsSetReaderPosition
-@ stub WsSetWriterPosition
+@ stdcall WsSetWriterPosition(ptr ptr ptr)
 @ stub WsShutdownSessionChannel
 @ stub WsSkipNode
 @ stub WsStartReaderCanonicalization

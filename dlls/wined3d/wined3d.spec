@@ -61,7 +61,7 @@
 @ cdecl wined3d_device_get_gs_cb(ptr long)
 @ cdecl wined3d_device_get_gs_resource_view(ptr long)
 @ cdecl wined3d_device_get_gs_sampler(ptr long)
-@ cdecl wined3d_device_get_index_buffer(ptr ptr)
+@ cdecl wined3d_device_get_index_buffer(ptr ptr ptr)
 @ cdecl wined3d_device_get_light(ptr long ptr)
 @ cdecl wined3d_device_get_light_enable(ptr long ptr)
 @ cdecl wined3d_device_get_material(ptr ptr)
@@ -119,7 +119,7 @@
 @ cdecl wined3d_device_set_gs_cb(ptr long ptr)
 @ cdecl wined3d_device_set_gs_resource_view(ptr long ptr)
 @ cdecl wined3d_device_set_gs_sampler(ptr long ptr)
-@ cdecl wined3d_device_set_index_buffer(ptr ptr long)
+@ cdecl wined3d_device_set_index_buffer(ptr ptr long long)
 @ cdecl wined3d_device_set_light(ptr long ptr)
 @ cdecl wined3d_device_set_light_enable(ptr long long)
 @ cdecl wined3d_device_set_material(ptr ptr)
@@ -200,6 +200,7 @@
 @ cdecl wined3d_sampler_get_parent(ptr)
 @ cdecl wined3d_sampler_incref(ptr)
 
+@ cdecl wined3d_shader_create_cs(ptr ptr ptr ptr ptr)
 @ cdecl wined3d_shader_create_ds(ptr ptr ptr ptr ptr)
 @ cdecl wined3d_shader_create_gs(ptr ptr ptr ptr ptr)
 @ cdecl wined3d_shader_create_hs(ptr ptr ptr ptr ptr)
@@ -211,7 +212,7 @@
 @ cdecl wined3d_shader_incref(ptr)
 @ cdecl wined3d_shader_set_local_constants_float(ptr long ptr long)
 
-@ cdecl wined3d_shader_resource_view_create(ptr ptr ptr ptr)
+@ cdecl wined3d_shader_resource_view_create(ptr ptr ptr ptr ptr)
 @ cdecl wined3d_shader_resource_view_decref(ptr)
 @ cdecl wined3d_shader_resource_view_get_parent(ptr)
 @ cdecl wined3d_shader_resource_view_incref(ptr)
@@ -265,6 +266,11 @@
 @ cdecl wined3d_texture_set_sub_resource_parent(ptr long ptr)
 @ cdecl wined3d_texture_update_desc(ptr long long long long long ptr long)
 @ cdecl wined3d_texture_update_overlay(ptr long ptr ptr long ptr long)
+
+@ cdecl wined3d_unordered_access_view_create(ptr ptr ptr ptr ptr)
+@ cdecl wined3d_unordered_access_view_decref(ptr)
+@ cdecl wined3d_unordered_access_view_get_parent(ptr)
+@ cdecl wined3d_unordered_access_view_incref(ptr)
 
 @ cdecl wined3d_vertex_declaration_create(ptr ptr long ptr ptr ptr)
 @ cdecl wined3d_vertex_declaration_create_from_fvf(ptr long ptr ptr ptr)

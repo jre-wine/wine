@@ -52,6 +52,7 @@ enum wined3d_cs_op
     WINED3D_CS_OP_SET_COLOR_KEY,
     WINED3D_CS_OP_SET_MATERIAL,
     WINED3D_CS_OP_RESET_STATE,
+    WINED3D_CS_OP_DESTROY_OBJECT,
 };
 
 struct wined3d_cs_present
@@ -78,10 +79,11 @@ struct wined3d_cs_clear
 struct wined3d_cs_draw
 {
     enum wined3d_cs_op opcode;
-    UINT start_idx;
-    UINT index_count;
-    UINT start_instance;
-    UINT instance_count;
+    int base_vertex_idx;
+    unsigned int start_idx;
+    unsigned int index_count;
+    unsigned int start_instance;
+    unsigned int instance_count;
     BOOL indexed;
 };
 
@@ -153,6 +155,7 @@ struct wined3d_cs_set_index_buffer
     enum wined3d_cs_op opcode;
     struct wined3d_buffer *buffer;
     enum wined3d_format_id format_id;
+    unsigned int offset;
 };
 
 struct wined3d_cs_set_constant_buffer
@@ -250,6 +253,13 @@ struct wined3d_cs_reset_state
     enum wined3d_cs_op opcode;
 };
 
+struct wined3d_cs_destroy_object
+{
+    enum wined3d_cs_op opcode;
+    void (*callback)(void *object);
+    void *object;
+};
+
 static void wined3d_cs_exec_present(struct wined3d_cs *cs, const void *data)
 {
     const struct wined3d_cs_present *op = data;
@@ -309,19 +319,28 @@ void wined3d_cs_emit_clear(struct wined3d_cs *cs, DWORD rect_count, const RECT *
 
 static void wined3d_cs_exec_draw(struct wined3d_cs *cs, const void *data)
 {
+    struct wined3d_state *state = &cs->device->state;
     const struct wined3d_cs_draw *op = data;
 
-    draw_primitive(cs->device, &cs->device->state, op->start_idx, op->index_count,
-            op->start_instance, op->instance_count, op->indexed);
+    if (!cs->device->adapter->gl_info.supported[ARB_DRAW_ELEMENTS_BASE_VERTEX]
+            && state->load_base_vertex_index != op->base_vertex_idx)
+    {
+        state->load_base_vertex_index = op->base_vertex_idx;
+        device_invalidate_state(cs->device, STATE_BASEVERTEXINDEX);
+    }
+
+    draw_primitive(cs->device, state, op->base_vertex_idx, op->start_idx,
+            op->index_count, op->start_instance, op->instance_count, op->indexed);
 }
 
-void wined3d_cs_emit_draw(struct wined3d_cs *cs, UINT start_idx, UINT index_count,
-        UINT start_instance, UINT instance_count, BOOL indexed)
+void wined3d_cs_emit_draw(struct wined3d_cs *cs, int base_vertex_idx, unsigned int start_idx,
+        unsigned int index_count, unsigned int start_instance, unsigned int instance_count, BOOL indexed)
 {
     struct wined3d_cs_draw *op;
 
     op = cs->ops->require_space(cs, sizeof(*op));
     op->opcode = WINED3D_CS_OP_DRAW;
+    op->base_vertex_idx = base_vertex_idx;
     op->start_idx = start_idx;
     op->index_count = index_count;
     op->start_instance = start_instance;
@@ -580,6 +599,7 @@ static void wined3d_cs_exec_set_index_buffer(struct wined3d_cs *cs, const void *
     prev = cs->state.index_buffer;
     cs->state.index_buffer = op->buffer;
     cs->state.index_format = op->format_id;
+    cs->state.index_offset = op->offset;
 
     if (op->buffer)
         InterlockedIncrement(&op->buffer->resource.bind_count);
@@ -590,7 +610,7 @@ static void wined3d_cs_exec_set_index_buffer(struct wined3d_cs *cs, const void *
 }
 
 void wined3d_cs_emit_set_index_buffer(struct wined3d_cs *cs, struct wined3d_buffer *buffer,
-        enum wined3d_format_id format_id)
+        enum wined3d_format_id format_id, unsigned int offset)
 {
     struct wined3d_cs_set_index_buffer *op;
 
@@ -598,6 +618,7 @@ void wined3d_cs_emit_set_index_buffer(struct wined3d_cs *cs, struct wined3d_buff
     op->opcode = WINED3D_CS_OP_SET_INDEX_BUFFER;
     op->buffer = buffer;
     op->format_id = format_id;
+    op->offset = offset;
 
     cs->ops->submit(cs);
 }
@@ -1016,6 +1037,25 @@ void wined3d_cs_emit_reset_state(struct wined3d_cs *cs)
     cs->ops->submit(cs);
 }
 
+static void wined3d_cs_exec_destroy_object(struct wined3d_cs *cs, const void *data)
+{
+    const struct wined3d_cs_destroy_object *op = data;
+
+    op->callback(op->object);
+}
+
+void wined3d_cs_emit_destroy_object(struct wined3d_cs *cs, void (*callback)(void *object), void *object)
+{
+    struct wined3d_cs_destroy_object *op;
+
+    op = cs->ops->require_space(cs, sizeof(*op));
+    op->opcode = WINED3D_CS_OP_DESTROY_OBJECT;
+    op->callback = callback;
+    op->object = object;
+
+    cs->ops->submit(cs);
+}
+
 static void (* const wined3d_cs_op_handlers[])(struct wined3d_cs *cs, const void *data) =
 {
     /* WINED3D_CS_OP_PRESENT                    */ wined3d_cs_exec_present,
@@ -1044,6 +1084,7 @@ static void (* const wined3d_cs_op_handlers[])(struct wined3d_cs *cs, const void
     /* WINED3D_CS_OP_SET_COLOR_KEY              */ wined3d_cs_exec_set_color_key,
     /* WINED3D_CS_OP_SET_MATERIAL               */ wined3d_cs_exec_set_material,
     /* WINED3D_CS_OP_RESET_STATE                */ wined3d_cs_exec_reset_state,
+    /* WINED3D_CS_OP_DESTROY_OBJECT             */ wined3d_cs_exec_destroy_object,
 };
 
 static void *wined3d_cs_st_require_space(struct wined3d_cs *cs, size_t size)

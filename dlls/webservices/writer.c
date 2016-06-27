@@ -119,15 +119,15 @@ static void write_insert_bof( struct writer *writer, struct node *bof )
     writer->current = writer->root = bof;
 }
 
-static void write_insert_node( struct writer *writer, struct node *node )
+static void write_insert_node( struct writer *writer, struct node *parent, struct node *node )
 {
-    node->parent = writer->current;
-    if (writer->current == writer->root)
+    node->parent = parent;
+    if (node->parent == writer->root)
     {
         struct list *eof = list_tail( &writer->root->children );
         list_add_before( eof, &node->entry );
     }
-    else list_add_tail( &writer->current->children, &node->entry );
+    else list_add_tail( &parent->children, &node->entry );
     writer->current = node;
 }
 
@@ -568,19 +568,9 @@ static HRESULT write_startelement( struct writer *writer )
     return S_OK;
 }
 
-static struct node *write_find_parent_element( struct writer *writer )
+static HRESULT write_endelement( struct writer *writer, struct node *parent )
 {
-    struct node *node = writer->current;
-
-    if (node_type( node ) == WS_XML_NODE_TYPE_ELEMENT) return node;
-    if (node_type( node->parent ) == WS_XML_NODE_TYPE_ELEMENT) return node->parent;
-    return NULL;
-}
-
-static HRESULT write_endelement( struct writer *writer )
-{
-    struct node *node = write_find_parent_element( writer );
-    WS_XML_ELEMENT_NODE *elem = &node->hdr;
+    WS_XML_ELEMENT_NODE *elem = &parent->hdr;
     ULONG size;
     HRESULT hr;
 
@@ -633,21 +623,28 @@ static HRESULT write_add_namespace_attribute( struct writer *writer, const WS_XM
     return S_OK;
 }
 
-static const WS_XML_ATTRIBUTE *find_namespace_attribute( const WS_XML_ELEMENT_NODE *elem,
-                                                         const WS_XML_STRING *prefix,
-                                                         const WS_XML_STRING *ns )
+static BOOL namespace_in_scope( const WS_XML_ELEMENT_NODE *elem, const WS_XML_STRING *prefix,
+                                const WS_XML_STRING *ns )
 {
     ULONG i;
-    for (i = 0; i < elem->attributeCount; i++)
+    const struct node *node;
+
+    for (node = (const struct node *)elem; node; node = node->parent)
     {
-        if (!elem->attributes[i]->isXmlNs) continue;
-        if (WsXmlStringEquals( elem->attributes[i]->prefix, prefix, NULL ) == S_OK &&
-            WsXmlStringEquals( elem->attributes[i]->ns, ns, NULL ) == S_OK)
+        if (node_type( node ) != WS_XML_NODE_TYPE_ELEMENT) break;
+
+        elem = &node->hdr;
+        for (i = 0; i < elem->attributeCount; i++)
         {
-            return elem->attributes[i];
+            if (!elem->attributes[i]->isXmlNs) continue;
+            if (WsXmlStringEquals( elem->attributes[i]->prefix, prefix, NULL ) == S_OK &&
+                WsXmlStringEquals( elem->attributes[i]->ns, ns, NULL ) == S_OK)
+            {
+                return TRUE;
+            }
         }
     }
-    return NULL;
+    return FALSE;
 }
 
 static HRESULT write_set_element_namespace( struct writer *writer )
@@ -656,7 +653,7 @@ static HRESULT write_set_element_namespace( struct writer *writer )
     HRESULT hr;
 
     if (!elem->ns->length || is_current_namespace( writer, elem->ns ) ||
-        find_namespace_attribute( elem, elem->prefix, elem->ns )) return S_OK;
+        namespace_in_scope( elem, elem->prefix, elem->ns )) return S_OK;
 
     if ((hr = write_add_namespace_attribute( writer, elem->prefix, elem->ns, FALSE )) != S_OK)
         return hr;
@@ -690,41 +687,53 @@ HRESULT WINAPI WsWriteEndAttribute( WS_XML_WRITER *handle, WS_ERROR *error )
     return S_OK;
 }
 
+static struct node *write_find_start_element( struct writer *writer )
+{
+    struct node *node = writer->current, *child;
+    struct list *ptr;
+
+    for (node = writer->current; node; node = node->parent)
+    {
+        if (node_type( node ) != WS_XML_NODE_TYPE_ELEMENT) continue;
+
+        if (!(ptr = list_tail( &node->children ))) return node;
+        child = LIST_ENTRY( ptr, struct node, entry );
+        if (node_type( child ) != WS_XML_NODE_TYPE_END_ELEMENT) return node;
+    }
+    return NULL;
+}
+
 static HRESULT write_close_element( struct writer *writer )
 {
+    struct node *node, *parent;
     HRESULT hr;
+
+    if (!(parent = write_find_start_element( writer ))) return WS_E_INVALID_FORMAT;
+    if (!(node = alloc_node( WS_XML_NODE_TYPE_END_ELEMENT ))) return E_OUTOFMEMORY;
 
     if (writer->state == WRITER_STATE_STARTELEMENT)
     {
         /* '/>' */
-        if ((hr = write_set_element_namespace( writer )) != S_OK) return hr;
-        if ((hr = write_startelement( writer )) != S_OK) return hr;
-        if ((hr = write_grow_buffer( writer, 2 )) != S_OK) return hr;
+        if ((hr = write_set_element_namespace( writer )) != S_OK) goto error;
+        if ((hr = write_startelement( writer )) != S_OK) goto error;
+        if ((hr = write_grow_buffer( writer, 2 )) != S_OK) goto error;
         write_char( writer, '/' );
         write_char( writer, '>' );
-
-        writer->current = writer->current->parent;
-        writer->state   = WRITER_STATE_STARTENDELEMENT;
-        return S_OK;
+        writer->state = WRITER_STATE_STARTENDELEMENT;
     }
     else
     {
-        struct node *node = alloc_node( WS_XML_NODE_TYPE_END_ELEMENT );
-        if (!node) return E_OUTOFMEMORY;
-
         /* '</prefix:localname>' */
-        if ((hr = write_endelement( writer )) != S_OK)
-        {
-            free_node( node );
-            return hr;
-        }
-
-        write_insert_node( writer, node );
-        writer->current = node->parent;
-        writer->state   = WRITER_STATE_ENDELEMENT;
-        return S_OK;
+        if ((hr = write_endelement( writer, parent )) != S_OK) goto error;
+        writer->state = WRITER_STATE_ENDELEMENT;
     }
-    return WS_E_INVALID_OPERATION;
+
+    write_insert_node( writer, parent, node );
+    return S_OK;
+
+error:
+    free_node( node );
+    return hr;
 }
 
 /**************************************************************************
@@ -871,10 +880,11 @@ static HRESULT write_flush( struct writer *writer )
 static HRESULT write_add_element_node( struct writer *writer, const WS_XML_STRING *prefix,
                                        const WS_XML_STRING *localname, const WS_XML_STRING *ns )
 {
-    struct node *node;
+    struct node *node, *parent;
     WS_XML_ELEMENT_NODE *elem;
     HRESULT hr;
 
+    if (!(parent = find_parent( writer->current ))) return WS_E_INVALID_FORMAT;
     if ((hr = write_flush( writer )) != S_OK) return hr;
 
     if (!prefix && node_type( writer->current ) == WS_XML_NODE_TYPE_ELEMENT)
@@ -898,7 +908,7 @@ static HRESULT write_add_element_node( struct writer *writer, const WS_XML_STRIN
         free_node( node );
         return E_OUTOFMEMORY;
     }
-    write_insert_node( writer, node );
+    write_insert_node( writer, parent, node );
     writer->state = WRITER_STATE_STARTELEMENT;
     return S_OK;
 }
@@ -927,6 +937,22 @@ static inline void write_set_attribute_value( struct writer *writer, WS_XML_TEXT
     elem->attributes[elem->attributeCount - 1]->value = text;
 }
 
+static HRESULT write_add_text_node( struct writer *writer, WS_XML_TEXT *value )
+{
+    struct node *node, *parent;
+    WS_XML_TEXT_NODE *text;
+
+    if (!(parent = find_parent( writer->current ))) return WS_E_INVALID_FORMAT;
+
+    if (!(node = alloc_node( WS_XML_NODE_TYPE_TEXT ))) return E_OUTOFMEMORY;
+    text = (WS_XML_TEXT_NODE *)node;
+    text->text = value;
+
+    write_insert_node( writer, parent, node );
+    writer->state = WRITER_STATE_TEXT;
+    return S_OK;
+}
+
 /**************************************************************************
  *          WsWriteText		[webservices.@]
  */
@@ -952,13 +978,23 @@ HRESULT WINAPI WsWriteText( WS_XML_WRITER *handle, const WS_XML_TEXT *text, WS_E
             return E_OUTOFMEMORY;
 
         write_set_attribute_value( writer, &dst->text );
+        return S_OK;
     }
-    else
+
+    if ((hr = write_flush( writer )) != S_OK) return hr;
+    if (writer->state != WRITER_STATE_STARTCDATA)
     {
-        if ((hr = write_flush( writer )) != S_OK) return hr;
-        if ((hr = write_grow_buffer( writer, src->value.length )) != S_OK) return hr;
-        write_bytes( writer, src->value.bytes, src->value.length );
+        if (!(dst = alloc_utf8_text( src->value.bytes, src->value.length )))
+            return E_OUTOFMEMORY;
+
+        if ((hr = write_add_text_node( writer, &dst->text )) != S_OK)
+        {
+            heap_free( dst );
+            return hr;
+        }
     }
+    if ((hr = write_grow_buffer( writer, src->value.length )) != S_OK) return hr;
+    write_bytes( writer, src->value.bytes, src->value.length );
 
     return S_OK;
 }
@@ -1042,20 +1078,6 @@ static WS_XML_UTF8_TEXT *format_uint64( const UINT64 *ptr )
     char buf[21]; /* "18446744073709551615" */
     int len = wsprintfA( buf, "%I64u", *ptr );
     return alloc_utf8_text( (const unsigned char *)buf, len );
-}
-
-static HRESULT write_add_text_node( struct writer *writer, WS_XML_TEXT *value )
-{
-    struct node *node;
-    WS_XML_TEXT_NODE *text;
-
-    if (!(node = alloc_node( WS_XML_NODE_TYPE_TEXT ))) return E_OUTOFMEMORY;
-    text = (WS_XML_TEXT_NODE *)node;
-    text->text = value;
-
-    write_insert_node( writer, node );
-    writer->state = WRITER_STATE_TEXT;
-    return S_OK;
 }
 
 static HRESULT write_text_node( struct writer *writer )
@@ -1405,55 +1427,55 @@ static HRESULT write_type( struct writer *writer, WS_TYPE_MAPPING mapping, WS_TY
     case WS_BOOL_TYPE:
     {
         const BOOL *ptr = value;
-        if (option != WS_WRITE_REQUIRED_VALUE || size != sizeof(*ptr)) return E_INVALIDARG;
+        if ((option && option != WS_WRITE_REQUIRED_VALUE) || size != sizeof(*ptr)) return E_INVALIDARG;
         return write_type_bool( writer, mapping, desc, ptr );
     }
     case WS_INT8_TYPE:
     {
         const INT8 *ptr = value;
-        if (option != WS_WRITE_REQUIRED_VALUE || size != sizeof(*ptr)) return E_INVALIDARG;
+        if ((option && option != WS_WRITE_REQUIRED_VALUE) || size != sizeof(*ptr)) return E_INVALIDARG;
         return write_type_int8( writer, mapping, desc, ptr );
     }
     case WS_INT16_TYPE:
     {
         const INT16 *ptr = value;
-        if (option != WS_WRITE_REQUIRED_VALUE || size != sizeof(*ptr)) return E_INVALIDARG;
+        if ((option && option != WS_WRITE_REQUIRED_VALUE) || size != sizeof(*ptr)) return E_INVALIDARG;
         return write_type_int16( writer, mapping, desc, ptr );
     }
     case WS_INT32_TYPE:
     {
         const INT32 *ptr = value;
-        if (option != WS_WRITE_REQUIRED_VALUE || size != sizeof(*ptr)) return E_INVALIDARG;
+        if ((option && option != WS_WRITE_REQUIRED_VALUE) || size != sizeof(*ptr)) return E_INVALIDARG;
         return write_type_int32( writer, mapping, desc, ptr );
     }
     case WS_INT64_TYPE:
     {
         const INT64 *ptr = value;
-        if (option != WS_WRITE_REQUIRED_VALUE || size != sizeof(*ptr)) return E_INVALIDARG;
+        if ((option && option != WS_WRITE_REQUIRED_VALUE) || size != sizeof(*ptr)) return E_INVALIDARG;
         return write_type_int64( writer, mapping, desc, ptr );
     }
     case WS_UINT8_TYPE:
     {
         const UINT8 *ptr = value;
-        if (option != WS_WRITE_REQUIRED_VALUE || size != sizeof(*ptr)) return E_INVALIDARG;
+        if ((option && option != WS_WRITE_REQUIRED_VALUE) || size != sizeof(*ptr)) return E_INVALIDARG;
         return write_type_uint8( writer, mapping, desc, ptr );
     }
     case WS_UINT16_TYPE:
     {
         const UINT16 *ptr = value;
-        if (option != WS_WRITE_REQUIRED_VALUE || size != sizeof(*ptr)) return E_INVALIDARG;
+        if ((option && option != WS_WRITE_REQUIRED_VALUE) || size != sizeof(*ptr)) return E_INVALIDARG;
         return write_type_uint16( writer, mapping, desc, ptr );
     }
     case WS_UINT32_TYPE:
     {
         const UINT32 *ptr = value;
-        if (option != WS_WRITE_REQUIRED_VALUE || size != sizeof(*ptr)) return E_INVALIDARG;
+        if ((option && option != WS_WRITE_REQUIRED_VALUE) || size != sizeof(*ptr)) return E_INVALIDARG;
         return write_type_uint32( writer, mapping, desc, ptr );
     }
     case WS_UINT64_TYPE:
     {
         const UINT64 *ptr = value;
-        if (option != WS_WRITE_REQUIRED_VALUE || size != sizeof(*ptr)) return E_INVALIDARG;
+        if ((option && option != WS_WRITE_REQUIRED_VALUE) || size != sizeof(*ptr)) return E_INVALIDARG;
         return write_type_uint64( writer, mapping, desc, ptr );
     }
     case WS_WSZ_TYPE:
@@ -1689,6 +1711,128 @@ HRESULT WINAPI WsWriteXmlnsAttribute( WS_XML_WRITER *handle, const WS_XML_STRING
     if (!writer || !ns) return E_INVALIDARG;
     if (writer->state != WRITER_STATE_STARTELEMENT) return WS_E_INVALID_OPERATION;
 
-    if (find_namespace_attribute( &writer->current->hdr, prefix, ns )) return S_OK;
+    if (namespace_in_scope( &writer->current->hdr, prefix, ns )) return S_OK;
     return write_add_namespace_attribute( writer, prefix, ns, single );
+}
+
+static HRESULT write_move_to( struct writer *writer, WS_MOVE_TO move, BOOL *found )
+{
+    BOOL success = FALSE;
+    struct node *node = writer->current;
+
+    switch (move)
+    {
+    case WS_MOVE_TO_ROOT_ELEMENT:
+        success = move_to_root_element( writer->root, &node );
+        break;
+
+    case WS_MOVE_TO_NEXT_ELEMENT:
+        success = move_to_next_element( &node );
+        break;
+
+    case WS_MOVE_TO_PREVIOUS_ELEMENT:
+        success = move_to_prev_element( &node );
+        break;
+
+    case WS_MOVE_TO_CHILD_ELEMENT:
+        success = move_to_child_element( &node );
+        break;
+
+    case WS_MOVE_TO_END_ELEMENT:
+        success = move_to_end_element( &node );
+        break;
+
+    case WS_MOVE_TO_PARENT_ELEMENT:
+        success = move_to_parent_element( &node );
+        break;
+
+    case WS_MOVE_TO_FIRST_NODE:
+        success = move_to_first_node( &node );
+        break;
+
+    case WS_MOVE_TO_NEXT_NODE:
+        success = move_to_next_node( &node );
+        break;
+
+    case WS_MOVE_TO_PREVIOUS_NODE:
+        success = move_to_prev_node( &node );
+        break;
+
+    case WS_MOVE_TO_CHILD_NODE:
+        success = move_to_child_node( &node );
+        break;
+
+    case WS_MOVE_TO_BOF:
+        success = move_to_bof( writer->root, &node );
+        break;
+
+    case WS_MOVE_TO_EOF:
+        success = move_to_eof( writer->root, &node );
+        break;
+
+    default:
+        FIXME( "unhandled move %u\n", move );
+        return E_NOTIMPL;
+    }
+
+    if (success && node == writer->root) return E_INVALIDARG;
+    writer->current = node;
+
+    if (found)
+    {
+        *found = success;
+        return S_OK;
+    }
+    return success ? S_OK : WS_E_INVALID_FORMAT;
+}
+
+/**************************************************************************
+ *          WsMoveWriter		[webservices.@]
+ */
+HRESULT WINAPI WsMoveWriter( WS_XML_WRITER *handle, WS_MOVE_TO move, BOOL *found, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+
+    TRACE( "%p %u %p %p\n", handle, move, found, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer) return E_INVALIDARG;
+    if (!writer->output_type) return WS_E_INVALID_OPERATION;
+
+    return write_move_to( writer, move, found );
+}
+
+/**************************************************************************
+ *          WsGetWriterPosition		[webservices.@]
+ */
+HRESULT WINAPI WsGetWriterPosition( WS_XML_WRITER *handle, WS_XML_NODE_POSITION *pos, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+
+    TRACE( "%p %p %p\n", handle, pos, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer || !pos) return E_INVALIDARG;
+    if (!writer->output_type) return WS_E_INVALID_OPERATION;
+
+    pos->buffer = (WS_XML_BUFFER *)writer->output_buf;
+    pos->node   = writer->current;
+    return S_OK;
+}
+
+/**************************************************************************
+ *          WsSetWriterPosition		[webservices.@]
+ */
+HRESULT WINAPI WsSetWriterPosition( WS_XML_WRITER *handle, const WS_XML_NODE_POSITION *pos, WS_ERROR *error )
+{
+    struct writer *writer = (struct writer *)handle;
+
+    TRACE( "%p %p %p\n", handle, pos, error );
+    if (error) FIXME( "ignoring error parameter\n" );
+
+    if (!writer || !pos || (struct xmlbuf *)pos->buffer != writer->output_buf) return E_INVALIDARG;
+    if (!writer->output_type) return WS_E_INVALID_OPERATION;
+
+    writer->current = pos->node;
+    return S_OK;
 }

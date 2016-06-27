@@ -661,7 +661,7 @@ static BOOL color_is_gray(ARGB color)
 }
 
 /* returns preferred pixel format for the applied attributes */
-static PixelFormat apply_image_attributes(const GpImageAttributes *attributes, LPBYTE data,
+PixelFormat apply_image_attributes(const GpImageAttributes *attributes, LPBYTE data,
     UINT width, UINT height, INT stride, ColorAdjustType type, PixelFormat fmt)
 {
     UINT x, y;
@@ -4297,6 +4297,7 @@ GpStatus WINGDIPAPI GdipGetVisibleClipBounds(GpGraphics *graphics, GpRectF *rect
 {
     GpRegion *clip_rgn;
     GpStatus stat;
+    GpMatrix device_to_world;
 
     TRACE("(%p, %p)\n", graphics, rect);
 
@@ -4311,6 +4312,13 @@ GpStatus WINGDIPAPI GdipGetVisibleClipBounds(GpGraphics *graphics, GpRectF *rect
         return stat;
 
     if((stat = get_visible_clip_region(graphics, clip_rgn)) != Ok)
+        goto cleanup;
+
+    /* transform to world coordinates */
+    if((stat = get_graphics_transform(graphics, CoordinateSpaceWorld, CoordinateSpaceDevice, &device_to_world)) != Ok)
+        goto cleanup;
+
+    if((stat = GdipTransformRegion(clip_rgn, &device_to_world)) != Ok)
         goto cleanup;
 
     /* get bounds of the region */

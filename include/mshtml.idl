@@ -6100,6 +6100,28 @@ interface IHTMLElement4 : IDispatch
     [propget, id(DISPID_IHTMLELEMENT4_ONFOCUSOUT), displaybind, bindable] \
     VARIANT onfocusout()
 
+/*****************************************************************************
+ *    IElementSelector interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(30510463-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IElementSelector : IDispatch
+{
+    [id(DISPID_IELEMENTSELECTOR_QUERYSELECTOR)]
+    HRESULT querySelector(
+        [in] BSTR v,
+        [out, retval] IHTMLElement **pel);
+
+    [id(DISPID_IELEMENTSELECTOR_QUERYSELECTORALL)]
+    HRESULT querySelectorAll(
+        [in] BSTR v,
+        [out, retval] IHTMLDOMChildrenCollection **pel);
+}
+
 #define WINE_IELEMENTSELECTOR_DISPINTERFACE_DECL                \
     [id(DISPID_IELEMENTSELECTOR_QUERYSELECTOR)]                 \
     IHTMLElement *querySelector([in] BSTR v);                   \
@@ -9772,7 +9794,7 @@ interface IHTMLSelection : IDispatch
     [id(DISPID_IHTMLSELECTION_COLLAPSE)]
     HRESULT collapse(
         [in] IDispatch *parentNode,
-        [in] long offfset);
+        [in] long offset);
 
     [id(DISPID_IHTMLSELECTION_COLLAPSETOSTART)]
     HRESULT collapseToStart();
@@ -14947,6 +14969,28 @@ interface IHTMLDocument7 : IDispatch
 }
 
 /*****************************************************************************
+ *    IDocumentSelector interface
+ */
+[
+    odl,
+    oleautomation,
+    dual,
+    uuid(30510462-98b5-11cf-bb82-00aa00bdce0b)
+]
+interface IDocumentSelector : IDispatch
+{
+    [id(DISPID_IDOCUMENTSELECTOR_QUERYSELECTOR)]
+    HRESULT querySelector(
+        [in] BSTR v,
+        [out, retval] IHTMLElement **pel);
+
+    [id(DISPID_IDOCUMENTSELECTOR_QUERYSELECTORALL)]
+    HRESULT querySelectorAll(
+        [in] BSTR v,
+        [out, retval] IHTMLDOMChildrenCollection **pel);
+}
+
+/*****************************************************************************
  *    DispHTMLDocument dispinterface
  */
 [
@@ -15547,6 +15591,12 @@ methods:
     void updateSettings();
 
     WINE_HTMLDOMNODE_DISPINTERFACE_DECL;
+
+    [id(DISPID_IDOCUMENTSELECTOR_QUERYSELECTOR)]
+    IHTMLElement *querySelector([in] BSTR v);
+
+    [id(DISPID_IDOCUMENTSELECTOR_QUERYSELECTORALL)]
+    IHTMLDOMChildrenCollection *querySelectorAll([in] BSTR v);
 }
 
 /*****************************************************************************

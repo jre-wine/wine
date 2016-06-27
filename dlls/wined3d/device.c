@@ -814,43 +814,52 @@ static void destroy_dummy_textures(struct wined3d_device *device, const struct w
 }
 
 /* Context activation is done by the caller. */
-static void create_default_sampler(struct wined3d_device *device)
+static void create_default_samplers(struct wined3d_device *device)
 {
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
 
-    /*
-     * In SM4+ shaders there is a separation between resources and samplers. Some of shader
-     * instructions allow to access resources without using samplers.
-     * In GLSL resources are always accessed through sampler or image variables. The default
-     * sampler object is used to emulate the direct resource access when there is no sampler state
-     * to use.
-     */
     if (gl_info->supported[ARB_SAMPLER_OBJECTS])
     {
+        /* In SM4+ shaders there is a separation between resources and samplers. Some shader
+         * instructions allow access to resources without using samplers.
+         * In GLSL, resources are always accessed through sampler or image variables. The default
+         * sampler object is used to emulate the direct resource access when there is no sampler state
+         * to use.
+         */
         GL_EXTCALL(glGenSamplers(1, &device->default_sampler));
-        checkGLcall("glGenSamplers");
         GL_EXTCALL(glSamplerParameteri(device->default_sampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
         GL_EXTCALL(glSamplerParameteri(device->default_sampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST));
-        checkGLcall("glSamplerParameteri");
+        checkGLcall("Create default sampler");
+
+        /* In D3D10+, a NULL sampler maps to the default sampler state. */
+        GL_EXTCALL(glGenSamplers(1, &device->null_sampler));
+        GL_EXTCALL(glSamplerParameteri(device->null_sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR));
+        GL_EXTCALL(glSamplerParameteri(device->null_sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+        GL_EXTCALL(glSamplerParameteri(device->null_sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+        GL_EXTCALL(glSamplerParameteri(device->null_sampler, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE));
+        checkGLcall("Create null sampler");
     }
     else
     {
         device->default_sampler = 0;
+        device->null_sampler = 0;
     }
 }
 
 /* Context activation is done by the caller. */
-static void destroy_default_sampler(struct wined3d_device *device)
+static void destroy_default_samplers(struct wined3d_device *device)
 {
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
 
     if (gl_info->supported[ARB_SAMPLER_OBJECTS])
     {
         GL_EXTCALL(glDeleteSamplers(1, &device->default_sampler));
+        GL_EXTCALL(glDeleteSamplers(1, &device->null_sampler));
         checkGLcall("glDeleteSamplers");
     }
 
     device->default_sampler = 0;
+    device->null_sampler = 0;
 }
 
 static LONG fullscreen_style(LONG style)
@@ -1032,13 +1041,14 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
 
     if (swapchain_desc->backbuffer_count)
     {
+        struct wined3d_resource *back_buffer = &swapchain->back_buffers[0]->resource;
         struct wined3d_rendertarget_view_desc view_desc;
 
-        view_desc.format_id = swapchain_desc->backbuffer_format;
+        view_desc.format_id = back_buffer->format->id;
         view_desc.u.texture.level_idx = 0;
         view_desc.u.texture.layer_idx = 0;
         view_desc.u.texture.layer_count = 1;
-        if (FAILED(hr = wined3d_rendertarget_view_create(&view_desc, &swapchain->back_buffers[0]->resource,
+        if (FAILED(hr = wined3d_rendertarget_view_create(&view_desc, back_buffer,
                 NULL, &wined3d_null_parent_ops, &device->back_buffer_view)))
         {
             ERR("Failed to create rendertarget view, hr %#x.\n", hr);
@@ -1058,7 +1068,7 @@ HRESULT CDECL wined3d_device_init_3d(struct wined3d_device *device,
     context = context_acquire(device, swapchain->front_buffer->sub_resources[0].u.surface);
 
     create_dummy_textures(device, context);
-    create_default_sampler(device);
+    create_default_samplers(device);
 
     device->contexts[0]->last_was_rhw = 0;
 
@@ -1183,7 +1193,7 @@ HRESULT CDECL wined3d_device_uninit_3d(struct wined3d_device *device)
     device->blitter->free_private(device);
     device->shader_backend->shader_free_private(device);
     destroy_dummy_textures(device, gl_info);
-    destroy_default_sampler(device);
+    destroy_default_samplers(device);
 
     /* Release the context again as soon as possible. In particular,
      * releasing the render target views below may release the last reference
@@ -1943,40 +1953,45 @@ void CDECL wined3d_device_get_material(const struct wined3d_device *device, stru
 }
 
 void CDECL wined3d_device_set_index_buffer(struct wined3d_device *device,
-        struct wined3d_buffer *buffer, enum wined3d_format_id format_id)
+        struct wined3d_buffer *buffer, enum wined3d_format_id format_id, unsigned int offset)
 {
     enum wined3d_format_id prev_format;
     struct wined3d_buffer *prev_buffer;
+    unsigned int prev_offset;
 
-    TRACE("device %p, buffer %p, format %s.\n",
-            device, buffer, debug_d3dformat(format_id));
+    TRACE("device %p, buffer %p, format %s, offset %u.\n",
+            device, buffer, debug_d3dformat(format_id), offset);
 
     prev_buffer = device->update_state->index_buffer;
     prev_format = device->update_state->index_format;
+    prev_offset = device->update_state->index_offset;
 
     device->update_state->index_buffer = buffer;
     device->update_state->index_format = format_id;
+    device->update_state->index_offset = offset;
 
     if (device->recording)
         device->recording->changed.indices = TRUE;
 
-    if (prev_buffer == buffer && prev_format == format_id)
+    if (prev_buffer == buffer && prev_format == format_id && prev_offset == offset)
         return;
 
     if (buffer)
         wined3d_buffer_incref(buffer);
     if (!device->recording)
-        wined3d_cs_emit_set_index_buffer(device->cs, buffer, format_id);
+        wined3d_cs_emit_set_index_buffer(device->cs, buffer, format_id, offset);
     if (prev_buffer)
         wined3d_buffer_decref(prev_buffer);
 }
 
 struct wined3d_buffer * CDECL wined3d_device_get_index_buffer(const struct wined3d_device *device,
-        enum wined3d_format_id *format)
+        enum wined3d_format_id *format, unsigned int *offset)
 {
-    TRACE("device %p, format %p.\n", device, format);
+    TRACE("device %p, format %p, offset %p.\n", device, format, offset);
 
     *format = device->state.index_format;
+    if (offset)
+        *offset = device->state.index_offset;
     return device->state.index_buffer;
 }
 
@@ -3482,13 +3497,7 @@ HRESULT CDECL wined3d_device_draw_primitive(struct wined3d_device *device, UINT 
 {
     TRACE("device %p, start_vertex %u, vertex_count %u.\n", device, start_vertex, vertex_count);
 
-    if (device->state.load_base_vertex_index)
-    {
-        device->state.load_base_vertex_index = 0;
-        device_invalidate_state(device, STATE_BASEVERTEXINDEX);
-    }
-
-    wined3d_cs_emit_draw(device->cs, start_vertex, vertex_count, 0, 0, FALSE);
+    wined3d_cs_emit_draw(device->cs, 0, start_vertex, vertex_count, 0, 0, FALSE);
 
     return WINED3D_OK;
 }
@@ -3499,13 +3508,11 @@ void CDECL wined3d_device_draw_primitive_instanced(struct wined3d_device *device
     TRACE("device %p, start_vertex %u, vertex_count %u, start_instance %u, instance_count %u.\n",
             device, start_vertex, vertex_count, start_instance, instance_count);
 
-    wined3d_cs_emit_draw(device->cs, start_vertex, vertex_count, start_instance, instance_count, FALSE);
+    wined3d_cs_emit_draw(device->cs, 0, start_vertex, vertex_count, start_instance, instance_count, FALSE);
 }
 
 HRESULT CDECL wined3d_device_draw_indexed_primitive(struct wined3d_device *device, UINT start_idx, UINT index_count)
 {
-    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
-
     TRACE("device %p, start_idx %u, index_count %u.\n", device, start_idx, index_count);
 
     if (!device->state.index_buffer)
@@ -3518,14 +3525,7 @@ HRESULT CDECL wined3d_device_draw_indexed_primitive(struct wined3d_device *devic
         return WINED3DERR_INVALIDCALL;
     }
 
-    if (!gl_info->supported[ARB_DRAW_ELEMENTS_BASE_VERTEX] &&
-            device->state.load_base_vertex_index != device->state.base_vertex_index)
-    {
-        device->state.load_base_vertex_index = device->state.base_vertex_index;
-        device_invalidate_state(device, STATE_BASEVERTEXINDEX);
-    }
-
-    wined3d_cs_emit_draw(device->cs, start_idx, index_count, 0, 0, TRUE);
+    wined3d_cs_emit_draw(device->cs, device->state.base_vertex_index, start_idx, index_count, 0, 0, TRUE);
 
     return WINED3D_OK;
 }
@@ -3536,7 +3536,8 @@ void CDECL wined3d_device_draw_indexed_primitive_instanced(struct wined3d_device
     TRACE("device %p, start_idx %u, index_count %u, start_instance %u, instance_count %u.\n",
             device, start_idx, index_count, start_instance, instance_count);
 
-    wined3d_cs_emit_draw(device->cs, start_idx, index_count, start_instance, instance_count, TRUE);
+    wined3d_cs_emit_draw(device->cs, device->state.base_vertex_index,
+            start_idx, index_count, start_instance, instance_count, TRUE);
 }
 
 static HRESULT wined3d_device_update_texture_3d(struct wined3d_device *device,
@@ -4548,7 +4549,7 @@ static void delete_opengl_contexts(struct wined3d_device *device, struct wined3d
     device->blitter->free_private(device);
     device->shader_backend->shader_free_private(device);
     destroy_dummy_textures(device, gl_info);
-    destroy_default_sampler(device);
+    destroy_default_samplers(device);
 
     context_release(context);
 
@@ -4604,7 +4605,7 @@ static HRESULT create_primary_opengl_context(struct wined3d_device *device, stru
     swapchain->context[0] = context;
     swapchain->num_contexts = 1;
     create_dummy_textures(device, context);
-    create_default_sampler(device);
+    create_default_samplers(device);
     context_release(context);
 
     return WINED3D_OK;
@@ -4851,11 +4852,13 @@ HRESULT CDECL wined3d_device_reset(struct wined3d_device *device,
     }
     if (swapchain->desc.backbuffer_count)
     {
-        view_desc.format_id = swapchain_desc->backbuffer_format;
+        struct wined3d_resource *back_buffer = &swapchain->back_buffers[0]->resource;
+
+        view_desc.format_id = back_buffer->format->id;
         view_desc.u.texture.level_idx = 0;
         view_desc.u.texture.layer_idx = 0;
         view_desc.u.texture.layer_count = 1;
-        if (FAILED(hr = wined3d_rendertarget_view_create(&view_desc, &swapchain->back_buffers[0]->resource,
+        if (FAILED(hr = wined3d_rendertarget_view_create(&view_desc, back_buffer,
                 NULL, &wined3d_null_parent_ops, &device->back_buffer_view)))
         {
             ERR("Failed to create rendertarget view, hr %#x.\n", hr);
