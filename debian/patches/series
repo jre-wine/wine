@@ -3,6 +3,7 @@ makefile.patch
 kfreebsd.patch
 sfnt2fon.patch
 manpages.patch
+unicode-9.patch
 version-string.patch
 
 disable/addons-download.patch
