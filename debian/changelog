@@ -19,8 +19,10 @@ wine-development (1.9.13-1) UNRELEASED; urgency=medium
   * Update suggests libwine-gecko to 2.47 (needs packaging).
   * Fix wineserver manpages for Debian's default persistence value (see:
     #816020).
+  * Drop alternative depends on perl:any (now handled by debhelper).
+  * Bump build-dep on debhelper version to >= 9.20160702.
 
- -- Jens Reyer <jre.winesim@gmail.com>  Mon, 27 Jun 2016 12:54:04 +0200
+ -- Jens Reyer <jre.winesim@gmail.com>  Sun, 03 Jul 2016 21:25:54 +0200
 
 wine-development (1.9.12-1) unstable; urgency=medium
 
