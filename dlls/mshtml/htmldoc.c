@@ -827,7 +827,7 @@ static HRESULT WINAPI HTMLDocument_get_domain(IHTMLDocument2 *iface, BSTR *p)
 
         nsAString_GetData(&nsstr, &str);
         if(!*str) {
-            TRACE("Gecko returned emptry string, fallback to loaded URL.\n");
+            TRACE("Gecko returned empty string, fallback to loaded URL.\n");
             nsAString_Finish(&nsstr);
             hres = IUri_GetHost(This->window->uri, p);
             return FAILED(hres) ? hres : S_OK;
@@ -2947,19 +2947,14 @@ static HRESULT WINAPI HTMLDocument5_get_onbeforedeactivate(IHTMLDocument5 *iface
 static HRESULT WINAPI HTMLDocument5_get_compatMode(IHTMLDocument5 *iface, BSTR *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument5(iface);
-    nsAString mode_str;
-    nsresult nsres;
+
+    static const WCHAR BackCompatW[] = {'B','a','c','k','C','o','m','p','a','t',0};
+    static const WCHAR CSS1CompatW[] = {'C','S','S','1','C','o','m','p','a','t',0};
 
     TRACE("(%p)->(%p)\n", This, p);
 
-    if(!This->doc_node->nsdoc) {
-        WARN("NULL nsdoc\n");
-        return E_UNEXPECTED;
-    }
-
-    nsAString_Init(&mode_str, NULL);
-    nsres = nsIDOMHTMLDocument_GetCompatMode(This->doc_node->nsdoc, &mode_str);
-    return return_nsstr(nsres, &mode_str, p);
+    *p = SysAllocString(This->doc_node->document_mode == COMPAT_MODE_QUIRKS ? BackCompatW : CSS1CompatW);
+    return *p ? S_OK : E_OUTOFMEMORY;
 }
 
 static const IHTMLDocument5Vtbl HTMLDocument5Vtbl = {
@@ -3053,12 +3048,31 @@ static HRESULT WINAPI HTMLDocument6_get_compatible(IHTMLDocument6 *iface,
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI HTMLDocument6_get_documentMode(IHTMLDocument6 *iface,
-        VARIANT *p)
+static HRESULT WINAPI HTMLDocument6_get_documentMode(IHTMLDocument6 *iface, VARIANT *p)
 {
     HTMLDocument *This = impl_from_IHTMLDocument6(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    static const int docmode_values[] = {
+        5,  /* DOCMODE_QUIRKS */
+        7,  /* DOCMODE_IE7 */
+        8,  /* DOCMODE_IE8 */
+        9,  /* DOCMODE_IE8 */
+        10, /* DOCMODE_IE10 */
+        11  /* DOCMODE_IE11 */
+    };
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!This->doc_node) {
+        FIXME("NULL doc_node\n");
+        return E_UNEXPECTED;
+    }
+
+    assert(This->doc_node->document_mode < sizeof(docmode_values)/sizeof(*docmode_values));
+
+    V_VT(p) = VT_I4;
+    V_I4(p) = docmode_values[This->doc_node->document_mode];
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument6_get_onstorage(IHTMLDocument6 *iface,
@@ -4762,6 +4776,7 @@ static const tid_t HTMLDocumentNode_iface_tids[] = {
     IHTMLDocument3_tid,
     IHTMLDocument4_tid,
     IHTMLDocument5_tid,
+    IHTMLDocument6_tid,
     IDocumentSelector_tid,
     0
 };
@@ -4769,7 +4784,6 @@ static const tid_t HTMLDocumentNode_iface_tids[] = {
 static dispex_static_data_t HTMLDocumentNode_dispex = {
     &HTMLDocumentNode_dispex_vtbl,
     DispHTMLDocument_tid,
-    NULL,
     HTMLDocumentNode_iface_tids
 };
 
@@ -4997,7 +5011,6 @@ static const tid_t HTMLDocumentObj_iface_tids[] = {
 static dispex_static_data_t HTMLDocumentObj_dispex = {
     NULL,
     DispHTMLDocument_tid,
-    NULL,
     HTMLDocumentObj_iface_tids
 };
 

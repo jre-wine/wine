@@ -684,6 +684,33 @@ DWORD get_cookie_header(const WCHAR *host, const WCHAR *path, WCHAR **ret)
     return res;
 }
 
+static void free_cookie_domain_list(struct list *list)
+{
+    cookie_container_t *container;
+    cookie_domain_t *domain;
+
+    while(!list_empty(list)) {
+        domain = LIST_ENTRY(list_head(list), cookie_domain_t, entry);
+
+        free_cookie_domain_list(&domain->subdomain_list);
+
+        while(!list_empty(&domain->path_list)) {
+            container = LIST_ENTRY(list_head(&domain->path_list), cookie_container_t, entry);
+
+            while(!list_empty(&container->cookie_list))
+                delete_cookie(LIST_ENTRY(list_head(&container->cookie_list), cookie_t, entry));
+
+            heap_free(container->cookie_url);
+            list_remove(&container->entry);
+            heap_free(container);
+        }
+
+        heap_free(domain->domain);
+        list_remove(&domain->entry);
+        heap_free(domain);
+    }
+}
+
 /***********************************************************************
  *           InternetGetCookieExW (WININET.@)
  *
@@ -781,7 +808,7 @@ BOOL WINAPI InternetGetCookieExA(LPCSTR lpszUrl, LPCSTR lpszCookieName,
         LPSTR lpCookieData, LPDWORD lpdwSize, DWORD flags, void *reserved)
 {
     WCHAR *url, *name;
-    DWORD len, size;
+    DWORD len, size = 0;
     BOOL r;
 
     TRACE("(%s %s %p %p(%u) %x %p)\n", debugstr_a(lpszUrl), debugstr_a(lpszCookieName),
@@ -814,12 +841,12 @@ BOOL WINAPI InternetGetCookieExA(LPCSTR lpszUrl, LPCSTR lpszCookieName,
                         r = FALSE;
                     }
                 }
-                *lpdwSize = size;
             }
 
             heap_free( szCookieData );
         }
     }
+    *lpdwSize = size;
     heap_free( name );
     heap_free( url );
     return r;
@@ -1239,5 +1266,9 @@ BOOL WINAPI InternetSetPerSiteCookieDecisionW( LPCWSTR pchHostName, DWORD dwDeci
 
 void free_cookie(void)
 {
-    DeleteCriticalSection(&cookie_cs);
+    EnterCriticalSection(&cookie_cs);
+
+    free_cookie_domain_list(&domain_list);
+
+    LeaveCriticalSection(&cookie_cs);
 }

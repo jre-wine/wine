@@ -11886,6 +11886,94 @@ msgstr "(kan ikke vise verdi)"
 msgid "(unknown %d)"
 msgstr "(ukjent %d)"
 
+#: regedit.rc:359
+msgid ""
+"Usage:\n"
+"  regedit [options] [filename] [reg_key]\n"
+"\n"
+"Options:\n"
+"  [no option]    Launch the graphical version of this program.\n"
+"  /L:system.dat  The location of the system.dat file to be modified.\n"
+"                 Compatible with any other switch. Ignored.\n"
+"  /R:user.dat    The location of the user.dat file to be modified.\n"
+"                 Compatible with any other switch. Ignored.\n"
+"  /C             Import the contents of a registry file.\n"
+"  /D             Delete a specified registry key.\n"
+"  /E             Export the contents of a specified registry key to a file.\n"
+"                 If no key is specified, the entire registry is exported.\n"
+"  /S             Silent mode. No messages will be displayed.\n"
+"  /V             Launch the GUI in advanced mode. Ignored.\n"
+"  /?             Display this information and exit.\n"
+"  [filename]     The location of the file containing registry information "
+"to\n"
+"                 be imported. When used with [/E], this option specifies "
+"the\n"
+"                 file location where registry information will be exported.\n"
+"  [reg_key]      The registry key to be modified.\n"
+"\n"
+"Usage examples:\n"
+"  regedit \"import.reg\"\n"
+"  regedit /E \"export.reg\" \"HKEY_CURRENT_USER\\Console\"\n"
+"  regedit /D \"HKEY_LOCAL_MACHINE\\Error\\Path\"\n"
+msgstr ""
+"Bruk:\n"
+"  regedit [alternativer] [filnavn] [reg_key]\n"
+"\n"
+"Alternativer:\n"
+"  [Ingen alt.]   Kjør den grafiske versjonen av dette programmet.\n"
+"  /L:system.dat  Plasseringen til system.dat filen som skal modifiseres.\n"
+"                 Kompatibel med hvilken som helst annen bryter. Ignorert.\n"
+"  /R:user.dat    Plasseringen til user.dat filen som skal modifiseres.\n"
+"                 Kompatibel med hvilken som helst annen bryter. Ignorert.\n"
+"  /C             Importér innholdet av en registerfil.\n"
+"  /D             Slett en spesifikk registernøkkel.\n"
+"  /E             Eksportér innholdet av en spesifikk registernøkkel til en "
+"fil.\n"
+"                 Hvis ingen nøkkel er spesifisert, er hele registeret "
+"eksportert.\n"
+"  /S             Stille modus. Ingen beskjeder vil bli vist.\n"
+"  /V             Kjør GUI'et i avansert modus. Ignorert.\n"
+"  /?             Vis denne informasjonen og avslutt.\n"
+"  [filnavn]      Plasseringen til filen som inneholder registerinformasjonen "
+"som\n"
+"                 skal importeres. Når brukt med [/E], spesifiserer dette \n"
+"                 alternativet plasseringen hvor registerinformasjonen vil \n"
+"                 bli eksportert.\n"
+"  [reg_key]      Registernøkkelen som skal modifiseres.\n"
+"\n"
+"Brukseksempler:\n"
+"  regedit \"import.reg\"\n"
+"  regedit /E \"export.reg\" \"HKEY_CURRENT_USER\\Console\"\n"
+"  regedit /D \"HKEY_LOCAL_MACHINE\\Error\\Path\"\n"
+
+#: regedit.rc:360
+msgid "regedit: Invalid or unrecognized switch [%1]\n"
+msgstr "regedit: Ugyldig eller ukjent bryter [%1]\n"
+
+#: regedit.rc:361
+msgid "Type \"regedit /?\" for help.\n"
+msgstr "Skriv \"regedit /?\" for hjelp.\n"
+
+#: regedit.rc:362
+msgid "regedit: No filename was specified.\n"
+msgstr "regedit: Intet filnavn ble oppgitt.\n"
+
+#: regedit.rc:363
+msgid "regedit: No registry key was specified for removal.\n"
+msgstr "regedit: Ingen registernøkkel ble oppgitt for fjerning.\n"
+
+#: regedit.rc:364
+msgid "regedit: The file '%1' was not found.\n"
+msgstr "regedit: Filen \"%1\" ble ikke funnet.\n"
+
+#: regedit.rc:365
+msgid "regedit: Unable to open the file '%1'.\n"
+msgstr "regedit: Kan ikke åpne filen \"%1\".\n"
+
+#: regedit.rc:366
+msgid "regedit: Unhandled action.\n"
+msgstr "regedit: Uhåndtert handling.\n"
+
 #: regedit.rc:163
 msgid "Quits the registry editor"
 msgstr "Avslutter Registerredigering"
@@ -12932,7 +13020,7 @@ msgid ""
 "WARNING: Debugging this process may result in loss of data.\n"
 "Are you sure you wish to attach the debugger?"
 msgstr ""
-"ADVERSEL: Å feilsøke denne prosessen kan føre til tap av data.\n"
+"ADVARSEL: Å feilsøke denne prosessen kan føre til tap av data.\n"
 "Er du sikker på at du vil koble til feilsøkeren?"
 
 #: taskmgr.rc:314

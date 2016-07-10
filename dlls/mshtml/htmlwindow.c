@@ -2933,7 +2933,12 @@ static event_target_t **HTMLWindow_get_event_target_ptr(DispatchEx *dispex)
 static void HTMLWindow_bind_event(DispatchEx *dispex, int eid)
 {
     HTMLInnerWindow *This = impl_from_DispatchEx(dispex);
-    This->doc->node.event_target.dispex.data->vtbl->bind_event(&This->doc->node.event_target.dispex, eid);
+    dispex_get_vtbl(&This->doc->node.event_target.dispex)->bind_event(&This->doc->node.event_target.dispex, eid);
+}
+
+static void HTMLWindow_init_dispex_info(dispex_data_t *info, compat_mode_t compat_mode)
+{
+    dispex_info_add_interface(info, IHTMLWindow5_tid);
 }
 
 static const dispex_static_data_vtbl_t HTMLWindow_dispex_vtbl = {
@@ -2956,9 +2961,8 @@ static const tid_t HTMLWindow_iface_tids[] = {
 static dispex_static_data_t HTMLWindow_dispex = {
     &HTMLWindow_dispex_vtbl,
     DispHTMLWindow2_tid,
-    NULL,
     HTMLWindow_iface_tids,
-    IHTMLWindow5_tid
+    HTMLWindow_init_dispex_info
 };
 
 static void *alloc_window(size_t size)
@@ -3169,18 +3173,6 @@ HRESULT update_window_doc(HTMLInnerWindow *window)
     }
 
     return hres;
-}
-
-HTMLOuterWindow *nswindow_to_window(const nsIDOMWindow *nswindow)
-{
-    HTMLOuterWindow *iter;
-
-    LIST_FOR_EACH_ENTRY(iter, &window_list, HTMLOuterWindow, entry) {
-        if(iter->nswindow == nswindow)
-            return iter;
-    }
-
-    return NULL;
 }
 
 HTMLOuterWindow *mozwindow_to_window(const mozIDOMWindowProxy *mozwindow)

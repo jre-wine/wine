@@ -28,7 +28,6 @@
 #include "wingdi.h"
 #include "dwrite_private.h"
 #include "scripts.h"
-#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dwrite);
 
@@ -805,9 +804,9 @@ static HRESULT layout_compute_runs(struct dwrite_textlayout *layout)
                 IDWriteFontCollection_AddRef(collection);
             }
             else
-                IDWriteFactory_GetSystemFontCollection((IDWriteFactory*)layout->factory, &collection, FALSE);
+                IDWriteFactory3_GetSystemFontCollection(layout->factory, FALSE, (IDWriteFontCollection1**)&collection, FALSE);
 
-            hr = create_matching_font(range->collection, range->fontfamily, range->weight,
+            hr = create_matching_font(collection, range->fontfamily, range->weight,
                 range->style, range->stretch, &font);
 
             IDWriteFontCollection_Release(collection);

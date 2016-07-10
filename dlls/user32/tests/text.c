@@ -2,7 +2,7 @@
  * DrawText tests
  *
  * Copyright (c) 2004 Zach Gorman
- * Copyright 2007 Dmitry Timoshkov
+ * Copyright 2007,2016 Dmitry Timoshkov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -728,9 +728,91 @@ static void test_DrawState(void)
     DestroyWindow(hwnd);
 }
 
+static void test_CharToOem_OemToChar(void)
+{
+    static const WCHAR helloWorldW[] = {'H','e','l','l','o',' ','W','o','r','l','d',0};
+    static const WCHAR emptyW[] = {0};
+    static const char helloWorld[] = "Hello World";
+    static const struct
+    {
+        BOOL src, dst, ret;
+    }
+    tests[] =
+    {
+        { FALSE, FALSE, FALSE },
+        { TRUE,  FALSE, FALSE },
+        { FALSE, TRUE,  FALSE },
+        { TRUE,  TRUE,  TRUE  },
+    };
+    BOOL ret;
+    int i;
+
+    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++)
+    {
+        const char *expected = tests[i].ret ? helloWorld : "";
+        const char *src = tests[i].src ? helloWorld : NULL;
+        char buf[64], *dst = tests[i].dst ? buf : NULL;
+
+        memset(buf, 0, sizeof(buf));
+        ret = CharToOemA(src, dst);
+        ok(ret == tests[i].ret, "test %d: expected %d, got %d\n", i, tests[i].ret, ret);
+        ok(!strcmp(buf, expected), "test %d: got '%s'\n", i, buf);
+
+        memset(buf, 0, sizeof(buf));
+        ret = CharToOemBuffA(src, dst, sizeof(helloWorld));
+        ok(ret == tests[i].ret, "test %d: expected %d, got %d\n", i, tests[i].ret, ret);
+        ok(!strcmp(buf, expected), "test %d: got '%s'\n", i, buf);
+
+        memset(buf, 0, sizeof(buf));
+        ret = OemToCharA(src, dst);
+        ok(ret == tests[i].ret, "test %d: expected %d, got %d\n", i, tests[i].ret, ret);
+        ok(!strcmp(buf, expected), "test %d: got '%s'\n", i, buf);
+
+        memset(buf, 0, sizeof(buf));
+        ret = OemToCharBuffA(src, dst, sizeof(helloWorld));
+        ok(ret == tests[i].ret, "test %d: expected %d, got %d\n", i, tests[i].ret, ret);
+        ok(!strcmp(buf, expected), "test %d: got '%s'\n", i, buf);
+    }
+
+    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++)
+    {
+        const char *expected = tests[i].ret ? helloWorld : "";
+        const WCHAR *src = tests[i].src ? helloWorldW : NULL;
+        char buf[64], *dst = tests[i].dst ? buf : NULL;
+
+        memset(buf, 0, sizeof(buf));
+        ret = CharToOemW(src, dst);
+        ok(ret == tests[i].ret, "test %d: expected %d, got %d\n", i, tests[i].ret, ret);
+        ok(!strcmp(buf, expected), "test %d: got '%s'\n", i, buf);
+
+        memset(buf, 0, sizeof(buf));
+        ret = CharToOemBuffW(src, dst, sizeof(helloWorldW)/sizeof(WCHAR));
+        ok(ret == tests[i].ret, "test %d: expected %d, got %d\n", i, tests[i].ret, ret);
+        ok(!strcmp(buf, expected), "test %d: got '%s'\n", i, buf);
+    }
+
+    for (i = 0; i < sizeof(tests)/sizeof(tests[0]); i++)
+    {
+        const WCHAR *expected = tests[i].ret ? helloWorldW : emptyW;
+        const char *src = tests[i].src ? helloWorld : NULL;
+        WCHAR buf[64], *dst = tests[i].dst ? buf : NULL;
+
+        memset(buf, 0, sizeof(buf));
+        ret = OemToCharW(src, dst);
+        ok(ret == tests[i].ret, "test %d: expected %d, got %d\n", i, tests[i].ret, ret);
+        ok(!lstrcmpW(buf, expected), "test %d: got '%s'\n", i, wine_dbgstr_w(buf));
+
+        memset(buf, 0, sizeof(buf));
+        ret = OemToCharBuffW(src, dst, sizeof(helloWorld));
+        ok(ret == tests[i].ret, "test %d: expected %d, got %d\n", i, tests[i].ret, ret);
+        ok(!lstrcmpW(buf, expected), "test %d: got '%s'\n", i, wine_dbgstr_w(buf));
+    }
+}
+
 START_TEST(text)
 {
     test_TabbedText();
     test_DrawTextCalcRect();
     test_DrawState();
+    test_CharToOem_OemToChar();
 }

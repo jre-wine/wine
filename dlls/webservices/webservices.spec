@@ -8,7 +8,7 @@
 @ stub WsAddCustomHeader
 @ stub WsAddErrorString
 @ stub WsAddMappedHeader
-@ stub WsAddressMessage
+@ stdcall WsAddressMessage(ptr ptr ptr)
 @ stdcall WsAlloc(ptr long ptr ptr)
 @ stub WsAsyncExecute
 @ stdcall WsCall(ptr ptr ptr ptr ptr long ptr ptr)
@@ -19,7 +19,7 @@
 @ stdcall WsCloseServiceProxy(ptr ptr ptr)
 @ stub WsCombineUrl
 @ stub WsCopyError
-@ stub WsCopyNode
+@ stdcall WsCopyNode(ptr ptr ptr)
 @ stdcall WsCreateChannel(long long ptr long ptr ptr ptr)
 @ stub WsCreateChannelForListener
 @ stdcall WsCreateError(ptr long ptr)
@@ -27,7 +27,7 @@
 @ stdcall WsCreateHeap(long long ptr long ptr ptr)
 @ stub WsCreateListener
 @ stdcall WsCreateMessage(long long ptr long ptr ptr)
-@ stub WsCreateMessageForChannel
+@ stdcall WsCreateMessageForChannel(ptr ptr long ptr ptr)
 @ stub WsCreateMetadata
 @ stdcall WsCreateReader(ptr long ptr ptr)
 @ stub WsCreateServiceEndpointFromTemplate
@@ -81,7 +81,7 @@
 @ stub WsGetPolicyProperty
 @ stdcall WsGetPrefixFromNamespace(ptr ptr long ptr ptr)
 @ stdcall WsGetReaderNode(ptr ptr ptr)
-@ stub WsGetReaderPosition
+@ stdcall WsGetReaderPosition(ptr ptr ptr)
 @ stdcall WsGetReaderProperty(ptr long ptr long ptr)
 @ stub WsGetSecurityContextProperty
 @ stub WsGetSecurityTokenProperty
@@ -90,7 +90,7 @@
 @ stdcall WsGetWriterPosition(ptr ptr ptr)
 @ stdcall WsGetWriterProperty(ptr long ptr long ptr)
 @ stdcall WsGetXmlAttribute(ptr ptr ptr ptr ptr ptr)
-@ stub WsInitializeMessage
+@ stdcall WsInitializeMessage(ptr long ptr ptr)
 @ stub WsMarkHeaderAsUnderstood
 @ stub WsMatchPolicyAlternative
 @ stdcall WsMoveReader(ptr long ptr ptr)
@@ -156,7 +156,7 @@
 @ stdcall WsSetMessageProperty(ptr long ptr long ptr)
 @ stdcall WsSetOutput(ptr ptr ptr ptr long ptr)
 @ stdcall WsSetOutputToBuffer(ptr ptr ptr long ptr)
-@ stub WsSetReaderPosition
+@ stdcall WsSetReaderPosition(ptr ptr ptr)
 @ stdcall WsSetWriterPosition(ptr ptr ptr)
 @ stub WsShutdownSessionChannel
 @ stub WsSkipNode
@@ -166,7 +166,7 @@
 @ stub WsVerifyXmlNCName
 @ stub WsWriteArray
 @ stdcall WsWriteAttribute(ptr ptr long ptr long ptr)
-@ stub WsWriteBody
+@ stdcall WsWriteBody(ptr ptr long ptr long ptr)
 @ stub WsWriteBytes
 @ stub WsWriteChars
 @ stub WsWriteCharsUtf8
@@ -175,11 +175,11 @@
 @ stdcall WsWriteEndCData(ptr ptr)
 @ stdcall WsWriteEndElement(ptr ptr)
 @ stdcall WsWriteEndStartElement(ptr ptr)
-@ stub WsWriteEnvelopeEnd
-@ stub WsWriteEnvelopeStart
+@ stdcall WsWriteEnvelopeEnd(ptr ptr)
+@ stdcall WsWriteEnvelopeStart(ptr ptr ptr ptr ptr)
 @ stub WsWriteMessageEnd
 @ stub WsWriteMessageStart
-@ stub WsWriteNode
+@ stdcall WsWriteNode(ptr ptr ptr)
 @ stub WsWriteQualifiedName
 @ stdcall WsWriteStartAttribute(ptr ptr ptr ptr long ptr)
 @ stdcall WsWriteStartCData(ptr ptr)

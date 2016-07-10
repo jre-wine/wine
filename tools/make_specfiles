@@ -73,18 +73,6 @@ my @dll_groups =
   "msvcp120_app",
  ],
  [
-  "d3dx9_36",
-  "d3dx9_43",
-  "d3dx9_42",
-  "d3dx9_41",
-  "d3dx9_40",
-  "d3dx9_39",
-  "d3dx9_38",
-  "d3dx9_37",
-  "d3dx9_35",
-  "d3dx9_34",
- ],
- [
   "d3dx10_43",
   "d3dx10_42",
   "d3dx10_41",
@@ -275,21 +263,17 @@ foreach my $arg (@ARGV)
     elsif ($arg eq "-d") { $show_duplicates = 1; }
 }
 
-sub update_file($)
+# update a file if changed
+sub update_file($$)
 {
     my $file = shift;
-    my $ret = !(-f $file) || system "cmp $file $file.new >/dev/null";
-    if (!$ret)
-    {
-        unlink "$file.new";
-    }
-    else
-    {
-        #system "diff -u $file $file.new";
-        rename "$file.new", "$file";
-        print "$file updated\n";
-    }
-    return $ret;
+    my $new = shift;
+
+    open FILE, ">$file.new" or die "cannot create $file.new";
+    print FILE $new;
+    close FILE;
+    rename "$file.new", "$file";
+    print "$file updated\n";
 }
 
 # parse a spec file line
@@ -331,11 +315,12 @@ sub update_spec_file($)
     my $name = shift;
     my $file = "dlls/$name/$name.spec";
     my %stubs;
+    my ($old, $new);
 
     open SPEC, "<$file" or die "cannot open $file";
-    open NEW, ">$file.new" or die "cannot create $file.new";
     while (<SPEC>)
     {
+        $old .= $_;
         chomp;
 
         my $commented_out = 0;
@@ -401,11 +386,10 @@ sub update_spec_file($)
         $_ .= $descr{comment} || "";
 
       done:
-        print NEW "$_\n";
+        $new .= "$_\n";
     }
     close SPEC;
-    close NEW;
-    update_file( $file );
+    update_file( $file, $new ) if $old ne $new;
 }
 
 sub sync_spec_files(@)

@@ -299,6 +299,7 @@ extern HGDIOBJ alloc_gdi_handle( void *obj, WORD type, const struct gdi_obj_func
 extern void *free_gdi_handle( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern HGDIOBJ get_full_gdi_handle( HGDIOBJ handle ) DECLSPEC_HIDDEN;
 extern void *GDI_GetObjPtr( HGDIOBJ, WORD ) DECLSPEC_HIDDEN;
+extern void *get_any_obj_ptr( HGDIOBJ, WORD * ) DECLSPEC_HIDDEN;
 extern void GDI_ReleaseObj( HGDIOBJ ) DECLSPEC_HIDDEN;
 extern void GDI_CheckNotLock(void) DECLSPEC_HIDDEN;
 extern UINT GDI_get_ref_count( HGDIOBJ handle ) DECLSPEC_HIDDEN;
@@ -368,6 +369,39 @@ static inline const WINEREGION *get_wine_region(HRGN rgn)
 static inline void release_wine_region(HRGN rgn)
 {
     GDI_ReleaseObj(rgn);
+}
+
+/**********************************************************
+ *     region_find_pt
+ *
+ * Return either the index of the rectangle that contains (x,y) or the first
+ * rectangle after it.  Sets *hit to TRUE if the region contains (x,y).
+ * Note if (x,y) follows all rectangles, then the return value will be rgn->numRects.
+ */
+static inline int region_find_pt( const WINEREGION *rgn, int x, int y, BOOL *hit )
+{
+    int i, start = 0, end = rgn->numRects - 1;
+    BOOL h = FALSE;
+
+    while (start <= end)
+    {
+        i = (start + end) / 2;
+
+        if (rgn->rects[i].bottom <= y ||
+            (rgn->rects[i].top <= y && rgn->rects[i].right <= x))
+            start = i + 1;
+        else if (rgn->rects[i].top > y ||
+                 (rgn->rects[i].bottom > y && rgn->rects[i].left > x))
+            end = i - 1;
+        else
+        {
+            h = TRUE;
+            break;
+        }
+    }
+
+    if (hit) *hit = h;
+    return h ? i : start;
 }
 
 /* null driver entry points */

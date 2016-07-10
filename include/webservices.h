@@ -73,7 +73,6 @@ typedef struct _WS_CUSTOM_HTTP_PROXY WS_CUSTOM_HTTP_PROXY;
 typedef struct _WS_HTTP_MESSAGE_MAPPING WS_HTTP_MESSAGE_MAPPING;
 typedef struct _WS_HTTP_HEADER_MAPPING WS_HTTP_HEADER_MAPPING;
 typedef struct _WS_HTTP_REDIRECT_CALLBACK_CONTEXT WS_HTTP_REDIRECT_CALLBACK_CONTEXT;
-typedef struct _WS_XML_NODE_POSITION WS_XML_NODE_POSITION;
 
 struct _WS_STRUCT_DESCRIPTION;
 struct _WS_XML_STRING;
@@ -551,6 +550,47 @@ typedef struct _WS_XML_UTF8_TEXT {
     WS_XML_TEXT text;
     WS_XML_STRING value;
 } WS_XML_UTF8_TEXT;
+
+typedef struct _WS_XML_UTF16_TEXT {
+    WS_XML_TEXT text;
+    BYTE *bytes;
+    ULONG byteCount;
+} WS_XML_UTF16_TEXT;
+
+typedef struct _WS_XML_BOOL_TEXT {
+    WS_XML_TEXT text;
+    BOOL value;
+} WS_XML_BOOL_TEXT;
+
+typedef struct _WS_XML_INT32_TEXT {
+    WS_XML_TEXT text;
+    __int32 value;
+} WS_XML_INT32_TEXT;
+
+typedef struct _WS_XML_INT64_TEXT {
+    WS_XML_TEXT text;
+    __int64 value;
+} WS_XML_INT64_TEXT;
+
+typedef struct _WS_XML_UINT64_TEXT {
+    WS_XML_TEXT text;
+    unsigned __int64 value;
+} WS_XML_UINT64_TEXT;
+
+typedef struct _WS_XML_DOUBLE_TEXT {
+    WS_XML_TEXT text;
+    double value;
+} WS_XML_DOUBLE_TEXT;
+
+typedef struct _WS_XML_GUID_TEXT {
+    WS_XML_TEXT text;
+    GUID value;
+} WS_XML_GUID_TEXT;
+
+typedef struct _WS_XML_UNIQUE_ID_TEXT {
+    WS_XML_TEXT text;
+    GUID value;
+} WS_XML_UNIQUE_ID_TEXT;
 
 typedef enum {
     WS_BOOL_VALUE_TYPE,
@@ -1399,6 +1439,7 @@ HRESULT WINAPI WsWriteEnvelopeEnd(WS_MESSAGE*, WS_ERROR*);
 HRESULT WINAPI WsWriteEnvelopeStart(WS_MESSAGE*, WS_XML_WRITER*, WS_MESSAGE_DONE_CALLBACK, void*, WS_ERROR*);
 HRESULT WINAPI WsWriteMessageStart(WS_CHANNEL*, WS_MESSAGE*, const WS_ASYNC_CONTEXT*, WS_ERROR*);
 HRESULT WINAPI WsWriteMessageEnd(WS_CHANNEL*, WS_MESSAGE*, const WS_ASYNC_CONTEXT*, WS_ERROR*);
+HRESULT WINAPI WsWriteNode(WS_XML_WRITER*, const WS_XML_NODE*, WS_ERROR*);
 HRESULT WINAPI WsWriteStartAttribute(WS_XML_WRITER*, const WS_XML_STRING*, const WS_XML_STRING*,
                                      const WS_XML_STRING*, BOOL, WS_ERROR*);
 HRESULT WINAPI WsWriteStartCData(WS_XML_WRITER*, WS_ERROR*);

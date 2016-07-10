@@ -57,6 +57,7 @@ const char *debug_float4(const float *values) DECLSPEC_HIDDEN;
 
 DXGI_FORMAT dxgi_format_from_wined3dformat(enum wined3d_format_id format) DECLSPEC_HIDDEN;
 enum wined3d_format_id wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
+unsigned int wined3d_getdata_flags_from_d3d11_async_getdata_flags(unsigned int d3d11_flags) DECLSPEC_HIDDEN;
 DWORD wined3d_usage_from_d3d11(UINT bind_flags, enum D3D11_USAGE usage) DECLSPEC_HIDDEN;
 struct wined3d_resource *wined3d_resource_from_d3d11_resource(ID3D11Resource *resource) DECLSPEC_HIDDEN;
 struct wined3d_resource *wined3d_resource_from_d3d10_resource(ID3D10Resource *resource) DECLSPEC_HIDDEN;
@@ -220,6 +221,22 @@ struct d3d_shader_resource_view *unsafe_impl_from_ID3D11ShaderResourceView(
 struct d3d_shader_resource_view *unsafe_impl_from_ID3D10ShaderResourceView(
         ID3D10ShaderResourceView *iface) DECLSPEC_HIDDEN;
 
+/* ID3D11UnorderedAccessView */
+struct d3d11_unordered_access_view
+{
+    ID3D11UnorderedAccessView ID3D11UnorderedAccessView_iface;
+    LONG refcount;
+
+    struct wined3d_private_store private_store;
+    struct wined3d_unordered_access_view *wined3d_view;
+    D3D11_UNORDERED_ACCESS_VIEW_DESC desc;
+    ID3D11Resource *resource;
+    ID3D11Device *device;
+};
+
+HRESULT d3d11_unordered_access_view_create(struct d3d_device *device, ID3D11Resource *resource,
+        const D3D11_UNORDERED_ACCESS_VIEW_DESC *desc, struct d3d11_unordered_access_view **view) DECLSPEC_HIDDEN;
+
 /* ID3D11InputLayout, ID3D10InputLayout */
 struct d3d_input_layout
 {
@@ -359,6 +376,11 @@ struct d3d_blend_state
     ID3D11Device *device;
 };
 
+static inline struct d3d_blend_state *impl_from_ID3D11BlendState(ID3D11BlendState *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d_blend_state, ID3D11BlendState_iface);
+}
+
 HRESULT d3d_blend_state_init(struct d3d_blend_state *state, struct d3d_device *device,
         const D3D11_BLEND_DESC *desc) DECLSPEC_HIDDEN;
 struct d3d_blend_state *unsafe_impl_from_ID3D11BlendState(ID3D11BlendState *iface) DECLSPEC_HIDDEN;
@@ -376,6 +398,11 @@ struct d3d_depthstencil_state
     struct wine_rb_entry entry;
     ID3D11Device *device;
 };
+
+static inline struct d3d_depthstencil_state *impl_from_ID3D11DepthStencilState(ID3D11DepthStencilState *iface)
+{
+    return CONTAINING_RECORD(iface, struct d3d_depthstencil_state, ID3D11DepthStencilState_iface);
+}
 
 HRESULT d3d_depthstencil_state_init(struct d3d_depthstencil_state *state, struct d3d_device *device,
         const D3D11_DEPTH_STENCIL_DESC *desc) DECLSPEC_HIDDEN;
@@ -438,6 +465,7 @@ HRESULT d3d_query_create(struct d3d_device *device, const D3D11_QUERY_DESC *desc
         struct d3d_query **query) DECLSPEC_HIDDEN;
 struct d3d_query *unsafe_impl_from_ID3D11Query(ID3D11Query *iface) DECLSPEC_HIDDEN;
 struct d3d_query *unsafe_impl_from_ID3D10Query(ID3D10Query *iface) DECLSPEC_HIDDEN;
+struct d3d_query *unsafe_impl_from_ID3D11Asynchronous(ID3D11Asynchronous *iface) DECLSPEC_HIDDEN;
 
 /* ID3D11DeviceContext - immediate context */
 struct d3d11_immediate_context

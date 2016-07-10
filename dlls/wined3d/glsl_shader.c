@@ -559,6 +559,26 @@ static void shader_glsl_load_samplers(const struct wined3d_gl_info *gl_info,
     string_buffer_release(&priv->string_buffers, sampler_name);
 }
 
+static void shader_glsl_load_icb(const struct wined3d_gl_info *gl_info, struct shader_glsl_priv *priv,
+        GLuint program_id, const struct wined3d_shader_reg_maps *reg_maps)
+{
+    const struct wined3d_shader_immediate_constant_buffer *icb = reg_maps->icb;
+
+    if (icb)
+    {
+        struct wined3d_string_buffer *icb_name = string_buffer_get(&priv->string_buffers);
+        const char *prefix = shader_glsl_get_prefix(reg_maps->shader_version.type);
+        GLint icb_location;
+
+        string_buffer_sprintf(icb_name, "%s_icb", prefix);
+        icb_location = GL_EXTCALL(glGetUniformLocation(program_id, icb_name->buffer));
+        GL_EXTCALL(glUniform4fv(icb_location, icb->vec4_count, (const GLfloat *)icb->data));
+        checkGLcall("Load immediate constant buffer");
+
+        string_buffer_release(&priv->string_buffers, icb_name);
+    }
+}
+
 /* Context activation is done by the caller. */
 static inline void walk_constant_heap(const struct wined3d_gl_info *gl_info, const struct wined3d_vec4 *constants,
         const GLint *constant_locations, const struct constant_heap *heap, unsigned char *stack, DWORD version)
@@ -1796,6 +1816,7 @@ static void shader_generate_glsl_declarations(const struct wined3d_context *cont
     const struct vs_compile_args *vs_args = ctx_priv->cur_vs_args;
     const struct ps_compile_args *ps_args = ctx_priv->cur_ps_args;
     const struct wined3d_gl_info *gl_info = context->gl_info;
+    const struct wined3d_shader_indexable_temp *idx_temp_reg;
     unsigned int i, extra_constants_needed = 0;
     const struct wined3d_shader_lconst *lconst;
     const char *prefix;
@@ -1891,6 +1912,11 @@ static void shader_generate_glsl_declarations(const struct wined3d_context *cont
     if (shader->limits->constant_bool > 0 && reg_maps->boolean_constants)
         shader_addline(buffer, "uniform bool %s_b[%u];\n", prefix, shader->limits->constant_bool);
 
+    /* Declare immediate constant buffer */
+    if (reg_maps->icb)
+        shader_addline(buffer, "uniform vec4 %s_icb[%u];\n", prefix, reg_maps->icb->vec4_count);
+
+    /* Declare constant buffers */
     for (i = 0; i < WINED3D_MAX_CBS; ++i)
     {
         if (reg_maps->cb_sizes[i])
@@ -2167,9 +2193,26 @@ static void shader_generate_glsl_declarations(const struct wined3d_context *cont
         shader_addline(buffer, "vec4 %s_out[%u];\n", prefix, shader->limits->packed_output);
 
     /* Declare temporary variables */
-    for (i = 0, map = reg_maps->temporary; map; map >>= 1, ++i)
+    if (reg_maps->temporary_count)
     {
-        if (map & 1) shader_addline(buffer, "vec4 R%u;\n", i);
+        for (i = 0; i < reg_maps->temporary_count; ++i)
+            shader_addline(buffer, "vec4 R%u;\n", i);
+    }
+    else
+    {
+        for (i = 0, map = reg_maps->temporary; map; map >>= 1, ++i)
+        {
+            if (map & 1)
+                shader_addline(buffer, "vec4 R%u;\n", i);
+        }
+    }
+
+    /* Declare indexable temporary variables */
+    LIST_FOR_EACH_ENTRY(idx_temp_reg, &reg_maps->indexable_temps, struct wined3d_shader_indexable_temp, entry)
+    {
+        if (idx_temp_reg->component_count != 4)
+            FIXME("Ignoring component count %u.\n", idx_temp_reg->component_count);
+        shader_addline(buffer, "vec4 X%u[%u];\n", idx_temp_reg->register_idx, idx_temp_reg->register_size);
     }
 
     /* Declare loop registers aLx */
@@ -2573,6 +2616,13 @@ static void shader_glsl_get_register_name(const struct wined3d_shader_register *
 
         case WINED3DSPR_PRIMID:
             sprintf(register_name, "uint(gl_PrimitiveIDIn)");
+            break;
+
+        case WINED3DSPR_IDXTEMP:
+            if (reg->idx[1].rel_addr)
+                sprintf(register_name, "X%u[%s + %u]", reg->idx[0].offset, rel_param1.param_str, reg->idx[1].offset);
+            else
+                sprintf(register_name, "X%u[%u]", reg->idx[0].offset, reg->idx[1].offset);
             break;
 
         default:
@@ -3412,7 +3462,12 @@ static void shader_glsl_cross(const struct wined3d_shader_instruction *ins)
 
 static void shader_glsl_cut(const struct wined3d_shader_instruction *ins)
 {
-    shader_addline(ins->ctx->buffer, "EndPrimitive();\n");
+    unsigned int stream = ins->handler_idx == WINED3DSIH_CUT ? 0 : ins->src[0].reg.idx[0].offset;
+
+    if (!stream)
+        shader_addline(ins->ctx->buffer, "EndPrimitive();\n");
+    else
+        FIXME("Unhandled primitive stream %u.\n", stream);
 }
 
 /* Process the WINED3DSIO_POW instruction in GLSL (dst = |src0|^src1)
@@ -4282,9 +4337,15 @@ static void shader_glsl_else(const struct wined3d_shader_instruction *ins)
 
 static void shader_glsl_emit(const struct wined3d_shader_instruction *ins)
 {
+    unsigned int stream = ins->handler_idx == WINED3DSIH_EMIT ? 0 : ins->src[0].reg.idx[0].offset;
+
     shader_addline(ins->ctx->buffer, "setup_gs_output(gs_out);\n");
     shader_glsl_fixup_position(ins->ctx->buffer);
-    shader_addline(ins->ctx->buffer, "EmitVertex();\n");
+
+    if (!stream)
+        shader_addline(ins->ctx->buffer, "EmitVertex();\n");
+    else
+        FIXME("Unhandled primitive stream %u.\n", stream);
 }
 
 static void shader_glsl_break(const struct wined3d_shader_instruction *ins)
@@ -4312,6 +4373,11 @@ static void shader_glsl_breakp(const struct wined3d_shader_instruction *ins)
 
     shader_glsl_add_src_param(ins, &ins->src[0], WINED3DSP_WRITEMASK_0, &src_param);
     shader_addline(ins->ctx->buffer, "if (%s(%s)) break;\n", condition, src_param.param_str);
+}
+
+static void shader_glsl_continue(const struct wined3d_shader_instruction *ins)
+{
+    shader_addline(ins->ctx->buffer, "continue;\n");
 }
 
 static void shader_glsl_label(const struct wined3d_shader_instruction *ins)
@@ -7822,6 +7888,7 @@ static void set_glsl_shader_program(const struct wined3d_context *context, const
             entry->constant_update_mask |= WINED3D_SHADER_CONST_POS_FIXUP;
 
         shader_glsl_init_uniform_block_bindings(gl_info, priv, program_id, &vshader->reg_maps);
+        shader_glsl_load_icb(gl_info, priv, program_id, &vshader->reg_maps);
     }
     else
     {
@@ -7862,6 +7929,7 @@ static void set_glsl_shader_program(const struct wined3d_context *context, const
     {
         entry->constant_update_mask |= WINED3D_SHADER_CONST_POS_FIXUP;
         shader_glsl_init_uniform_block_bindings(gl_info, priv, program_id, &gshader->reg_maps);
+        shader_glsl_load_icb(gl_info, priv, program_id, &gshader->reg_maps);
     }
 
     if (ps_id)
@@ -7877,6 +7945,7 @@ static void set_glsl_shader_program(const struct wined3d_context *context, const
                 entry->constant_update_mask |= WINED3D_SHADER_CONST_PS_Y_CORR;
 
             shader_glsl_init_uniform_block_bindings(gl_info, priv, program_id, &pshader->reg_maps);
+            shader_glsl_load_icb(gl_info, priv, program_id, &pshader->reg_maps);
         }
         else
         {
@@ -8551,6 +8620,7 @@ static const SHADER_HANDLER shader_glsl_instruction_handler_table[WINED3DSIH_TAB
     /* WINED3DSIH_AND                              */ shader_glsl_binop,
     /* WINED3DSIH_BEM                              */ shader_glsl_bem,
     /* WINED3DSIH_BFI                              */ NULL,
+    /* WINED3DSIH_BFREV                            */ NULL,
     /* WINED3DSIH_BREAK                            */ shader_glsl_break,
     /* WINED3DSIH_BREAKC                           */ shader_glsl_breakc,
     /* WINED3DSIH_BREAKP                           */ shader_glsl_breakp,
@@ -8560,15 +8630,17 @@ static const SHADER_HANDLER shader_glsl_instruction_handler_table[WINED3DSIH_TAB
     /* WINED3DSIH_CASE                             */ shader_glsl_case,
     /* WINED3DSIH_CMP                              */ shader_glsl_conditional_move,
     /* WINED3DSIH_CND                              */ shader_glsl_cnd,
+    /* WINED3DSIH_CONTINUE                         */ shader_glsl_continue,
     /* WINED3DSIH_CRS                              */ shader_glsl_cross,
     /* WINED3DSIH_CUT                              */ shader_glsl_cut,
+    /* WINED3DSIH_CUT_STREAM                       */ shader_glsl_cut,
     /* WINED3DSIH_DCL                              */ shader_glsl_nop,
     /* WINED3DSIH_DCL_CONSTANT_BUFFER              */ shader_glsl_nop,
     /* WINED3DSIH_DCL_GLOBAL_FLAGS                 */ shader_glsl_nop,
     /* WINED3DSIH_DCL_HS_FORK_PHASE_INSTANCE_COUNT */ NULL,
     /* WINED3DSIH_DCL_HS_MAX_TESSFACTOR            */ NULL,
-    /* WINED3DSIH_DCL_IMMEDIATE_CONSTANT_BUFFER    */ NULL,
-    /* WINED3DSIH_DCL_INDEXABLE_TEMP               */ NULL,
+    /* WINED3DSIH_DCL_IMMEDIATE_CONSTANT_BUFFER    */ shader_glsl_nop,
+    /* WINED3DSIH_DCL_INDEXABLE_TEMP               */ shader_glsl_nop,
     /* WINED3DSIH_DCL_INPUT                        */ shader_glsl_nop,
     /* WINED3DSIH_DCL_INPUT_CONTROL_POINT_COUNT    */ NULL,
     /* WINED3DSIH_DCL_INPUT_PRIMITIVE              */ shader_glsl_nop,
@@ -8583,6 +8655,7 @@ static const SHADER_HANDLER shader_glsl_instruction_handler_table[WINED3DSIH_TAB
     /* WINED3DSIH_DCL_OUTPUT_TOPOLOGY              */ shader_glsl_nop,
     /* WINED3DSIH_DCL_RESOURCE_STRUCTURED          */ NULL,
     /* WINED3DSIH_DCL_SAMPLER                      */ shader_glsl_nop,
+    /* WINED3DSIH_DCL_STREAM                       */ NULL,
     /* WINED3DSIH_DCL_TEMPS                        */ shader_glsl_nop,
     /* WINED3DSIH_DCL_TESSELLATOR_DOMAIN           */ NULL,
     /* WINED3DSIH_DCL_TESSELLATOR_OUTPUT_PRIMITIVE */ NULL,
@@ -8610,6 +8683,7 @@ static const SHADER_HANDLER shader_glsl_instruction_handler_table[WINED3DSIH_TAB
     /* WINED3DSIH_DSY_FINE                         */ NULL,
     /* WINED3DSIH_ELSE                             */ shader_glsl_else,
     /* WINED3DSIH_EMIT                             */ shader_glsl_emit,
+    /* WINED3DSIH_EMIT_STREAM                      */ shader_glsl_emit,
     /* WINED3DSIH_ENDIF                            */ shader_glsl_end,
     /* WINED3DSIH_ENDLOOP                          */ shader_glsl_end,
     /* WINED3DSIH_ENDREP                           */ shader_glsl_end,
@@ -8700,6 +8774,7 @@ static const SHADER_HANDLER shader_glsl_instruction_handler_table[WINED3DSIH_TAB
     /* WINED3DSIH_STORE_STRUCTURED                 */ NULL,
     /* WINED3DSIH_STORE_UAV_TYPED                  */ NULL,
     /* WINED3DSIH_SUB                              */ shader_glsl_binop,
+    /* WINED3DSIH_SWAPC                            */ NULL,
     /* WINED3DSIH_SWITCH                           */ shader_glsl_switch,
     /* WINED3DSIH_TEX                              */ shader_glsl_tex,
     /* WINED3DSIH_TEXBEM                           */ shader_glsl_texbem,

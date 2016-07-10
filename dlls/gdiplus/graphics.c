@@ -4379,10 +4379,13 @@ GpStatus WINGDIPAPI GdipGraphicsClear(GpGraphics *graphics, ARGB color)
     if(graphics->busy)
         return ObjectBusy;
 
+    if (graphics->image && graphics->image->type == ImageTypeMetafile)
+        return METAFILE_GraphicsClear((GpMetafile*)graphics->image, color);
+
     if((stat = GdipCreateSolidFill(color, &brush)) != Ok)
         return stat;
 
-    if((stat = get_graphics_bounds(graphics, &wnd_rect)) != Ok){
+    if((stat = GdipGetVisibleClipBounds(graphics, &wnd_rect)) != Ok){
         GdipDeleteBrush((GpBrush*)brush);
         return stat;
     }

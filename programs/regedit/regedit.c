@@ -18,84 +18,112 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
+#include <shellapi.h>
+#include "wine/unicode.h"
+#include "wine/debug.h"
 #include "regproc.h"
+#include "resource.h"
 
-static const char *usage =
-    "Usage:\n"
-    "    regedit filename\n"
-    "    regedit /E filename [regpath]\n"
-    "    regedit /D regpath\n"
-    "\n"
-    "filename - registry file name\n"
-    "regpath - name of the registry key\n"
-    "\n"
-    "When called without any switches, adds the content of the specified\n"
-    "file to the registry\n"
-    "\n"
-    "Switches:\n"
-    "    /E - exports contents of the specified registry key to the specified\n"
-    "	file. Exports the whole registry if no key is specified.\n"
-    "    /D - deletes specified registry key\n"
-    "    /S - silent execution, can be used with any other switch.\n"
-    "	Default. The only existing mode, exists for compatibility with Windows regedit.\n"
-    "    /V - advanced mode, can be used with any other switch.\n"
-    "	Ignored, exists for compatibility with Windows regedit.\n"
-    "    /L - location of system.dat file. Can be used with any other switch.\n"
-    "	Ignored. Exists for compatibility with Windows regedit.\n"
-    "    /R - location of user.dat file. Can be used with any other switch.\n"
-    "	Ignored. Exists for compatibility with Windows regedit.\n"
-    "    /? - print this help. Any other switches are ignored.\n"
-    "    /C - create registry from file. Not implemented.\n"
-    "\n"
-    "The switches are case-insensitive, can be prefixed either by '-' or '/'.\n"
-    "This program is command-line compatible with Microsoft Windows\n"
-    "regedit.\n";
+WINE_DEFAULT_DEBUG_CHANNEL(regedit);
+
+static void output_writeconsole(const WCHAR *str, DWORD wlen)
+{
+    DWORD count, ret;
+
+    ret = WriteConsoleW(GetStdHandle(STD_OUTPUT_HANDLE), str, wlen, &count, NULL);
+    if (!ret)
+    {
+        DWORD len;
+        char  *msgA;
+
+        /* WriteConsole() fails on Windows if its output is redirected. If this occurs,
+         * we should call WriteFile() and assume the console encoding is still correct.
+         */
+        len = WideCharToMultiByte(GetConsoleOutputCP(), 0, str, wlen, NULL, 0, NULL, NULL);
+        msgA = HeapAlloc(GetProcessHeap(), 0, len);
+        if (!msgA) return;
+
+        WideCharToMultiByte(GetConsoleOutputCP(), 0, str, wlen, msgA, len, NULL, NULL);
+        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), msgA, len, &count, FALSE);
+        HeapFree(GetProcessHeap(), 0, msgA);
+    }
+}
+
+static void output_formatstring(const WCHAR *fmt, __ms_va_list va_args)
+{
+    WCHAR *str;
+    DWORD len;
+
+    SetLastError(NO_ERROR);
+    len = FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ALLOCATE_BUFFER,
+                         fmt, 0, 0, (WCHAR *)&str, 0, &va_args);
+    if (len == 0 && GetLastError() != NO_ERROR)
+    {
+        WINE_FIXME("Could not format string: le=%u, fmt=%s\n", GetLastError(), wine_dbgstr_w(fmt));
+        return;
+    }
+    output_writeconsole(str, len);
+    LocalFree(str);
+}
+
+static void __cdecl output_message(unsigned int id, ...)
+{
+    WCHAR fmt[1536];
+    __ms_va_list va_args;
+
+    if (!LoadStringW(GetModuleHandleW(NULL), id, fmt, sizeof(fmt)/sizeof(*fmt)))
+    {
+        WINE_FIXME("LoadString failed with %d\n", GetLastError());
+        return;
+    }
+    __ms_va_start(va_args, id);
+    output_formatstring(fmt, va_args);
+    __ms_va_end(va_args);
+}
 
 typedef enum {
     ACTION_ADD, ACTION_EXPORT, ACTION_DELETE
 } REGEDIT_ACTION;
 
-static BOOL PerformRegAction(REGEDIT_ACTION action, char **argv, int *i)
+static void PerformRegAction(REGEDIT_ACTION action, WCHAR **argv, int *i)
 {
     switch (action) {
     case ACTION_ADD: {
-            char *filename = argv[*i];
+            WCHAR *filename = argv[*i];
+            WCHAR hyphen[] = {'-',0};
             FILE *reg_file;
 
-            if (filename[0]) {
-                char* realname = NULL;
+            if (!strcmpW(filename, hyphen))
+                reg_file = stdin;
+            else
+            {
+                int size;
+                WCHAR *realname = NULL;
+                WCHAR rb_mode[] = {'r','b',0};
 
-                if (strcmp(filename, "-") == 0)
+                size = SearchPathW(NULL, filename, NULL, 0, NULL, NULL);
+                if (size > 0)
                 {
-                    reg_file = stdin;
+                    realname = HeapAlloc(GetProcessHeap(), 0, size * sizeof(WCHAR));
+                    size = SearchPathW(NULL, filename, NULL, size, realname, NULL);
                 }
-                else
+                if (size == 0)
                 {
-                    int size;
-
-                    size = SearchPathA(NULL, filename, NULL, 0, NULL, NULL);
-                    if (size > 0)
-                    {
-                        realname = HeapAlloc(GetProcessHeap(), 0, size);
-                        size = SearchPathA(NULL, filename, NULL, size, realname, NULL);
-                    }
-                    if (size == 0)
-                    {
-                        fprintf(stderr, "regedit: File not found \"%s\" (%d)\n",
-                                filename, GetLastError());
-                        exit(1);
-                    }
-                    reg_file = fopen(realname, "rb");
-                    if (reg_file == NULL)
-                    {
-                        perror("");
-                        fprintf(stderr, "regedit: Can't open file \"%s\"\n", filename);
-                        exit(1);
-                    }
+                    output_message(STRING_FILE_NOT_FOUND, filename);
+                    HeapFree(GetProcessHeap(), 0, realname);
+                    return;
+                }
+                reg_file = _wfopen(realname, rb_mode);
+                if (reg_file == NULL)
+                {
+                    WCHAR regedit[] = {'r','e','g','e','d','i','t',0};
+                    _wperror(regedit);
+                    output_message(STRING_CANNOT_OPEN_FILE, filename);
+                    HeapFree(GetProcessHeap(), 0, realname);
+                    return;
                 }
                 import_registry_file(reg_file);
                 if (realname)
@@ -106,109 +134,44 @@ static BOOL PerformRegAction(REGEDIT_ACTION action, char **argv, int *i)
             }
             break;
         }
-    case ACTION_DELETE: {
-            WCHAR *reg_key_nameW = GetWideString(argv[*i]);
-
-            delete_registry_key(reg_key_nameW);
-            HeapFree(GetProcessHeap(), 0, reg_key_nameW);
+    case ACTION_DELETE:
+            delete_registry_key(argv[*i]);
             break;
-        }
     case ACTION_EXPORT: {
-            char *filename = argv[*i];
-            WCHAR* filenameW;
+            WCHAR *filename = argv[*i];
+            WCHAR *key_name = argv[++(*i)];
 
-            filenameW = GetWideString(filename);
-            if (filenameW[0]) {
-                char *reg_key_name = argv[++(*i)];
-                WCHAR* reg_key_nameW;
-
-                reg_key_nameW = GetWideString(reg_key_name);
-                export_registry_key(filenameW, reg_key_nameW, REG_FORMAT_4);
-                HeapFree(GetProcessHeap(), 0, reg_key_nameW);
-            } else {
-                export_registry_key(filenameW, NULL, REG_FORMAT_4);
-            }
-            HeapFree(GetProcessHeap(), 0, filenameW);
+            if (key_name && *key_name)
+                export_registry_key(filename, key_name, REG_FORMAT_4);
+            else
+                export_registry_key(filename, NULL, REG_FORMAT_4);
             break;
         }
     default:
-        fprintf(stderr, "regedit: Unhandled action!\n");
+        output_message(STRING_UNHANDLED_ACTION);
         exit(1);
         break;
     }
-    return TRUE;
 }
 
-char *get_token(char *input, char **next)
+BOOL ProcessCmdLine(WCHAR *cmdline)
 {
-    char *ch = input;
-    char *str;
-
-    while (*ch && isspace(*ch))
-        ch++;
-
-    str = ch;
-
-    if (*ch == '"') {
-        ch++;
-        str = ch;
-        for (;;) {
-            while (*ch && (*ch != '"'))
-                ch++;
-
-            if (!*ch)
-                break;
-
-            if (*(ch - 1) == '\\') {
-                ch++;
-                continue;
-            }
-            break;
-        }
-    }
-    else {
-        while (*ch && !isspace(*ch))
-            ch++;
-    }
-
-    if (*ch) {
-        *ch = 0;
-        ch++;
-    }
-
-    *next = ch;
-    return str;
-}
-
-BOOL ProcessCmdLine(LPSTR lpCmdLine)
-{
-    char *s = lpCmdLine;
-    char **argv;
-    char *tok;
-    int argc = 0, i = 1;
+    WCHAR **argv;
+    int argc, i;
     REGEDIT_ACTION action = ACTION_ADD;
 
-    if (!*lpCmdLine)
+    argv = CommandLineToArgvW(cmdline, &argc);
+
+    if (!argv)
         return FALSE;
 
-    while (*s) {
-        if (isspace(*s))
-            i++;
-        s++;
-    }
-
-    s = lpCmdLine;
-    argv = HeapAlloc(GetProcessHeap(), 0, i * sizeof(char *));
-
-    for (i = 0; *s; i++)
+    if (argc == 1)
     {
-        tok = get_token(s, &s);
-        argv[i] = HeapAlloc(GetProcessHeap(), 0, strlen(tok) + 1);
-        strcpy(argv[i], tok);
-        argc++;
+        LocalFree(argv);
+        return FALSE;
     }
 
-    for (i = 0; i < argc; i++)
+    for (i = 1; i < argc; i++)
     {
         if (argv[i][0] != '/' && argv[i][0] != '-')
             break; /* No flags specified. */
@@ -219,10 +182,10 @@ BOOL ProcessCmdLine(LPSTR lpCmdLine)
         if (argv[i][1] && argv[i][2] && argv[i][2] != ':')
             break; /* This is a file path beginning with '/'. */
 
-        switch (toupper(argv[i][1]))
+        switch (toupperW(argv[i][1]))
         {
         case '?':
-            fprintf(stderr, usage);
+            output_message(STRING_USAGE);
             exit(0);
             break;
         case 'D':
@@ -241,7 +204,8 @@ BOOL ProcessCmdLine(LPSTR lpCmdLine)
             /* ignored */;
             break;
         default:
-            fprintf(stderr, "regedit: Invalid switch [%ls]\n", argv[i]);
+            output_message(STRING_INVALID_SWITCH, argv[i]);
+            output_message(STRING_HELP);
             exit(1);
         }
     }
@@ -252,22 +216,20 @@ BOOL ProcessCmdLine(LPSTR lpCmdLine)
         {
         case ACTION_ADD:
         case ACTION_EXPORT:
-            fprintf(stderr, "regedit: No file name was specified\n\n");
+            output_message(STRING_NO_FILENAME);
             break;
         case ACTION_DELETE:
-            fprintf(stderr,"regedit: No registry key was specified for removal\n\n");
+            output_message(STRING_NO_REG_KEY);
             break;
         }
-        fprintf(stderr, usage);
+        output_message(STRING_HELP);
         exit(1);
     }
 
     for (; i < argc; i++)
         PerformRegAction(action, argv, &i);
 
-    for (i = 0; i < argc; i++)
-        HeapFree(GetProcessHeap(), 0, argv[i]);
-    HeapFree(GetProcessHeap(), 0, argv);
+    LocalFree(argv);
 
     return TRUE;
 }

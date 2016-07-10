@@ -86,6 +86,7 @@ extern GpStatus graphics_from_image(GpImage *image, GpGraphics **graphics) DECLS
 extern GpStatus METAFILE_GetGraphicsContext(GpMetafile* metafile, GpGraphics **result) DECLSPEC_HIDDEN;
 extern GpStatus METAFILE_GetDC(GpMetafile* metafile, HDC *hdc) DECLSPEC_HIDDEN;
 extern GpStatus METAFILE_ReleaseDC(GpMetafile* metafile, HDC hdc) DECLSPEC_HIDDEN;
+extern GpStatus METAFILE_GraphicsClear(GpMetafile* metafile, ARGB color) DECLSPEC_HIDDEN;
 extern GpStatus METAFILE_FillRectangles(GpMetafile* metafile, GpBrush* brush,
     GDIPCONST GpRectF* rects, INT count) DECLSPEC_HIDDEN;
 extern GpStatus METAFILE_SetPageTransform(GpMetafile* metafile, GpUnit unit, REAL scale) DECLSPEC_HIDDEN;
@@ -347,6 +348,8 @@ struct GpMetafile{
     DWORD comment_data_size;
     DWORD comment_data_length;
     IStream *record_stream;
+    BOOL auto_frame; /* If true, determine the frame automatically */
+    GpPointF auto_frame_min, auto_frame_max;
 
     /* playback */
     GpGraphics *playback_graphics;
@@ -358,6 +361,7 @@ struct GpMetafile{
     GpMatrix *world_transform;
     GpUnit page_unit;
     REAL page_scale;
+    GpRegion *base_clip; /* clip region in device space for all metafile output */
 };
 
 struct GpBitmap{

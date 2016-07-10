@@ -45,6 +45,7 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_AND                              */ "and",
     /* WINED3DSIH_BEM                              */ "bem",
     /* WINED3DSIH_BFI                              */ "bfi",
+    /* WINED3DSIH_BFREV                            */ "bfrev",
     /* WINED3DSIH_BREAK                            */ "break",
     /* WINED3DSIH_BREAKC                           */ "breakc",
     /* WINED3DSIH_BREAKP                           */ "breakp",
@@ -54,8 +55,10 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_CASE                             */ "case",
     /* WINED3DSIH_CMP                              */ "cmp",
     /* WINED3DSIH_CND                              */ "cnd",
+    /* WINED3DSIH_CONTINUE                         */ "continue",
     /* WINED3DSIH_CRS                              */ "crs",
     /* WINED3DSIH_CUT                              */ "cut",
+    /* WINED3DSIH_CUT_STREAM                       */ "cut_stream",
     /* WINED3DSIH_DCL                              */ "dcl",
     /* WINED3DSIH_DCL_CONSTANT_BUFFER              */ "dcl_constantBuffer",
     /* WINED3DSIH_DCL_GLOBAL_FLAGS                 */ "dcl_globalFlags",
@@ -77,6 +80,7 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_DCL_OUTPUT_TOPOLOGY              */ "dcl_outputTopology",
     /* WINED3DSIH_DCL_RESOURCE_STRUCTURED          */ "dcl_resource_structured",
     /* WINED3DSIH_DCL_SAMPLER                      */ "dcl_sampler",
+    /* WINED3DSIH_DCL_STREAM                       */ "dcl_stream",
     /* WINED3DSIH_DCL_TEMPS                        */ "dcl_temps",
     /* WINED3DSIH_DCL_TESSELLATOR_DOMAIN           */ "dcl_tessellator_domain",
     /* WINED3DSIH_DCL_TESSELLATOR_OUTPUT_PRIMITIVE */ "dcl_tessellator_output_primitive",
@@ -104,6 +108,7 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_DSY_FINE                         */ "deriv_rty_fine",
     /* WINED3DSIH_ELSE                             */ "else",
     /* WINED3DSIH_EMIT                             */ "emit",
+    /* WINED3DSIH_EMIT_STREAM                      */ "emit_stream",
     /* WINED3DSIH_ENDIF                            */ "endif",
     /* WINED3DSIH_ENDLOOP                          */ "endloop",
     /* WINED3DSIH_ENDREP                           */ "endrep",
@@ -194,6 +199,7 @@ static const char * const shader_opcode_names[] =
     /* WINED3DSIH_STORE_STRUCTURED                 */ "store_structured",
     /* WINED3DSIH_STORE_UAV_TYPED                  */ "store_uav_typed",
     /* WINED3DSIH_SUB                              */ "sub",
+    /* WINED3DSIH_SWAPC                            */ "swapc",
     /* WINED3DSIH_SWITCH                           */ "switch",
     /* WINED3DSIH_TEX                              */ "texld",
     /* WINED3DSIH_TEXBEM                           */ "texbem",
@@ -253,6 +259,9 @@ sysval_semantic_names[] =
 {
     {WINED3D_SV_POSITION,                   "SV_Position"},
     {WINED3D_SV_CLIP_DISTANCE,              "SV_ClipDistance"},
+    {WINED3D_SV_CULL_DISTANCE,              "SV_CullDistance"},
+    {WINED3D_SV_RENDER_TARGET_ARRAY_INDEX,  "SV_RenderTargetArrayIndex"},
+    {WINED3D_SV_VIEWPORT_ARRAY_INDEX,       "SV_ViewportArrayIndex"},
     {WINED3D_SV_VERTEX_ID,                  "SV_VertexID"},
     {WINED3D_SV_INSTANCE_ID,                "SV_InstanceID"},
     {WINED3D_SV_PRIMITIVE_ID,               "SV_PrimitiveID"},
@@ -450,8 +459,7 @@ struct wined3d_string_buffer *string_buffer_get(struct wined3d_string_buffer_lis
         if (!buffer || !string_buffer_init(buffer))
         {
             ERR("Couldn't allocate buffer for temporary string.\n");
-            if (buffer)
-                HeapFree(GetProcessHeap(), 0, buffer);
+            HeapFree(GetProcessHeap(), 0, buffer);
             return NULL;
         }
     }
@@ -847,6 +855,7 @@ static HRESULT shader_get_registers_used(struct wined3d_shader *shader, const st
     memset(input_signature_elements, 0, sizeof(input_signature_elements));
     memset(output_signature_elements, 0, sizeof(output_signature_elements));
     reg_maps->min_rel_offset = ~0U;
+    list_init(&reg_maps->indexable_temps);
 
     fe->shader_read_header(fe_data, &ptr, &shader_version);
     reg_maps->shader_version = shader_version;
@@ -942,6 +951,16 @@ static HRESULT shader_get_registers_used(struct wined3d_shader *shader, const st
                 FIXME("Multiple immediate constant buffers.\n");
             reg_maps->icb = ins.declaration.icb;
         }
+        else if (ins.handler_idx == WINED3DSIH_DCL_INDEXABLE_TEMP)
+        {
+            struct wined3d_shader_indexable_temp *reg;
+
+            if (!(reg = HeapAlloc(GetProcessHeap(), 0, sizeof(*reg))))
+                return E_OUTOFMEMORY;
+
+            *reg = ins.declaration.indexable_temp;
+            list_add_tail(&reg_maps->indexable_temps, &reg->entry);
+        }
         else if (ins.handler_idx == WINED3DSIH_DCL_INPUT_PRIMITIVE)
         {
             if (shader_version.type == WINED3D_SHADER_TYPE_GEOMETRY)
@@ -962,6 +981,10 @@ static HRESULT shader_get_registers_used(struct wined3d_shader *shader, const st
         {
             if (ins.flags & WINED3DSI_SAMPLER_COMPARISON_MODE)
                 reg_maps->sampler_comparison_mode |= (1u << ins.declaration.dst.reg.idx[0].offset);
+        }
+        else if (ins.handler_idx == WINED3DSIH_DCL_TEMPS)
+        {
+            reg_maps->temporary_count = ins.declaration.count;
         }
         else if (ins.handler_idx == WINED3DSIH_DCL_VERTICES_OUT)
         {
@@ -1324,6 +1347,18 @@ static HRESULT shader_get_registers_used(struct wined3d_shader *shader, const st
     }
 
     return WINED3D_OK;
+}
+
+static void shader_cleanup_reg_maps(struct wined3d_shader_reg_maps *reg_maps)
+{
+    struct wined3d_shader_indexable_temp *reg, *reg_next;
+
+    HeapFree(GetProcessHeap(), 0, reg_maps->constf);
+    HeapFree(GetProcessHeap(), 0, reg_maps->sampler_map.entries);
+
+    LIST_FOR_EACH_ENTRY_SAFE(reg, reg_next, &reg_maps->indexable_temps, struct wined3d_shader_indexable_temp, entry)
+        HeapFree(GetProcessHeap(), 0, reg);
+    list_init(&reg_maps->indexable_temps);
 }
 
 unsigned int shader_find_free_input_register(const struct wined3d_shader_reg_maps *reg_maps, unsigned int max)
@@ -1776,6 +1811,10 @@ static void shader_dump_register(struct wined3d_string_buffer *buffer,
             shader_addline(buffer, "x");
             break;
 
+        case WINED3DSPR_STREAM:
+            shader_addline(buffer, "m");
+            break;
+
         default:
             shader_addline(buffer, "<unhandled_rtype(%#x)>", reg->type);
             break;
@@ -2196,7 +2235,7 @@ static void shader_trace_init(const struct wined3d_shader_frontend *fe, void *fe
         else if (ins.handler_idx == WINED3DSIH_DCL_IMMEDIATE_CONSTANT_BUFFER)
         {
             shader_addline(&buffer, "%s {\n", shader_opcode_names[ins.handler_idx]);
-            for (i = 0; i < ins.declaration.icb->element_count / 4; ++i)
+            for (i = 0; i < ins.declaration.icb->vec4_count; ++i)
             {
                 shader_addline(&buffer, "    {0x%08x, 0x%08x, 0x%08x, 0x%08x},\n",
                         ins.declaration.icb->data[4 * i + 0],
@@ -2423,8 +2462,7 @@ static void shader_cleanup(struct wined3d_shader *shader)
     HeapFree(GetProcessHeap(), 0, shader->input_signature.elements);
     HeapFree(GetProcessHeap(), 0, shader->signature_strings);
     shader->device->shader_backend->shader_destroy(shader);
-    HeapFree(GetProcessHeap(), 0, shader->reg_maps.constf);
-    HeapFree(GetProcessHeap(), 0, shader->reg_maps.sampler_map.entries);
+    shader_cleanup_reg_maps(&shader->reg_maps);
     HeapFree(GetProcessHeap(), 0, shader->function);
     shader_delete_constant_list(&shader->constantsF);
     shader_delete_constant_list(&shader->constantsB);
@@ -2600,6 +2638,7 @@ static HRESULT shader_set_function(struct wined3d_shader *shader, const DWORD *b
     list_init(&shader->constantsB);
     list_init(&shader->constantsI);
     shader->lconst_inf_or_nan = FALSE;
+    list_init(&reg_maps->indexable_temps);
 
     fe = shader_select_frontend(*byte_code);
     if (!fe)

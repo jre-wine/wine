@@ -393,6 +393,7 @@ enum wined3d_shader_register_type
     WINED3DSPR_LOCALTHREADID,
     WINED3DSPR_LOCALTHREADINDEX,
     WINED3DSPR_IDXTEMP,
+    WINED3DSPR_STREAM,
 };
 
 enum wined3d_data_type
@@ -529,7 +530,6 @@ enum wined3d_shader_conditional_op
 /* TODO: Make this dynamic, based on shader limits ? */
 #define MAX_ATTRIBS 16
 #define MAX_REG_ADDR 1
-#define MAX_REG_TEMP 32
 #define MAX_REG_TEXCRD 8
 #define MAX_REG_INPUT 32
 #define MAX_REG_OUTPUT 32
@@ -560,6 +560,7 @@ enum WINED3D_SHADER_INSTRUCTION_HANDLER
     WINED3DSIH_AND,
     WINED3DSIH_BEM,
     WINED3DSIH_BFI,
+    WINED3DSIH_BFREV,
     WINED3DSIH_BREAK,
     WINED3DSIH_BREAKC,
     WINED3DSIH_BREAKP,
@@ -569,8 +570,10 @@ enum WINED3D_SHADER_INSTRUCTION_HANDLER
     WINED3DSIH_CASE,
     WINED3DSIH_CMP,
     WINED3DSIH_CND,
+    WINED3DSIH_CONTINUE,
     WINED3DSIH_CRS,
     WINED3DSIH_CUT,
+    WINED3DSIH_CUT_STREAM,
     WINED3DSIH_DCL,
     WINED3DSIH_DCL_CONSTANT_BUFFER,
     WINED3DSIH_DCL_GLOBAL_FLAGS,
@@ -592,6 +595,7 @@ enum WINED3D_SHADER_INSTRUCTION_HANDLER
     WINED3DSIH_DCL_OUTPUT_TOPOLOGY,
     WINED3DSIH_DCL_RESOURCE_STRUCTURED,
     WINED3DSIH_DCL_SAMPLER,
+    WINED3DSIH_DCL_STREAM,
     WINED3DSIH_DCL_TEMPS,
     WINED3DSIH_DCL_TESSELLATOR_DOMAIN,
     WINED3DSIH_DCL_TESSELLATOR_OUTPUT_PRIMITIVE,
@@ -619,6 +623,7 @@ enum WINED3D_SHADER_INSTRUCTION_HANDLER
     WINED3DSIH_DSY_FINE,
     WINED3DSIH_ELSE,
     WINED3DSIH_EMIT,
+    WINED3DSIH_EMIT_STREAM,
     WINED3DSIH_ENDIF,
     WINED3DSIH_ENDLOOP,
     WINED3DSIH_ENDREP,
@@ -709,6 +714,7 @@ enum WINED3D_SHADER_INSTRUCTION_HANDLER
     WINED3DSIH_STORE_STRUCTURED,
     WINED3DSIH_STORE_UAV_TYPED,
     WINED3DSIH_SUB,
+    WINED3DSIH_SWAPC,
     WINED3DSIH_SWITCH,
     WINED3DSIH_TEX,
     WINED3DSIH_TEXBEM,
@@ -784,8 +790,16 @@ struct wined3d_shader_sampler_map
 
 struct wined3d_shader_immediate_constant_buffer
 {
-    UINT element_count;
+    unsigned int vec4_count;
     DWORD data[MAX_IMMEDIATE_CONSTANT_BUFFER_SIZE];
+};
+
+struct wined3d_shader_indexable_temp
+{
+    struct list entry;
+    unsigned int register_idx;
+    unsigned int register_size;
+    unsigned int component_count;
 };
 
 #define WINED3D_SHADER_VERSION(major, minor) (((major) << 8) | (minor))
@@ -796,8 +810,10 @@ struct wined3d_shader_reg_maps
     BYTE texcoord;                                  /* MAX_REG_TEXCRD, 8 */
     BYTE address;                                   /* MAX_REG_ADDR, 1 */
     WORD labels;                                    /* MAX_LABELS, 16 */
-    DWORD temporary;                                /* MAX_REG_TEMP, 32 */
+    DWORD temporary;                                /* 32 */
+    unsigned int temporary_count;
     DWORD *constf;                                  /* pixel, vertex */
+    struct list indexable_temps;
     const struct wined3d_shader_immediate_constant_buffer *icb;
     union
     {
@@ -894,13 +910,6 @@ struct wined3d_shader_src_param
     struct wined3d_shader_register reg;
     DWORD swizzle;
     enum wined3d_shader_src_modifier modifiers;
-};
-
-struct wined3d_shader_indexable_temp
-{
-    unsigned int register_idx;
-    unsigned int register_size;
-    unsigned int component_count;
 };
 
 struct wined3d_shader_semantic
@@ -1936,10 +1945,13 @@ enum wined3d_pci_device
     CARD_INTEL_IVBS                 = 0x015a,
     CARD_INTEL_HWD                  = 0x0412,
     CARD_INTEL_HWM                  = 0x0416,
+    CARD_INTEL_IG6100               = 0x162b,
+    CARD_INTEL_IP6200               = 0x1622,
     CARD_INTEL_HD520                = 0x1916,
     CARD_INTEL_HD530_1              = 0x1912,
     CARD_INTEL_HD530_2              = 0x191b,
     CARD_INTEL_HD540                = 0x1926,
+    CARD_INTEL_IPP580               = 0x193d,
 };
 
 struct wined3d_fbo_ops
@@ -2486,6 +2498,7 @@ struct wined3d_resource
     DWORD priority;
     void *heap_memory;
     struct list resource_list_entry;
+    LONG access_count;
 
     void *parent;
     const struct wined3d_parent_ops *parent_ops;
@@ -2500,6 +2513,21 @@ static inline ULONG wined3d_resource_incref(struct wined3d_resource *resource)
 static inline ULONG wined3d_resource_decref(struct wined3d_resource *resource)
 {
     return resource->resource_ops->resource_decref(resource);
+}
+
+static inline void wined3d_resource_acquire(struct wined3d_resource *resource)
+{
+    InterlockedIncrement(&resource->access_count);
+}
+
+static inline void wined3d_resource_release(struct wined3d_resource *resource)
+{
+    InterlockedDecrement(&resource->access_count);
+}
+
+static inline void wined3d_resource_wait_idle(struct wined3d_resource *resource)
+{
+    while (InterlockedCompareExchange(&resource->access_count, 0, 0));
 }
 
 void resource_cleanup(struct wined3d_resource *resource) DECLSPEC_HIDDEN;
