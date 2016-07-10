@@ -1,9 +1,8 @@
-wine-development (1.9.13-1) UNRELEASED; urgency=medium
+wine-development (1.9.13-1) unstable; urgency=medium
 
   * New upstream release 1.9.13, released Jun 24, 2016.
-    - New version of the Gecko engine based on Firefox 47.
     - More Shader Model 5 support in Direct3D.
-    - Unicode data updated to Unicode 9.0.0.
+    - Unicode data updated to Unicode 9.0.0 (closes: #829080).
     - Improvements to GDI paths and metafiles.
     - More progress towards the Direct3D command stream.
     - Joystick support improvements on Mac OS X.
