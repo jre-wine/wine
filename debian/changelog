@@ -1,3 +1,11 @@
+wine (1.8.3-3) UNRELEASED; urgency=medium
+
+  * Cherrypick changes from master:
+    - Fix wineserver manpages for Debian's default persistence value (see:
+      #816020).
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Thu, 28 Jul 2016 17:33:38 +0200
+
 wine (1.8.3-2) unstable; urgency=medium
 
   * Backport upstream changes for building with Unicode 9.0 (closes: #829003).
