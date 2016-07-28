@@ -2,6 +2,8 @@ wine-development (1.9.15-2) UNRELEASED; urgency=medium
 
   * Add removal instructions for binfmt support to README.debian.
   * Add Recommends g++ or g++-multilib to the -tools (see: #832041).
+  * Implement the Debian alternatives system.
+    - Drop now obsolete development/winegcc.patch.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Thu, 28 Jul 2016 15:14:47 +0200
 
