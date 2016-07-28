@@ -94,6 +94,7 @@ Description: Windows API implementation - standard suite
 
 Package: wineVERSION-binfmt
 Architecture: all
+Multi-Arch: foreign
 Depends:
  ${misc:Depends},
  wineVERSION,
