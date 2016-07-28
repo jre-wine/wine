@@ -13,7 +13,8 @@ wine (1.8.3-3) UNRELEASED; urgency=medium
       hardcoded paths/names instead of runtime detection.
     - Export DEBSUFFIX from d/rules.
     - Drop now obsolete development/winegcc.patch.
-    - Use variable instead of '-development' in winemenubuilder.patch.
+    - Use variable instead of '-development' in winemenubuilder.patch, and
+      enable it.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Thu, 28 Jul 2016 17:33:38 +0200
 
