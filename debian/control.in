@@ -178,6 +178,7 @@ Depends:
  ${shlibs:Depends},
  libwineVERSION-dev (= ${binary:Version}),
 Recommends:
+ wineVERSION (= ${source:Version}),
  g++ | g++-multilib:amd64 [i386],
 Conflicts:
  wine64VERSION-tools,
@@ -206,6 +207,7 @@ Depends:
  libwineVERSION-dev:armel (= ${binary:Version}) [arm64] |
  libwineVERSION-dev:armhf (= ${binary:Version}) [arm64],
 Recommends:
+ wineVERSION (= ${source:Version}),
  g++,
 Conflicts:
  wine32VERSION-tools,
