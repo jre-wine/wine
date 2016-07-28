@@ -171,3 +171,6 @@ $ sudo update-binfmts --import wine
 This change increases the risk of inadvertently launching Windows malware, so
 please make sure that you understand the security risks before blindly setting
 this up.
+
+To remove the support again execute:
+$ sudo update-binfmts --package wine --remove wine /usr/bin/wine

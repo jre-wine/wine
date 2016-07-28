@@ -5,6 +5,7 @@ wine (1.8.3-3) UNRELEASED; urgency=medium
       #816020).
     - Drop alternative depends on perl:any (now handled by debhelper).
       Bump build-dep on debhelper version to >= 9.20160702.
+    - Add removal instructions for binfmt support to README.debian.
   * Implement the Debian alternatives system (see: #758291).
     Partly cherrypicked from master:
     - Replace VERSION (value is empty or '-development') with DEBSUFFIX
