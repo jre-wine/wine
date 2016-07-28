@@ -7,6 +7,7 @@ wine-development (1.9.15-2) UNRELEASED; urgency=medium
     - Add breaks older src:wine packages before the alternatives system.
     - Let the -tools packages recommend wineVERSION.
   * Bump versioned dependency on unicode-data to >= 9.0.
+  * Refresh patches.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Thu, 28 Jul 2016 15:14:47 +0200
 
