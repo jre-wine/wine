@@ -3,6 +3,8 @@ wine (1.8.3-3) UNRELEASED; urgency=medium
   * Cherrypick changes from master:
     - Fix wineserver manpages for Debian's default persistence value (see:
       #816020).
+    - Drop alternative depends on perl:any (now handled by debhelper).
+      Bump build-dep on debhelper version to >= 9.20160702.
 
  -- Jens Reyer <jre.winesim@gmail.com>  Thu, 28 Jul 2016 17:33:38 +0200
 
