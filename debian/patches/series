@@ -1,3 +1,4 @@
+gnutls.patch
 fontdir.patch
 makefile.patch
 kfreebsd.patch

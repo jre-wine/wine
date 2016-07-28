@@ -19,6 +19,7 @@ wine (1.8.3-3) UNRELEASED; urgency=medium
     - Let the -tools packages recommend wineVERSION.
     - Add wine-development as alternative depends to wine-binfmt.
   * Make wine-binfmt M-A:foreign.
+  * Add gnutls.patch to fix FTBFS against against gnutls 3.5 (closes: #832275).
 
  -- Jens Reyer <jre.winesim@gmail.com>  Thu, 28 Jul 2016 17:33:38 +0200
 
