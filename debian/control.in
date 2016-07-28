@@ -174,6 +174,8 @@ Depends:
  ${misc:Depends},
  ${shlibs:Depends},
  libwineVERSION-dev (= ${binary:Version}),
+Recommends:
+ g++ | g++-multilib:amd64 [i386],
 Conflicts:
  wine64VERSION-tools,
 Description: Windows API implementation - 32-bit developer tools
@@ -197,6 +199,8 @@ Depends:
  libwineVERSION-dev:i386 (= ${binary:Version}) [amd64] |
  libwineVERSION-dev:armel (= ${binary:Version}) [arm64] |
  libwineVERSION-dev:armhf (= ${binary:Version}) [arm64],
+Recommends:
+ g++,
 Conflicts:
  wine32VERSION-tools,
 Description: Windows API implementation - 64-bit developer tools
