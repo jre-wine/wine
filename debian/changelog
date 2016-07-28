@@ -15,7 +15,6 @@ wine (1.8.3-3) UNRELEASED; urgency=medium
     - Drop now obsolete development/winegcc.patch.
     - Use variable instead of '-development' in winemenubuilder.patch, and
       enable it.
-    - Add breaks older src:wine packages before the alternatives system.
     - Let the -tools packages recommend wineVERSION.
     - Add bug script to show the target of the /usr/bin/wine link.
   * Make wine-binfmt M-A:foreign.
