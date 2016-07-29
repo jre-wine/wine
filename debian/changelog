@@ -6,6 +6,7 @@ wine-development (1.9.15-2) UNRELEASED; urgency=medium
     - Drop now obsolete development/winegcc.patch.
     - Add breaks older src:wine packages before the alternatives system.
     - Let the -tools packages recommend wineVERSION.
+    - Add bug script to show the target of the /usr/bin/wine link.
   * Bump versioned dependency on unicode-data to >= 9.0.
   * Refresh patches.
 
