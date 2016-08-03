@@ -17,7 +17,6 @@ wine (1.8.3-3) UNRELEASED; urgency=medium
       enable it.
     - Add breaks older src:wine packages before the alternatives system.
     - Let the -tools packages recommend wineVERSION.
-    - Add wine-development as alternative depends to wine-binfmt.
     - Add bug script to show the target of the /usr/bin/wine link.
   * Make wine-binfmt M-A:foreign.
   * Add gnutls.patch to fix FTBFS against gnutls 3.5 (closes: #832275).

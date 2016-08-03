@@ -97,7 +97,7 @@ Architecture: all
 Multi-Arch: foreign
 Depends:
  ${misc:Depends},
- wine | wine-development,
+ wine,
  binfmt-support,
 Description: Windows API implementation - binfmt support
  Wine is a free MS-Windows API implementation.
