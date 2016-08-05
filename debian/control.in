@@ -92,7 +92,7 @@ Description: Windows API implementation - standard suite
  This package provides essential wrappers and convenience tools for the
  standard Wine components.
 
-Package: wineVERSION-binfmt
+Package: wine-binfmt
 Architecture: all
 Multi-Arch: foreign
 Depends:
