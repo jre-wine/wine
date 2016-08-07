@@ -1,5 +1,14 @@
-wine-development (1.9.15-2) UNRELEASED; urgency=medium
+wine-development (1.9.16-1) unstable; urgency=medium
 
+  [ Michael Gilbert ]
+  * New upstream release 1.9.16, released Aug 5, 2016.
+   - Performance improvements in JavaScript.
+   - More progress towards the Direct3D command stream.
+   - More shader instructions in Direct3D.
+   - Performance improvements in GDI.
+   - Various bug fixes.
+
+  [ Jens Reyer ]
   * Add removal instructions for binfmt support to README.debian.
   * Add Recommends g++ or g++-multilib to the -tools (see: #832041).
   * Implement the Debian alternatives system (closes: #758291).
@@ -11,7 +20,7 @@ wine-development (1.9.15-2) UNRELEASED; urgency=medium
   * Bump versioned dependency on unicode-data to >= 9.0.
   * Refresh patches.
 
- -- Jens Reyer <jre.winesim@gmail.com>  Thu, 28 Jul 2016 15:14:47 +0200
+ -- Michael Gilbert <mgilbert@debian.org>  Sun, 07 Aug 2016 04:59:32 +0000
 
 wine-development (1.9.15-1) unstable; urgency=medium
 
