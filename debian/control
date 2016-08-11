@@ -1,6 +1,6 @@
 Source: wine1.6
-Section: otherosfs
-Priority: optional
+Section: oldlibs
+Priority: extra
 Maintainer: Graham Inggs <ginggs@ubuntu.com>
 Build-Depends: debhelper (>= 9)
 Standards-Version: 3.9.8
@@ -9,7 +9,6 @@ Homepage: http://www.winehq.org/
 Package: wine1.6-i386
 Architecture: i386
 Multi-Arch: foreign
-Section: otherosfs
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends}
 Replaces: wine-i386, wine1.4-i386, wine1.5-i386, wine (>= 1:1.6.2-0ubuntu1~)
@@ -30,7 +29,6 @@ Description: Microsoft Windows Compatibility Layer (32-bit support)
 Package: wine1.6-amd64
 Architecture: amd64
 Multi-Arch: foreign
-Section: otherosfs
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends}
 Replaces: wine-amd64, wine1.4-amd64, wine1.5-amd64, wine (>= 1:1.6.2-0ubuntu1~)
@@ -51,7 +49,6 @@ Description: Microsoft Windows Compatibility Layer (64-bit support
 Package: wine1.6
 Architecture: amd64 i386
 Multi-Arch: allowed
-Section: otherosfs
 Pre-Depends: ${misc:Pre-Depends}, wine1.6-i386 (= ${binary:Version}) [i386], wine1.6-amd64 (= ${binary:Version}) [amd64]
 Depends: wine:all (<< 1:1.6.2-0ubuntu1~), wine:all (>= 1.8-1~), ${misc:Depends}, wine32 (>= 1.8-1~) [i386], wine64 (>= 1.8-1~) [amd64]
 Conflicts: wine1.0, wine1.2, wine1.3, wine (>= 1:1.6.2-0ubuntu1~)
@@ -68,7 +65,6 @@ Description: Microsoft Windows Compatibility Layer (Binary Emulator and Library)
 
 Package: wine1.6-dev
 Architecture: amd64 i386
-Section: libdevel
 Pre-Depends: ${misc:Pre-Depends}
 Depends: libwine-dev (>= 1.8.1~), ${misc:Depends}
 Conflicts: wine-dev
@@ -86,10 +82,8 @@ Description: Microsoft Windows Compatibility Layer (Development files)
 Package: wine1.6-dbg
 Architecture: amd64 i386
 Multi-Arch: same
-Section: debug
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends}
-Priority: extra
 Description: Microsoft Windows Compatibility Layer (debugging symbols)
  Wine is a compatibility layer for running Windows applications on Linux.
  Applications are run at full speed without the need of cpu emulation. Wine
