@@ -3,7 +3,7 @@ Section: otherosfs
 Priority: optional
 Maintainer: Graham Inggs <ginggs@ubuntu.com>
 Build-Depends: debhelper (>= 9)
-Standards-Version: 3.9.6
+Standards-Version: 3.9.8
 Homepage: http://www.winehq.org/
 
 Package: wine1.6-i386
