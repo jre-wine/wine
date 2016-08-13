@@ -1,3 +1,17 @@
+wine1.6-transition (1.8.4~ppa0~jre40) xenial; urgency=medium
+
+  * Non-maintainer upload.
+  * Create new native source package wine1.6-transition.
+    Note: version must be bigger than existing broken wine versions, and
+    smaller than src:wine version will be when this transition is over.
+    To avoid confusion with the Wine version I propose to aim for "2" in
+    the archive, and stay in the 1.8.4-2.0.0.x range. (Wine 2.0 might be
+    released in December 2016, Wine 1.8.4 in the next days).
+  * Add dummy binary package wine which depends on wine-stable.
+    Needed for the transition to the Debian src:wine packages.
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Sat, 13 Aug 2016 23:02:23 +0200
+
 wine1.6 (1:1.6.2ubuntu1~ppa0~jre40) xenial; urgency=medium
 
   * Transition to the Debian src:wine packages.
