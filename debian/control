@@ -1,4 +1,4 @@
-Source: wine1.6
+Source: wine1.6-transition
 Section: oldlibs
 Priority: extra
 Maintainer: Graham Inggs <ginggs@ubuntu.com>
