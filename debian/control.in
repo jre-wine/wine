@@ -87,6 +87,13 @@ Suggests:
  dosbox (>= 0.74-4.2~),
 Breaks:
  wine (<< 1.8.3-3~),
+Conflicts:
+ wine (>= 1:1),
+ wine1.6 (<< 1:1.6.2ubuntu),
+ wine1.6-i386 (<< 1:1.6.2ubuntu),
+Replaces:
+ wine1.6 (<< 1:1.6.2ubuntu),
+ wine1.6-i386 (<< 1:1.6.2ubuntu),
 Provides:
  wine,
 Description: Windows API implementation - standard suite
@@ -112,6 +119,8 @@ Suggests:
 Breaks:
  wineVERSION (<< 1.7.50-3~),
  wine32VERSION-preloader (<< 1.7.51-2~),
+Conflicts:
+ wine (>= 1:1),
 Description: Windows API implementation - 32-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -136,6 +145,11 @@ Breaks:
  wine64 (<< 1.8.3-3~),
  wineVERSION (<< 1.7.50-3~),
  wine64VERSION-preloader (<< 1.7.51-2~),
+Conflicts:
+ wine (>= 1:1),
+ wine1.6-amd64 (<< 1:1.6.2ubuntu),
+Replaces:
+ wine1.6-amd64 (<< 1:1.6.2ubuntu),
 Description: Windows API implementation - 64-bit binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -183,10 +197,14 @@ Recommends:
  wineVERSION (= ${source:Version}),
  g++ | g++-multilib:amd64 [i386],
 Conflicts:
+ wine (>= 1:1),
+ wine1.6 (<< 1:1.6.2ubuntu),
  wine64VERSION-tools,
 Breaks:
  wine32-tools (<< 1.8.3-3~),
  wine64-tools (<< 1.8.3-3~),
+Replaces:
+ wine1.6 (<< 1:1.6.2ubuntu),
 Description: Windows API implementation - 32-bit developer tools
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -212,10 +230,14 @@ Recommends:
  wineVERSION (= ${source:Version}),
  g++,
 Conflicts:
+ wine (>= 1:1),
+ wine1.6 (<< 1:1.6.2ubuntu),
  wine32VERSION-tools,
 Breaks:
  wine32-tools (<< 1.8.3-3~),
  wine64-tools (<< 1.8.3-3~),
+Replaces:
+ wine1.6 (<< 1:1.6.2ubuntu),
 Description: Windows API implementation - 64-bit developer tools
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -266,6 +288,8 @@ Recommends:
 Breaks:
  wine32VERSION (<< 1.7.51-2~),
  wine64VERSION (<< 1.7.51-2~),
+Conflicts:
+ wine1.6-dev (<< 1:1.6.2ubuntu),
 Description: Windows API implementation - development files
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
