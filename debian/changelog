@@ -1,5 +1,12 @@
-wine1.6 (1:1.6.2ubuntu1~ppa0~jre30) yakkety; urgency=medium
+wine1.6 (1:1.6.2ubuntu1~ppa0~jre40) yakkety; urgency=medium
 
+  * Transition to the Debian src:wine packages.
+    Rename the binary package wine to wine-stable and let it provide wine.
+    Necessary until after the transition is complete (18.04).
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Sat, 13 Aug 2016 22:23:37 +0200
+
+wine1.6 (1:1.6.2ubuntu1~ppa0~jre30) yakkety; urgency=medium
   * Non-maintainer upload.
   * Transition to the Debian src:wine-development packages.
     TODO: transition the wine1.x-dbg packages.
