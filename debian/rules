@@ -67,6 +67,7 @@ export DEB_CFLAGS_MAINT_APPEND+=-Wno-error
 
 # additional files to generate
 INSTALLS=$(shell ls debian/*VERSION* | sed s/VERSION/$(VERSION)/) \
+         $(shell ls debian/*DEBSUFFIX* | sed s/DEBSUFFIX/$(DEBSUFFIX)/) \
          debian/bug-control \
 
 # sonames to compute additional dependencies
@@ -80,9 +81,9 @@ sonamesRecommends=$(shell \
     cut -d\" -f2)
 
 debian/control: debian/control.in
-	sed s/VERSION/$(VERSION)/g < $< > $@
+	sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g" < $< > $@
 
-debian/wine$(VERSION)%: debian/wineVERSION%
+debian/wine$(DEBSUFFIX)%: debian/wineDEBSUFFIX%
 	sed "s/VERSION/$(VERSION)/g;s/DEBSUFFIX/$(DEBSUFFIX)/g" < $< > $@
 
 debian/wine32$(VERSION)%: debian/wine32VERSION%
