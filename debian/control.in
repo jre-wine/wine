@@ -115,7 +115,7 @@ Description: Windows API implementation - binfmt support
  This package provides support for launching Windows executables directly.
 
 Package: wine32VERSION
-Architecture: any-i386 any-powerpc armel armhf
+Architecture: any-i386 any-powerpc armel
 Multi-Arch: foreign
 Built-Using: ${built:Using}
 Depends:
@@ -165,7 +165,7 @@ Description: Windows API implementation - 64-bit binary loader
  This package provides the binary loader for 64-bit Windows applications.
 
 Package: wine32VERSION-preloader
-Architecture: i386 powerpc armel armhf
+Architecture: i386 powerpc armel
 Multi-Arch: foreign
 Built-Using: ${built:Using}
 Depends:
@@ -191,7 +191,7 @@ Description: Windows API implementation - prelinked 64-bit binary loader
  This package provides the prelinked loader for 64-bit Windows applications.
 
 Package: wine32VERSION-tools
-Architecture: any-i386 any-powerpc armel armhf
+Architecture: any-i386 any-powerpc armel
 Multi-Arch: foreign
 Section: libdevel
 Built-Using: ${built:Using}
@@ -269,7 +269,7 @@ Description: Windows API implementation - fonts
 
 Package: libwineVERSION
 Section: libs
-Architecture: amd64 any-i386 any-powerpc armel armhf arm64
+Architecture: amd64 any-i386 any-powerpc armel arm64
 Multi-Arch: same
 Built-Using: ${built:Using}
 Depends:
@@ -303,7 +303,7 @@ Description: Windows API implementation - library
  This package provides the Wine library.
 
 Package: libwineVERSION-dev
-Architecture: amd64 any-i386 any-powerpc armel armhf arm64
+Architecture: amd64 any-i386 any-powerpc armel arm64
 Section: libdevel
 Multi-Arch: same
 Built-Using: ${built:Using}
