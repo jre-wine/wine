@@ -70,7 +70,7 @@ Homepage: http://www.winehq.org/
 Vcs-Browser: https://anonscm.debian.org/git/pkg-wine/wine.git/?h=stretch
 Vcs-Git: https://anonscm.debian.org/git/pkg-wine/wine.git -b stretch
 
-Package: wineVERSION
+Package: wineDEBSUFFIX
 Architecture: all
 Multi-Arch: foreign
 Built-Using: ${built:Using}
@@ -90,6 +90,8 @@ Conflicts:
 Replaces:
  wine1.6 (<< 1:1.6.2ubuntu),
  wine1.6-i386 (<< 1:1.6.2ubuntu),
+Provides:
+ wine,
 Description: Windows API implementation - standard suite
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -123,7 +125,7 @@ Depends:
  ${shlibs:Depends},
  libwineVERSION (= ${binary:Version}),
 Recommends:
- wineVERSION (= ${source:Version}),
+ wineDEBSUFFIX (= ${source:Version}),
 Suggests:
  wine32VERSION-preloader (= ${binary:Version}),
 Breaks:
@@ -146,7 +148,7 @@ Depends:
  ${shlibs:Depends},
  libwineVERSION (= ${binary:Version}),
 Recommends:
- wineVERSION (= ${source:Version}),
+ wineDEBSUFFIX (= ${source:Version}),
  wine32VERSION (= ${binary:Version}),
 Suggests:
  wine64VERSION-preloader (= ${binary:Version}),
@@ -202,7 +204,7 @@ Depends:
  ${shlibs:Depends},
  libwineVERSION-dev (= ${binary:Version}),
 Recommends:
- wineVERSION (= ${source:Version}),
+ wineDEBSUFFIX (= ${source:Version}),
  g++ | g++-multilib:amd64 [i386],
 Conflicts:
  wine (>= 1:1),
@@ -232,7 +234,7 @@ Depends:
  libwineVERSION-dev:armel (= ${binary:Version}) [arm64] |
  libwineVERSION-dev:armhf (= ${binary:Version}) [arm64],
 Recommends:
- wineVERSION (= ${source:Version}),
+ wineDEBSUFFIX (= ${source:Version}),
  g++,
 Conflicts:
  wine (>= 1:1),
