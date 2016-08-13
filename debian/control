@@ -9,38 +9,38 @@ Homepage: http://www.winehq.org/
 Package: wine1.6-i386
 Architecture: i386
 Multi-Arch: foreign
-Depends: wine32-development, ${misc:Depends}
+Depends: wine32, ${misc:Depends}
 Conflicts: wine-i386
 Replaces: wine-i386, wine1.4-i386, wine1.5-i386
 Description: Windows API implementation (transitional package 32-bit support)
  This is a transitional dummy package to ease the migration to Debian's
- src:wine-development. It can be safely removed.
+ src:wine. It can be safely removed.
 
 Package: wine1.6-amd64
 Architecture: amd64
 Multi-Arch: foreign
-Depends: wine64-development, ${misc:Depends}
+Depends: wine64, ${misc:Depends}
 Conflicts: wine-amd64
 Replaces: wine-amd64, wine1.4-amd64, wine1.5-amd64
 Description: Windows API implementation (transitional package 64-bit support)
  This is a transitional dummy package to ease the migration to Debian's
- src:wine-development. It can be safely removed.
+ src:wine. It can be safely removed.
 
 Package: wine1.6
 Architecture: amd64 i386
 Multi-Arch: allowed
-Depends: wine-development, ${misc:Depends}
+Depends: wine-stable, ${misc:Depends}
 Conflicts: wine1.0, wine1.2, wine1.3
 Replaces: wine1.0, wine1.2, wine1.3, wine1.4, wine1.5
 Description: Windows API implementation (transitional package)
  This is a transitional dummy package to ease the migration to Debian's
- src:wine-development. It can be safely removed.
+ src:wine. It can be safely removed.
 
 Package: wine1.6-dev
 Architecture: amd64 i386
-Depends: wine64-development-tools | wine32-development-tools, ${misc:Depends}
+Depends: wine64-tools | wine32-tools, ${misc:Depends}
 Conflicts: wine-dev
 Replaces: wine-dev
 Description: Windows API implementation (transitional package development tools)
  This is a transitional dummy package to ease the migration to Debian's
- src:wine-development. It can be safely removed.
+ src:wine. It can be safely removed.
