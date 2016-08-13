@@ -1,3 +1,12 @@
+wine (1.8.3-3ubuntu1~ppa0~jre30) xenial; urgency=medium
+
+  * Use unversioned sonames in debian/scripts/sonames2elf
+    so that dpkg-shlibdeps can find libGL.so in Ubuntu. (Closes: #827770)
+  * Add conflicts/replaces wine1.6.
+  * Don't build on armhf.
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Sat, 13 Aug 2016 21:31:53 +0200
+
 wine (1.8.3-3) unstable; urgency=medium
 
   * Cherrypick changes from master:
