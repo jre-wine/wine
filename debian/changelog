@@ -1,3 +1,19 @@
+wine1.6 (1:1.6.2ubuntu1~ppa0~jre30) yakkety; urgency=medium
+
+  * Non-maintainer upload.
+  * Transition to the Debian src:wine-development packages.
+    TODO: transition the wine1.x-dbg packages.
+  * Drop old Provides.
+  * Drop Pre-Depends.
+  * Section: oldlibs, Priority: extra
+  * Standards-Version: 3.9.8
+    TODO: remove /etc/xdg/menus/applications-merged/wine.menu
+  * Use a native Debian version.
+  * Apply wrap-and-sort (no options).
+  * TODO: rework d/copyright for native package.
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Thu, 11 Aug 2016 23:04:05 +0200
+
 wine1.6 (1:1.6.2-0ubuntu99~ppa5) xenial; urgency=medium
 
   * Transition to Debian's wine packaging.
