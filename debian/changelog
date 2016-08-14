@@ -1,3 +1,14 @@
+wine (1.8.3-3ubuntu1~ppa0~jre40) yakkety; urgency=medium
+
+  * Rename pkg wine to wine-stable.
+    - Adjust d/control.in and d/rules.
+    - Rename d/wineVERSION* files to d/wineDEBSUFFIX*.
+      for file in $(ls debian/wineVERSION*); do
+        mv $file $(echo $file|sed "s|VERSION|DEBSUFFIX|")
+      done
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Sun, 14 Aug 2016 01:55:29 +0200
+
 wine (1.8.3-3ubuntu1~ppa0~jre30) yakkety; urgency=medium
 
   * Use unversioned sonames in debian/scripts/sonames2elf
