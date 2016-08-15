@@ -70,6 +70,18 @@ Homepage: http://www.winehq.org/
 Vcs-Browser: https://anonscm.debian.org/git/pkg-wine/wine.git/?h=stretch
 Vcs-Git: https://anonscm.debian.org/git/pkg-wine/wine.git -b stretch
 
+Package: wine
+Architecture: all
+Multi-Arch: foreign
+Depends:
+ ${misc:Depends},
+ wine-stable,
+Description: Windows API implementation (transitional package)
+ This package provides a real package wine as long as the migration to
+ Debian's src:wine is ongoing.
+ .
+ It is not needed for the transition itself and can be safely removed.
+
 Package: wineDEBSUFFIX
 Architecture: all
 Multi-Arch: foreign
