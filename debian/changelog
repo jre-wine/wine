@@ -1,3 +1,12 @@
+wine (1.8.3-3+local41+Ubuntu.src.wine) yakkety; urgency=medium
+
+  * Add dummy package wine which depends on wine-stable.
+    Not needed for the transition itself, but to make sure that
+    "apt install wine" installs src:wine packages ("wine" is also
+    provided by other packages).
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Mon, 15 Aug 2016 14:00:44 +0200
+
 wine (1.8.3-3ubuntu1~ppa0~jre40) yakkety; urgency=medium
 
   * Rename pkg wine to wine-stable.
