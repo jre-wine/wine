@@ -1,0 +1,29 @@
+Description: winspool.drv: Include <cups/ppd.h> to fix building with Cups 2.2.
+Origin: http://source.winehq.org/git/wine.git/commit/10065d2acd0a9e1e852a8151c95569b99d1b3294
+Author: Ken Thomases <ken@codeweavers.com>
+
+--- a/configure.ac
++++ b/configure.ac
+@@ -1536,7 +1536,8 @@
+     AC_CHECK_HEADERS(cups/cups.h,
+             [WINE_CHECK_SONAME(cups,cupsGetDefault,
+                        [CUPS_CFLAGS="$ac_cups_cflags"],,
+-                       [$ac_cups_libs])])
++                       [$ac_cups_libs])
++             AC_CHECK_HEADERS(cups/ppd.h)])
+     CPPFLAGS="$ac_save_CPPFLAGS"
+ fi
+ WINE_NOTICE_WITH(cups,[test "x$ac_cv_lib_soname_cups" = "x"],
+--- a/dlls/winspool.drv/info.c
++++ b/dlls/winspool.drv/info.c
+@@ -44,6 +44,9 @@
+ #ifdef HAVE_CUPS_CUPS_H
+ # include <cups/cups.h>
+ #endif
++#ifdef HAVE_CUPS_PPD_H
++# include <cups/ppd.h>
++#endif
+ 
+ #ifdef HAVE_APPLICATIONSERVICES_APPLICATIONSERVICES_H
+ #define GetCurrentProcess GetCurrentProcess_Mac
+
