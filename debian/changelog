@@ -1,3 +1,11 @@
+wine (1.8.3-3+local50+Ubuntu.src.wine) yakkety; urgency=medium
+
+  * Add ftbfs.cups.patch to fix FTBFS with Cups 2.2.
+  * Only Break the wine1.6* packages.
+    Note: keep Conflicts: wine (>= 1:1).
+
+ -- Jens Reyer <jre.winesim@gmail.com>  Wed, 17 Aug 2016 14:17:30 +0200
+
 wine (1.8.3-3+local41+Ubuntu.src.wine) yakkety; urgency=medium
 
   * Add dummy package wine which depends on wine-stable.
