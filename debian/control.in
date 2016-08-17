@@ -97,6 +97,7 @@ Suggests:
  dosbox (>= 0.74-4.2~),
 Conflicts:
  wine (>= 1:1),
+Breaks:
  wine1.6 (<< 1:1.6.2ubuntu),
  wine1.6-i386 (<< 1:1.6.2ubuntu),
 Replaces:
@@ -118,7 +119,7 @@ Depends:
  ${misc:Depends},
  wine,
  binfmt-support,
-Conflicts:
+Breaks:
  wine1.6 (<< 1:1.6.2ubuntu),
 Replaces:
  wine1.6 (<< 1:1.6.2ubuntu),
@@ -165,11 +166,11 @@ Recommends:
 Suggests:
  wine64VERSION-preloader (= ${binary:Version}),
 Breaks:
+ wine1.6-amd64 (<< 1:1.6.2ubuntu),
  wineVERSION (<< 1.7.50-3~),
  wine64VERSION-preloader (<< 1.7.51-2~),
 Conflicts:
  wine (>= 1:1),
- wine1.6-amd64 (<< 1:1.6.2ubuntu),
 Replaces:
  wine1.6-amd64 (<< 1:1.6.2ubuntu),
 Description: Windows API implementation - 64-bit binary loader
@@ -218,9 +219,10 @@ Depends:
 Recommends:
  wineDEBSUFFIX (= ${source:Version}),
  g++ | g++-multilib:amd64 [i386],
+Breaks:
+ wine1.6 (<< 1:1.6.2ubuntu),
 Conflicts:
  wine (>= 1:1),
- wine1.6 (<< 1:1.6.2ubuntu),
  wine64VERSION-tools,
 Replaces:
  wine1.6 (<< 1:1.6.2ubuntu),
@@ -248,9 +250,10 @@ Depends:
 Recommends:
  wineDEBSUFFIX (= ${source:Version}),
  g++,
+Breaks:
+ wine1.6 (<< 1:1.6.2ubuntu),
 Conflicts:
  wine (>= 1:1),
- wine1.6 (<< 1:1.6.2ubuntu),
  wine32VERSION-tools,
 Replaces:
  wine1.6 (<< 1:1.6.2ubuntu),
@@ -269,11 +272,10 @@ Built-Using: ${built:Using}
 Depends:
  ${misc:Depends},
 Replaces:
+ wine1.6 (<< 1:1.6.2ubuntu),
  libwineVERSION (<< 1.7.41-2~),
- wine1.6 (<< 1:1.6.2ubuntu),
-Conflicts:
- wine1.6 (<< 1:1.6.2ubuntu),
 Breaks:
+ wine1.6 (<< 1:1.6.2ubuntu),
  libwineVERSION (<< 1.7.41-2~),
 Description: Windows API implementation - fonts
  Wine is a free MS-Windows API implementation.
@@ -302,11 +304,10 @@ Suggests:
 Pre-Depends:
  ${misc:Pre-Depends},
 Breaks:
- wine32VERSION (<< 1.7.51-2~),
- wine64VERSION (<< 1.7.51-2~),
-Conflicts:
  wine1.6-amd64 (<< 1:1.6.2ubuntu),
  wine1.6-i386 (<< 1:1.6.2ubuntu),
+ wine32VERSION (<< 1.7.51-2~),
+ wine64VERSION (<< 1.7.51-2~),
 Replaces:
  wine1.6-amd64 (<< 1:1.6.2ubuntu),
  wine1.6-i386 (<< 1:1.6.2ubuntu),
@@ -328,11 +329,11 @@ Depends:
 Recommends:
  wine64VERSION-tools (= ${binary:Version}) | wine32VERSION-tools (= ${binary:Version}),
 Breaks:
+ wine1.6-dev (<< 1:1.6.2ubuntu),
  wine32VERSION (<< 1.7.51-2~),
  wine64VERSION (<< 1.7.51-2~),
 Conflicts:
  wine (>= 1:1),
- wine1.6-dev (<< 1:1.6.2ubuntu),
 Replaces:
  wine1.6-dev (<< 1:1.6.2ubuntu),
 Description: Windows API implementation - development files
